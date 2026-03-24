@@ -10,6 +10,7 @@ from collections import defaultdict
 from typing import Dict, List, Set, Tuple
 
 import torch
+from safetensors.torch import load_file as load_safetensors
 from torch.utils.data import DataLoader
 
 from model import BiLstmCrf
@@ -110,7 +111,7 @@ def run_scoring(
         dropout=dropout,
     ).to(device)
 
-    state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    state_dict = load_safetensors(checkpoint_path, device=str(device))
     model.load_state_dict(state_dict)
     model.train(False)
 
@@ -197,6 +198,6 @@ def run_scoring(
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print(f"Usage: {sys.argv[0]} <best_model.pt> <config.json> <test_data.jsonl>")
+        print(f"Usage: {sys.argv[0]} <best_model.safetensors> <config.json> <test_data.jsonl>")
         sys.exit(1)
     run_scoring(sys.argv[1], sys.argv[2], sys.argv[3])

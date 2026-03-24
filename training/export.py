@@ -30,6 +30,7 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
+from safetensors.torch import load_file as load_safetensors
 
 from model import BiLstmCrf
 from preprocess import POS_TAGS
@@ -240,7 +241,7 @@ def export_gmdl(
         num_layers=num_layers,
         dropout=dropout,
     )
-    state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    state_dict = load_safetensors(checkpoint_path, device="cpu")
     model.load_state_dict(state_dict)
     model.train(False)
 
@@ -271,6 +272,6 @@ def export_gmdl(
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print(f"Usage: {sys.argv[0]} <best_model.pt> <config.json> <output.gmdl>")
+        print(f"Usage: {sys.argv[0]} <best_model.safetensors> <config.json> <output.gmdl>")
         sys.exit(1)
     export_gmdl(sys.argv[1], sys.argv[2], sys.argv[3])

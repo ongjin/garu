@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
+from safetensors.torch import save_file as save_safetensors
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from model import BiLstmCrf
@@ -224,8 +225,8 @@ def train(
         if avg_val < best_val_loss:
             best_val_loss = avg_val
             best_epoch = epoch
-            ckpt_path = os.path.join(output_dir, "best_model.pt")
-            torch.save(model.state_dict(), ckpt_path)
+            ckpt_path = os.path.join(output_dir, "best_model.safetensors")
+            save_safetensors(model.state_dict(), ckpt_path)
             print(f"  -> Saved best model (epoch {epoch})")
 
     # Save config
