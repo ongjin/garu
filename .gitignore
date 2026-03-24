@@ -3,7 +3,8 @@ node_modules/
 dist/
 pkg/
 models/*.bin
-models/*.gmdl
 training/__pycache__/
+training/*.jsonl
+training/checkpoints/
 *.pyc
 .DS_Store

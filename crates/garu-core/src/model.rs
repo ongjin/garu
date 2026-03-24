@@ -282,9 +282,9 @@ impl Model {
 
                         let pos_tag = if bio == BioTag::O {
                             None
-                        } else if pos_byte <= 38 {
-                            // Safety: pos_byte validated in range 0..=38
-                            // matching the 39 variants of Pos (#[repr(u8)]).
+                        } else if pos_byte <= 41 {
+                            // Safety: pos_byte validated in range 0..=41
+                            // matching the 42 variants of Pos (#[repr(u8)]).
                             Some(unsafe { std::mem::transmute::<u8, Pos>(pos_byte) })
                         } else {
                             return Err(format!("Invalid POS byte: {}", pos_byte));

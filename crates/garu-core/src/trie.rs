@@ -248,11 +248,11 @@ impl Dict {
                     let pos_byte = data[pos];
                     pos += 1;
 
-                    if pos_byte > 38 {
+                    if pos_byte > 41 {
                         return Err(format!("Invalid POS byte: {}", pos_byte));
                     }
-                    // Safety: pos_byte is validated to be in range 0..=38,
-                    // matching the 39 variants of Pos (#[repr(u8)]).
+                    // Safety: pos_byte is validated to be in range 0..=41,
+                    // matching the 42 variants of Pos (#[repr(u8)]).
                     let pos_tag: Pos = unsafe { std::mem::transmute(pos_byte) };
 
                     morphemes.push(Morpheme { text, pos: pos_tag });
