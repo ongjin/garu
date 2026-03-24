@@ -1,16 +1,16 @@
-# Kiwi Lite — 초경량 한국어 형태소 분석기 설계 문서
+# Garu (가루) — 초경량 한국어 형태소 분석기 설계 문서
 
 ## 1. 개요
 
 **한 줄 정의:** 웹 브라우저에서 바로 돌아가는 5MB 이하 한국어 형태소 분석기
 
-**프로젝트명:** kiwi-lite
+**프로젝트명:** garu
 
 **타겟 사용자:** NLP 개발자, 프론트엔드 개발자, 검색/에디터 등 클라이언트 사이드 한국어 처리가 필요한 개발자
 
 ## 2. 핵심 차별점
 
-| | Kiwi (기존) | kiwi-lite (목표) |
+| | Kiwi (기존) | garu (목표) |
 |---|---|---|
 | WASM 모델 크기 | ~83MB | ~5MB |
 | 초기 로딩 | 수십 초 | 1초 이내 |
@@ -73,10 +73,10 @@ JS 글루코드 + 기타:                    ~500KB
 ### 3.4 배포 형태
 
 ```
-kiwi-lite/
-├── npm 패키지 (kiwi-lite)         # npm install kiwi-lite
-├── CDN 배포                        # <script src="cdn/kiwi-lite.js">
-├── Python 바인딩 (선택)            # pip install kiwi-lite
+garu/
+├── npm 패키지 (garu)         # npm install garu
+├── CDN 배포                        # <script src="cdn/garu.js">
+├── Python 바인딩 (선택)            # pip install garu
 └── WASM + JS 글루코드
 ```
 
@@ -85,13 +85,13 @@ kiwi-lite/
 #### MVP API (v0.1)
 
 ```js
-import { Kiwi } from 'kiwi-lite';
+import { Garu } from 'garu';
 
 // ── 초기화 ──────────────────────────────────────
-const kiwi = await Kiwi.load();   // 5MB 기본 모델 로딩
+const garu = await Garu.load();   // 5MB 기본 모델 로딩
 
 // ── 형태소 분석 ─────────────────────────────────
-const result = kiwi.analyze('나는 어제 학교에 갔다');
+const result = garu.analyze('나는 어제 학교에 갔다');
 // {
 //   tokens: [
 //     { text: '나',   pos: 'NP',  start: 0, end: 1 },
@@ -108,7 +108,7 @@ const result = kiwi.analyze('나는 어제 학교에 갔다');
 // }
 
 // ── N-best 분석 ─────────────────────────────────
-const nbest = kiwi.analyze('나는 배를 먹었다', { topN: 3 });
+const nbest = garu.analyze('나는 배를 먹었다', { topN: 3 });
 // [
 //   { tokens: [...], score: -8.2 },   // 배 = 과일
 //   { tokens: [...], score: -11.5 },  // 배 = 신체
@@ -116,13 +116,13 @@ const nbest = kiwi.analyze('나는 배를 먹었다', { topN: 3 });
 // ]
 
 // ── 토크나이저 모드 (검색/인덱싱 특화) ──────────
-const tokens = kiwi.tokenize('서울특별시 강남구');
+const tokens = garu.tokenize('서울특별시 강남구');
 // ['서울', '특별시', '강남구']
 
 // ── 유틸리티 ────────────────────────────────────
-kiwi.isLoaded();                    // boolean
-kiwi.modelInfo();                   // { version, size, accuracy }
-kiwi.destroy();                     // WASM 메모리 해제
+garu.isLoaded();                    // boolean
+garu.modelInfo();                   // { version, size, accuracy }
+garu.destroy();                     // WASM 메모리 해제
 ```
 
 #### 에러 처리
@@ -132,7 +132,7 @@ kiwi.destroy();                     // WASM 메모리 해제
 | 빈 문자열 입력 | `{ tokens: [], score: 0, elapsed: 0 }` 반환 |
 | 비한국어 텍스트 | 공백 기준 분리, `pos: 'SL'`(외국어) 또는 `pos: 'SN'`(숫자)로 태깅 |
 | 한영 혼용 | 한국어 부분은 형태소 분석, 영문은 `SL`로 패스스루 |
-| WASM 초기화 실패 | `Kiwi.load()`에서 에러 throw, 메시지에 원인 포함 |
+| WASM 초기화 실패 | `Garu.load()`에서 에러 throw, 메시지에 원인 포함 |
 | 매우 긴 입력 (>10만자) | 내부적으로 청크 분할 처리, 결과는 합쳐서 반환 |
 
 #### Future API (v0.2+)
@@ -141,13 +141,13 @@ kiwi.destroy();                     // WASM 메모리 해제
 
 ```js
 // 배치 분석 (Web Worker 병렬)
-kiwi.analyzeAll(sentences, { concurrency: navigator.hardwareConcurrency });
+garu.analyzeAll(sentences, { concurrency: navigator.hardwareConcurrency });
 
 // 명사 추출
-kiwi.extractNouns('자연어처리는 재미있다');
+garu.extractNouns('자연어처리는 재미있다');
 
 // 후처리 파이프라인
-const pipeline = kiwi.pipe(
+const pipeline = garu.pipe(
   PostProcessor.normalize(),
   PostProcessor.deInflect(),
   PostProcessor.compound(),
@@ -155,14 +155,14 @@ const pipeline = kiwi.pipe(
 );
 
 // 사용자 사전
-kiwi.addWord('뉴진스', 'NNP', 9.0);
-kiwi.addPreanalyzedWord('고려대학교', [
+garu.addWord('뉴진스', 'NNP', 9.0);
+garu.addPreanalyzedWord('고려대학교', [
   { text: '고려', pos: 'NNP' },
   { text: '대학교', pos: 'NNG' },
 ]);
 
 // 스트리밍 분석
-const reader = kiwi.stream();
+const reader = garu.stream();
 reader.on('token', (token) => console.log(token));
 reader.feed('실시간으로 입력되는 텍스트');
 reader.end();
@@ -259,7 +259,7 @@ Pro 모델 판매:  $500/월 (17명)
 첫 출시에 포함할 최소 기능:
 
 - [x] WASM 빌드 + npm 패키지
-- [x] `Kiwi.load()` + `analyze()` + `tokenize()`
+- [x] `Garu.load()` + `analyze()` + `tokenize()`
 - [x] 기본 모델 1종 (5MB 이하, 모델 티어 분리는 v0.2+)
 - [x] TypeScript 타입 정의
 - [x] 벤치마크 페이지 (Kiwi WASM 대비 로딩 속도/크기 비교)
