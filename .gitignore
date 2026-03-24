@@ -1,0 +1,9 @@
+target/
+node_modules/
+dist/
+pkg/
+models/*.bin
+models/*.gmdl
+training/__pycache__/
+*.pyc
+.DS_Store

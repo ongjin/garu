@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/garu-core", "crates/garu-wasm"]
+resolver = "2"

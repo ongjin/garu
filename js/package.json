@@ -1,0 +1,21 @@
+{
+  "name": "garu",
+  "version": "0.1.0",
+  "description": "Ultra-lightweight Korean morphological analyzer for the web (~5MB)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "pkg"],
+  "scripts": {
+    "build:wasm": "wasm-pack build ../crates/garu-wasm --target web --out-dir ../../js/pkg",
+    "build:js": "tsc",
+    "build": "npm run build:wasm && npm run build:js",
+    "test": "vitest run"
+  },
+  "keywords": ["korean", "morphological-analysis", "nlp", "wasm", "lightweight"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4",
+    "vitest": "^2.0"
+  }
+}
