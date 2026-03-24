@@ -1,3 +1,4 @@
+pub mod crf;
 pub mod jamo;
 pub mod lstm;
 pub mod trie;
