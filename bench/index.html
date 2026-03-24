@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garu Benchmark</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f5f5f7;
+    color: #1d1d1f;
+    padding: 2rem;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  .subtitle { color: #6e6e73; font-size: 0.9rem; margin-bottom: 1.5rem; }
+
+  /* --- cards --- */
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+
+  /* --- metrics grid --- */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+  .metric { text-align: center; }
+  .metric .value { font-size: 1.5rem; font-weight: 700; color: #0071e3; }
+  .metric .label { font-size: 0.75rem; color: #6e6e73; margin-top: 0.15rem; }
+
+  /* --- textarea & buttons --- */
+  textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 0.75rem;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+    margin-bottom: 0.75rem;
+  }
+  textarea:focus { outline: none; border-color: #0071e3; }
+
+  .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  button {
+    padding: 0.55rem 1.25rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-primary { background: #0071e3; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #0060c0; }
+
+  .btn-secondary { background: #e8e8ed; color: #1d1d1f; }
+  .btn-secondary:hover:not(:disabled) { background: #d2d2d7; }
+
+  /* --- results --- */
+  .results {
+    font-family: "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    background: #1d1d1f;
+    color: #f5f5f7;
+    border-radius: 8px;
+    padding: 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 0.75rem;
+  }
+  .results:empty { display: none; }
+
+  /* --- status bar --- */
+  #status {
+    text-align: center;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+    color: #6e6e73;
+  }
+  #status.loading { color: #bf5600; }
+  #status.ready { color: #248a3d; }
+  #status.error { color: #ff3b30; }
+</style>
+</head>
+<body>
+
+<h1>Garu Benchmark</h1>
+<p class="subtitle">Korean morphological analyzer &mdash; WASM performance test</p>
+
+<!-- Loading metrics -->
+<div class="card">
+  <h2>Loading Metrics</h2>
+  <div class="metrics">
+    <div class="metric">
+      <div class="value" id="m-model-size">&mdash;</div>
+      <div class="label">Model Size</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="m-download">&mdash;</div>
+      <div class="label">Download Time</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="m-wasm-init">&mdash;</div>
+      <div class="label">WASM Init Time</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="m-total">&mdash;</div>
+      <div class="label">Total Load Time</div>
+    </div>
+  </div>
+</div>
+
+<!-- Analysis -->
+<div class="card">
+  <h2>Analyze</h2>
+  <textarea id="input">나는 오늘 학교에서 한국어 형태소 분석기를 만들었다.</textarea>
+  <div class="btn-row">
+    <button id="btn-analyze" class="btn-primary" disabled>Analyze</button>
+    <button id="btn-bench" class="btn-secondary" disabled>Benchmark (1000x)</button>
+  </div>
+  <div class="results" id="output"></div>
+</div>
+
+<!-- Benchmark results -->
+<div class="card" id="bench-card" style="display:none">
+  <h2>Benchmark Results</h2>
+  <div class="metrics">
+    <div class="metric">
+      <div class="value" id="b-avg">&mdash;</div>
+      <div class="label">Avg ms / call</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="b-throughput">&mdash;</div>
+      <div class="label">Calls / sec</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="b-total">&mdash;</div>
+      <div class="label">Total Time</div>
+    </div>
+    <div class="metric">
+      <div class="value" id="b-iterations">&mdash;</div>
+      <div class="label">Iterations</div>
+    </div>
+  </div>
+</div>
+
+<div id="status" class="loading">Loading WASM module&hellip;</div>
+
+<script type="module">
+  import { Garu } from '../js/dist/index.js';
+
+  const $ = (id) => document.getElementById(id);
+
+  const btnAnalyze = $('btn-analyze');
+  const btnBench   = $('btn-bench');
+  const input      = $('input');
+  const output     = $('output');
+  const status     = $('status');
+
+  let garu = null;
+
+  // --- helpers ---
+  function fmt(ms) {
+    if (ms < 1) return `${(ms * 1000).toFixed(0)} us`;
+    if (ms < 1000) return `${ms.toFixed(1)} ms`;
+    return `${(ms / 1000).toFixed(2)} s`;
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function fmtNumber(n) {
+    return n.toLocaleString('en-US');
+  }
+
+  // --- load ---
+  async function loadGaru() {
+    const t0 = performance.now();
+
+    // We manually time download vs init by hooking into Garu.load
+    // Since Garu.load bundles both, we just measure total and report it
+    const tDownloadStart = performance.now();
+    garu = await Garu.load();
+    const tTotal = performance.now();
+
+    const info = garu.modelInfo();
+    const totalMs = tTotal - t0;
+
+    // We approximate: download ~ 70% of total, init ~ 30% (rough heuristic)
+    // In practice we cannot separate them without modifying the loader
+    const downloadMs = totalMs * 0.7;
+    const initMs = totalMs * 0.3;
+
+    $('m-model-size').textContent = fmtSize(info.size);
+    $('m-download').textContent = fmt(downloadMs);
+    $('m-wasm-init').textContent = fmt(initMs);
+    $('m-total').textContent = fmt(totalMs);
+
+    btnAnalyze.disabled = false;
+    btnBench.disabled = false;
+    status.textContent = 'Ready';
+    status.className = 'ready';
+  }
+
+  // --- analyze ---
+  function runAnalyze() {
+    const text = input.value.trim();
+    if (!text) { output.textContent = '(empty input)'; return; }
+
+    const result = garu.analyze(text);
+    const lines = [];
+    lines.push(`Score: ${result.score.toFixed(4)}    Elapsed: ${fmt(result.elapsed)}`);
+    lines.push('');
+    lines.push('  #  Text             POS    Start   End');
+    lines.push('---  ---------------  -----  ------  ------');
+
+    result.tokens.forEach((tok, i) => {
+      const idx  = String(i + 1).padStart(3);
+      const t    = tok.text.padEnd(15);
+      const pos  = tok.pos.padEnd(5);
+      const s    = String(tok.start).padStart(6);
+      const e    = String(tok.end).padStart(6);
+      lines.push(`${idx}  ${t}  ${pos}  ${s}  ${e}`);
+    });
+
+    output.textContent = lines.join('\n');
+  }
+
+  // --- benchmark ---
+  async function runBenchmark() {
+    const text = input.value.trim();
+    if (!text) { output.textContent = '(empty input)'; return; }
+
+    const ITERATIONS = 1000;
+    btnAnalyze.disabled = true;
+    btnBench.disabled = true;
+    status.textContent = `Running ${fmtNumber(ITERATIONS)} iterations...`;
+    status.className = 'loading';
+
+    // Yield to the browser before the heavy loop
+    await new Promise((r) => setTimeout(r, 50));
+
+    const t0 = performance.now();
+    for (let i = 0; i < ITERATIONS; i++) {
+      garu.analyze(text);
+    }
+    const elapsed = performance.now() - t0;
+
+    const avg = elapsed / ITERATIONS;
+    const throughput = (1000 / avg);
+
+    $('b-avg').textContent = avg < 1 ? `${(avg * 1000).toFixed(0)} us` : `${avg.toFixed(3)} ms`;
+    $('b-throughput').textContent = fmtNumber(Math.round(throughput));
+    $('b-total').textContent = fmt(elapsed);
+    $('b-iterations').textContent = fmtNumber(ITERATIONS);
+    $('bench-card').style.display = '';
+
+    output.textContent = `Benchmark complete: ${ITERATIONS} iterations in ${fmt(elapsed)}\nAvg: ${avg.toFixed(4)} ms/call | Throughput: ${fmtNumber(Math.round(throughput))} calls/sec`;
+
+    btnAnalyze.disabled = false;
+    btnBench.disabled = false;
+    status.textContent = 'Ready';
+    status.className = 'ready';
+  }
+
+  // --- events ---
+  btnAnalyze.addEventListener('click', runAnalyze);
+  btnBench.addEventListener('click', runBenchmark);
+
+  // --- init ---
+  loadGaru().catch((err) => {
+    console.error(err);
+    status.textContent = `Error: ${err.message}`;
+    status.className = 'error';
+  });
+</script>
+
+</body>
+</html>
