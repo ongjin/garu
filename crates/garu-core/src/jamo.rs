@@ -16,11 +16,10 @@ pub const JAMO_COUNT: u16 = 51;
 pub const VOCAB_SIZE: u16 = JAMO_OFFSET + JAMO_COUNT; // 57
 
 // Hangul syllable block
-const SBase: u32 = 0xAC00;
-const LCount: u32 = 19;
-const VCount: u32 = 21;
-const TCount: u32 = 28;
-const NCount: u32 = VCount * TCount; // 588
+const S_BASE: u32 = 0xAC00;
+const V_COUNT: u32 = 21;
+const T_COUNT: u32 = 28;
+const N_COUNT: u32 = V_COUNT * T_COUNT; // 588
 
 /// Leading consonants in compatibility Jamo order.
 const LEADS: [char; 19] = [
@@ -51,13 +50,13 @@ const TAILS: [Option<char>; 28] = [
 /// Returns `None` if the character is not a precomposed Hangul syllable.
 pub fn decompose(ch: char) -> Option<(char, char, Option<char>)> {
     let code = ch as u32;
-    if code < SBase || code > 0xD7A3 {
+    if code < S_BASE || code > 0xD7A3 {
         return None;
     }
-    let offset = code - SBase;
-    let l_idx = (offset / NCount) as usize;
-    let v_idx = ((offset % NCount) / TCount) as usize;
-    let t_idx = (offset % TCount) as usize;
+    let offset = code - S_BASE;
+    let l_idx = (offset / N_COUNT) as usize;
+    let v_idx = ((offset % N_COUNT) / T_COUNT) as usize;
+    let t_idx = (offset % T_COUNT) as usize;
 
     Some((LEADS[l_idx], VOWELS[v_idx], TAILS[t_idx]))
 }
