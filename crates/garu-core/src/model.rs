@@ -88,12 +88,29 @@ impl TagSet {
     }
 }
 
+/// V2 tag entry: supports compound tags like B-VV+EP.
+#[derive(Debug, Clone)]
+pub struct TagEntryV2 {
+    pub bio: BioTag,
+    pub parts: Vec<Pos>,
+}
+
+/// V2 tagset with string-based compound tags.
+pub struct TagSetV2 {
+    pub entries: Vec<TagEntryV2>,
+}
+
+impl TagSetV2 {
+    pub fn num_tags(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
 const MAGIC: &[u8; 4] = b"GMDL";
-const VERSION: u32 = 1;
 
 /// Full model holding all components needed for analysis.
 pub struct Model {
@@ -103,7 +120,9 @@ pub struct Model {
     pub output_bias: Vec<f32>,
     pub crf: Crf,
     pub tagset: TagSet,
+    pub tagset_v2: Option<TagSetV2>,
     pub dict: Option<Dict>,
+    pub version: u32,
 }
 
 /// Helper to read a little-endian u32 from a byte slice at a given offset.
@@ -162,7 +181,7 @@ impl Model {
             return Err("Invalid magic bytes (expected GMDL)".into());
         }
         let version = read_u32(data, 4)?;
-        if version != VERSION {
+        if version != 1 && version != 2 {
             return Err(format!("Unsupported GMDL version: {}", version));
         }
 
@@ -175,6 +194,7 @@ impl Model {
         let mut crf: Option<Crf> = None;
         let mut tagset: Option<TagSet> = None;
         let mut dict: Option<Dict> = None;
+        let mut tagset_v2: Option<TagSetV2> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -197,19 +217,31 @@ impl Model {
 
             match section_type {
                 0 => {
-                    // Embedding: u32 vocab_size + u32 embed_dim + f32 weights
-                    let vocab_size = read_u32(section_data, 0)? as usize;
-                    let embed_dim = read_u32(section_data, 4)? as usize;
-                    let num_floats = vocab_size * embed_dim;
-                    let weights_start = 8;
-                    if weights_start + num_floats * 4 > section_data.len() {
-                        return Err("Embedding weights truncated".into());
+                    if version == 2 {
+                        // INT8 quantized embedding — reuse parse_quantized_matrix
+                        let (qm, _) = parse_quantized_matrix(section_data, 0)?;
+                        let vocab_size = qm.rows;
+                        let embed_dim = qm.cols;
+                        let mut weights = Vec::with_capacity(vocab_size * embed_dim);
+                        for i in 0..vocab_size * embed_dim {
+                            weights.push(qm.data[i] as f32 * qm.scale);
+                        }
+                        embedding = Some(Embedding::new(weights, vocab_size, embed_dim));
+                    } else {
+                        // v1: f32 embedding
+                        let vocab_size = read_u32(section_data, 0)? as usize;
+                        let embed_dim = read_u32(section_data, 4)? as usize;
+                        let num_floats = vocab_size * embed_dim;
+                        let weights_start = 8;
+                        if weights_start + num_floats * 4 > section_data.len() {
+                            return Err("Embedding weights truncated".into());
+                        }
+                        let mut weights = Vec::with_capacity(num_floats);
+                        for i in 0..num_floats {
+                            weights.push(read_f32(section_data, weights_start + i * 4)?);
+                        }
+                        embedding = Some(Embedding::new(weights, vocab_size, embed_dim));
                     }
-                    let mut weights = Vec::with_capacity(num_floats);
-                    for i in 0..num_floats {
-                        weights.push(read_f32(section_data, weights_start + i * 4)?);
-                    }
-                    embedding = Some(Embedding::new(weights, vocab_size, embed_dim));
                 }
                 1 => {
                     // BiLSTM: u32 num_layers + u32 hidden_size + per layer data
@@ -306,38 +338,77 @@ impl Model {
                     crf = Some(Crf::new(transitions, num_tags));
                 }
                 5 => {
-                    // TagSet: u32 num_labels + per label: u8 bio + u8 pos_byte
-                    let num_labels = read_u32(section_data, 0)? as usize;
-                    let mut labels = Vec::with_capacity(num_labels);
-                    let mut spos = 4;
-                    for _ in 0..num_labels {
-                        if spos + 2 > section_data.len() {
-                            return Err("TagSet data truncated".into());
+                    if version == 2 {
+                        // V2 tagset: string-based compound tags
+                        let num_tags = read_u32(section_data, 0)? as usize;
+                        let mut entries = Vec::with_capacity(num_tags);
+                        let mut spos = 4;
+                        for _ in 0..num_tags {
+                            let str_len = read_u32(section_data, spos)? as usize;
+                            spos += 4;
+                            let tag_str = std::str::from_utf8(&section_data[spos..spos + str_len])
+                                .map_err(|e| format!("Invalid UTF-8 in tag: {}", e))?;
+                            spos += str_len;
+
+                            let entry = if tag_str == "O" {
+                                TagEntryV2 { bio: BioTag::O, parts: vec![] }
+                            } else if tag_str.len() >= 2 {
+                                let bio = match &tag_str[0..2] {
+                                    "B-" => BioTag::B,
+                                    "I-" => BioTag::I,
+                                    _ => BioTag::O,
+                                };
+                                let remainder = &tag_str[2..];
+                                let parts: Vec<Pos> = remainder
+                                    .split('+')
+                                    .filter_map(Pos::from_str)
+                                    .collect();
+                                TagEntryV2 { bio, parts }
+                            } else {
+                                TagEntryV2 { bio: BioTag::O, parts: vec![] }
+                            };
+                            entries.push(entry);
                         }
-                        let bio_byte = section_data[spos];
-                        let pos_byte = section_data[spos + 1];
-                        spos += 2;
+                        // Also build a v1-compatible tagset (single POS per tag)
+                        let v1_labels: Vec<(BioTag, Option<Pos>)> = entries.iter().map(|e| {
+                            (e.bio, e.parts.first().copied())
+                        }).collect();
+                        tagset = Some(TagSet { labels: v1_labels });
+                        tagset_v2 = Some(TagSetV2 { entries });
+                    } else {
+                        // V1 tagset: u32 num_labels + per label: u8 bio + u8 pos_byte
+                        let num_labels = read_u32(section_data, 0)? as usize;
+                        let mut labels = Vec::with_capacity(num_labels);
+                        let mut spos = 4;
+                        for _ in 0..num_labels {
+                            if spos + 2 > section_data.len() {
+                                return Err("TagSet data truncated".into());
+                            }
+                            let bio_byte = section_data[spos];
+                            let pos_byte = section_data[spos + 1];
+                            spos += 2;
 
-                        let bio = match bio_byte {
-                            0 => BioTag::B,
-                            1 => BioTag::I,
-                            2 => BioTag::O,
-                            _ => return Err(format!("Invalid BIO byte: {}", bio_byte)),
-                        };
+                            let bio = match bio_byte {
+                                0 => BioTag::B,
+                                1 => BioTag::I,
+                                2 => BioTag::O,
+                                _ => return Err(format!("Invalid BIO byte: {}", bio_byte)),
+                            };
 
-                        let pos_tag = if bio == BioTag::O {
-                            None
-                        } else if pos_byte <= 41 {
-                            // Safety: pos_byte validated in range 0..=41
-                            // matching the 42 variants of Pos (#[repr(u8)]).
-                            Some(unsafe { std::mem::transmute::<u8, Pos>(pos_byte) })
-                        } else {
-                            return Err(format!("Invalid POS byte: {}", pos_byte));
-                        };
+                            let pos_tag = if bio == BioTag::O {
+                                None
+                            } else if pos_byte <= 41 {
+                                // Safety: pos_byte validated in range 0..=41
+                                // matching the 42 variants of Pos (#[repr(u8)]).
+                                Some(unsafe { std::mem::transmute::<u8, Pos>(pos_byte) })
+                            } else {
+                                return Err(format!("Invalid POS byte: {}", pos_byte));
+                            };
 
-                        labels.push((bio, pos_tag));
+                            labels.push((bio, pos_tag));
+                        }
+                        tagset = Some(TagSet { labels });
                     }
-                    tagset = Some(TagSet { labels });
                 }
                 6 => {
                     // Dictionary: raw bytes for Dict::from_bytes
@@ -358,7 +429,9 @@ impl Model {
             output_bias: output_bias.ok_or("Missing output bias section (type 3)")?,
             crf: crf.ok_or("Missing CRF section (type 4)")?,
             tagset: tagset.ok_or("Missing tagset section (type 5)")?,
+            tagset_v2,
             dict,
+            version,
         })
     }
 }
