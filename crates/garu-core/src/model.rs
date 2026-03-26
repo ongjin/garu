@@ -8,6 +8,51 @@ use crate::crf::Crf;
 use crate::jamo;
 use crate::lstm::{BiLstm, Embedding, LstmLayer, QuantizedMatrix};
 use crate::trie::Dict;
+
+fn now_ms() -> f64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::Instant;
+        static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        let origin = ORIGIN.get_or_init(Instant::now);
+        origin.elapsed().as_secs_f64() * 1000.0
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        0.0
+    }
+}
+
+/// Decompose a contracted Korean syllable into its component surfaces.
+/// Returns (surface1, surface2) if the syllable is a known contraction.
+fn decompose_contraction(ch: char) -> Option<(&'static str, &'static str)> {
+    match ch {
+        '됐' => Some(("되", "었")),
+        '했' => Some(("하", "었")),
+        '갔' => Some(("가", "았")),
+        '왔' => Some(("오", "았")),
+        '봤' => Some(("보", "았")),
+        '났' => Some(("나", "았")),
+        '섰' => Some(("서", "었")),
+        '셨' => Some(("시", "었")),
+        '줬' => Some(("주", "었")),
+        '겼' => Some(("기", "었")),
+        '녔' => Some(("니", "었")),
+        '렸' => Some(("리", "었")),
+        '몄' => Some(("미", "었")),
+        '폈' => Some(("피", "었")),
+        '쳤' => Some(("치", "었")),
+        '텄' => Some(("터", "었")),
+        '건' => Some(("것", "은")),
+        '걸' => Some(("것", "을")),
+        '난' => Some(("나", "는")),
+        '넌' => Some(("너", "는")),
+        '전' => Some(("저", "는")),
+        '뭘' => Some(("무엇", "을")),
+        _ => None,
+    }
+}
+
 use crate::types::{AnalyzeResult, Pos, Token};
 
 // ---------------------------------------------------------------------------
@@ -366,7 +411,7 @@ impl Analyzer {
             };
         }
 
-        let start_time = std::time::Instant::now();
+        let t0 = now_ms();
 
         // 1. Encode to Jamo IDs
         let ids = jamo::encode(text);
@@ -374,7 +419,7 @@ impl Analyzer {
             return AnalyzeResult {
                 tokens: vec![],
                 score: 0.0,
-                elapsed_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                elapsed_ms: now_ms() - t0,
             };
         }
 
@@ -406,11 +451,10 @@ impl Analyzer {
         let jamo_to_char = Self::build_jamo_to_char_map(text);
         let tokens = self.bio_to_tokens(text, &tag_ids, &jamo_to_char);
 
-        let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
         AnalyzeResult {
             tokens,
             score: crf_score,
-            elapsed_ms,
+            elapsed_ms: now_ms() - t0,
         }
     }
 
@@ -569,7 +613,7 @@ impl Analyzer {
         }
 
         // Chunk at spaces for long input
-        let start_time = std::time::Instant::now();
+        let t0 = now_ms();
         let mut all_tokens = Vec::new();
         let mut total_score = 0.0;
         let mut char_offset = 0;
@@ -585,11 +629,10 @@ impl Analyzer {
             char_offset += chunk.chars().count();
         }
 
-        let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
         AnalyzeResult {
             tokens: all_tokens,
             score: total_score,
-            elapsed_ms,
+            elapsed_ms: now_ms() - t0,
         }
     }
 
@@ -599,7 +642,7 @@ impl Analyzer {
             return vec![];
         }
 
-        let start_time = std::time::Instant::now();
+        let t0 = now_ms();
 
         // Encode and run through pipeline
         let ids = jamo::encode(text);
@@ -607,7 +650,7 @@ impl Analyzer {
             return vec![AnalyzeResult {
                 tokens: vec![],
                 score: 0.0,
-                elapsed_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                elapsed_ms: now_ms() - t0,
             }];
         }
 
@@ -630,7 +673,7 @@ impl Analyzer {
             .collect();
 
         let jamo_to_char = Self::build_jamo_to_char_map(text);
-        let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+        let elapsed_ms = now_ms() - t0;
 
         self.model
             .crf
