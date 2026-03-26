@@ -1,0 +1,11 @@
+[package]
+name = "garu-tools"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "build-dict"
+path = "src/build_dict.rs"
+
+[dependencies]
+fst = "0.4"

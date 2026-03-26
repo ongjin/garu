@@ -29,4 +29,11 @@ fn test_load_and_analyze_v2() {
     let tokens = analyzer.tokenize("서울특별시 강남구");
     println!("Tokenize: {:?}", tokens);
     assert!(!tokens.is_empty());
+
+    // Dict lookup: English proper nouns
+    let result3 = analyzer.analyze("Next.js는 좋은 프레임워크이다");
+    println!("\nNext.js 테스트:");
+    for token in &result3.tokens {
+        println!("  {} {:?} [{}:{}]", token.text, token.pos, token.start, token.end);
+    }
 }

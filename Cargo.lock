@@ -15,8 +15,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "fst"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
+
+[[package]]
 name = "garu-core"
 version = "0.1.0"
+dependencies = [
+ "fst",
+]
+
+[[package]]
+name = "garu-tools"
+version = "0.1.0"
+dependencies = [
+ "fst",
+]
 
 [[package]]
 name = "garu-wasm"
