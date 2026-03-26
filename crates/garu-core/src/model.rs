@@ -483,6 +483,9 @@ impl Analyzer {
                 elapsed_ms: 0.0,
             };
         }
+        if self.model.version == 2 {
+            return self.analyze_chunk_v2(text);
+        }
 
         let t0 = now_ms();
 
@@ -668,6 +671,234 @@ impl Analyzer {
         });
     }
 
+    fn bio_to_tokens_v2(
+        &self,
+        text: &str,
+        tag_ids: &[usize],
+        char_offset: usize,
+    ) -> Vec<Token> {
+        let tagset_v2 = self.model.tagset_v2.as_ref().unwrap();
+        let chars: Vec<char> = text.chars().collect();
+        let mut tokens = Vec::new();
+        let mut current_chars: Vec<char> = Vec::new();
+        let mut current_entry: Option<&TagEntryV2> = None;
+        let mut current_start: usize = 0;
+
+        for (i, &tag_id) in tag_ids.iter().enumerate() {
+            if i >= chars.len() { break; }
+            let entry = &tagset_v2.entries[tag_id.min(tagset_v2.entries.len() - 1)];
+
+            match entry.bio {
+                BioTag::B => {
+                    // Emit previous span
+                    if let Some(prev) = current_entry {
+                        self.emit_tokens_v2(&chars, &current_chars, prev, current_start + char_offset, &mut tokens);
+                    }
+                    current_chars = vec![chars[i]];
+                    current_entry = Some(entry);
+                    current_start = i;
+                }
+                BioTag::I if current_entry.is_some() => {
+                    current_chars.push(chars[i]);
+                }
+                _ => {
+                    // O or orphan I
+                    if let Some(prev) = current_entry {
+                        self.emit_tokens_v2(&chars, &current_chars, prev, current_start + char_offset, &mut tokens);
+                    }
+                    current_chars.clear();
+                    current_entry = None;
+                }
+            }
+        }
+        // Emit final span
+        if let Some(prev) = current_entry {
+            self.emit_tokens_v2(&chars, &current_chars, prev, current_start + char_offset, &mut tokens);
+        }
+        tokens
+    }
+
+    fn emit_tokens_v2(
+        &self,
+        _all_chars: &[char],
+        span_chars: &[char],
+        entry: &TagEntryV2,
+        start_char: usize,
+        tokens: &mut Vec<Token>,
+    ) {
+        if entry.parts.is_empty() { return; }
+
+        let surface: String = span_chars.iter().collect();
+        let end_char = start_char + span_chars.len();
+
+        if entry.parts.len() == 1 {
+            // Simple tag
+            tokens.push(Token {
+                text: surface,
+                pos: entry.parts[0],
+                start: start_char,
+                end: end_char,
+                score: None,
+            });
+        } else if span_chars.len() == 1 {
+            // Single char compound — try contraction decomposition
+            if let Some((s1, s2)) = decompose_contraction(span_chars[0]) {
+                tokens.push(Token {
+                    text: s1.to_string(),
+                    pos: entry.parts[0],
+                    start: start_char,
+                    end: end_char,
+                    score: None,
+                });
+                if entry.parts.len() > 1 {
+                    tokens.push(Token {
+                        text: s2.to_string(),
+                        pos: entry.parts[1],
+                        start: start_char,
+                        end: end_char,
+                        score: None,
+                    });
+                }
+                // If more than 2 parts (rare)
+                for pos in entry.parts.iter().skip(2) {
+                    tokens.push(Token {
+                        text: String::new(),
+                        pos: *pos,
+                        start: start_char,
+                        end: end_char,
+                        score: None,
+                    });
+                }
+            } else {
+                // No known contraction — first part gets surface, rest empty
+                tokens.push(Token {
+                    text: surface,
+                    pos: entry.parts[0],
+                    start: start_char,
+                    end: end_char,
+                    score: None,
+                });
+                for pos in entry.parts.iter().skip(1) {
+                    tokens.push(Token {
+                        text: String::new(),
+                        pos: *pos,
+                        start: start_char,
+                        end: end_char,
+                        score: None,
+                    });
+                }
+            }
+        } else {
+            // Multi-char compound — first part gets surface, rest empty
+            tokens.push(Token {
+                text: surface,
+                pos: entry.parts[0],
+                start: start_char,
+                end: end_char,
+                score: None,
+            });
+            for pos in entry.parts.iter().skip(1) {
+                tokens.push(Token {
+                    text: String::new(),
+                    pos: *pos,
+                    start: start_char,
+                    end: end_char,
+                    score: None,
+                });
+            }
+        }
+    }
+
+    fn analyze_chunk_v2(&self, text: &str) -> AnalyzeResult {
+        if text.is_empty() {
+            return AnalyzeResult { tokens: vec![], score: 0.0, elapsed_ms: 0.0 };
+        }
+        let t0 = now_ms();
+        use crate::syllable;
+
+        // Step 1: Dict lookup (greedy longest match)
+        let mut dict_tokens: Vec<Token> = Vec::new();
+        let mut covered = vec![false; text.chars().count()];
+
+        if let Some(ref dict) = self.model.dict {
+            let chars: Vec<char> = text.chars().collect();
+            let mut ci = 0;
+            while ci < chars.len() {
+                if covered[ci] { ci += 1; continue; }
+                let remaining: String = chars[ci..].iter().collect();
+                let matches = dict.common_prefix_search(&remaining);
+                if let Some((byte_len, entries)) = matches.last() {
+                    // Longest match
+                    if let Some(entry) = entries.first() {
+                        let match_chars = remaining[..*byte_len].chars().count();
+                        for morph in &entry.morphemes {
+                            dict_tokens.push(Token {
+                                text: morph.text.clone(),
+                                pos: morph.pos,
+                                start: ci,
+                                end: ci + match_chars,
+                                score: Some(entry.score),
+                            });
+                        }
+                        for j in ci..ci + match_chars {
+                            covered[j] = true;
+                        }
+                        ci += match_chars;
+                        continue;
+                    }
+                }
+                ci += 1;
+            }
+        }
+
+        // Step 2: Model inference on uncovered spans
+        let chars: Vec<char> = text.chars().collect();
+        let mut model_tokens: Vec<Token> = Vec::new();
+        let mut span_start = None;
+
+        for i in 0..=chars.len() {
+            let is_covered = i < chars.len() && covered[i];
+            let at_end = i == chars.len();
+
+            if (is_covered || at_end) && span_start.is_some() {
+                // End of uncovered span — run model
+                let start = span_start.unwrap();
+                let span: String = chars[start..i].iter().collect();
+                let ids = syllable::encode(&span);
+                if !ids.is_empty() {
+                    let embeddings: Vec<Vec<f32>> = ids.iter()
+                        .map(|&id| self.model.embedding.lookup(id).to_vec())
+                        .collect();
+                    let lstm_out = self.model.bilstm.forward(&embeddings);
+                    let emissions: Vec<Vec<f32>> = lstm_out.iter()
+                        .map(|h| {
+                            let proj = self.model.output_weights.matvec(h);
+                            proj.iter().zip(self.model.output_bias.iter())
+                                .map(|(&p, &b)| p + b).collect()
+                        }).collect();
+                    let (tag_ids, _score) = self.model.crf.decode(&emissions);
+                    let span_tokens = self.bio_to_tokens_v2(&span, &tag_ids, start);
+                    model_tokens.extend(span_tokens);
+                }
+                span_start = None;
+            }
+            if !is_covered && !at_end && span_start.is_none() {
+                span_start = Some(i);
+            }
+        }
+
+        // Step 3: Merge and sort
+        let mut all_tokens = dict_tokens;
+        all_tokens.extend(model_tokens);
+        all_tokens.sort_by_key(|t| t.start);
+
+        AnalyzeResult {
+            tokens: all_tokens,
+            score: 0.0,
+            elapsed_ms: now_ms() - t0,
+        }
+    }
+
     /// Analyze text, returning morphological tokens.
     ///
     /// - Empty string returns empty result.
@@ -711,6 +942,10 @@ impl Analyzer {
 
     /// Analyze returning top-N results via CRF beam search.
     pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
+        if self.model.version == 2 {
+            // v2: return single result via analyze_chunk_v2 (topn not yet supported for v2)
+            return vec![self.analyze_chunk_v2(text)];
+        }
         if text.is_empty() || n == 0 {
             return vec![];
         }
