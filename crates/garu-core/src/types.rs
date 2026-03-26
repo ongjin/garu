@@ -33,6 +33,28 @@ impl Pos {
             Pos::SH => "SH", Pos::SL => "SL", Pos::SN => "SN",
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Pos> {
+        match s {
+            "NNG" => Some(Pos::NNG), "NNP" => Some(Pos::NNP), "NNB" => Some(Pos::NNB),
+            "NR" => Some(Pos::NR), "NP" => Some(Pos::NP),
+            "VV" => Some(Pos::VV), "VA" => Some(Pos::VA), "VX" => Some(Pos::VX),
+            "VCP" => Some(Pos::VCP), "VCN" => Some(Pos::VCN),
+            "MAG" => Some(Pos::MAG), "MAJ" => Some(Pos::MAJ), "MM" => Some(Pos::MM),
+            "IC" => Some(Pos::IC),
+            "JKS" => Some(Pos::JKS), "JKC" => Some(Pos::JKC), "JKG" => Some(Pos::JKG),
+            "JKO" => Some(Pos::JKO), "JKB" => Some(Pos::JKB), "JKV" => Some(Pos::JKV),
+            "JKQ" => Some(Pos::JKQ), "JX" => Some(Pos::JX), "JC" => Some(Pos::JC),
+            "EP" => Some(Pos::EP), "EF" => Some(Pos::EF), "EC" => Some(Pos::EC),
+            "ETN" => Some(Pos::ETN), "ETM" => Some(Pos::ETM),
+            "XPN" => Some(Pos::XPN), "XSN" => Some(Pos::XSN), "XSV" => Some(Pos::XSV),
+            "XSA" => Some(Pos::XSA), "XR" => Some(Pos::XR),
+            "SF" => Some(Pos::SF), "SP" => Some(Pos::SP), "SS" => Some(Pos::SS),
+            "SE" => Some(Pos::SE), "SO" => Some(Pos::SO), "SW" => Some(Pos::SW),
+            "SH" => Some(Pos::SH), "SL" => Some(Pos::SL), "SN" => Some(Pos::SN),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
