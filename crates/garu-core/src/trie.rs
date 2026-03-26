@@ -14,7 +14,8 @@ pub struct DictEntry {
     pub score: f32,
 }
 
-/// Internal trie node.
+// ---- Trie internals (kept for v1 backward compat) ----
+
 #[derive(Debug, Clone)]
 struct TrieNode {
     children: Vec<(char, usize)>,
@@ -23,16 +24,11 @@ struct TrieNode {
 
 impl TrieNode {
     fn new() -> Self {
-        TrieNode {
-            children: Vec::new(),
-            entries: Vec::new(),
-        }
+        TrieNode { children: Vec::new(), entries: Vec::new() }
     }
-
     fn get_child(&self, c: char) -> Option<usize> {
         self.children.iter().find(|(ch, _)| *ch == c).map(|(_, idx)| *idx)
     }
-
     fn get_or_create_child(&mut self, c: char, next_id: usize) -> (usize, bool) {
         if let Some(idx) = self.get_child(c) {
             (idx, false)
@@ -43,148 +39,205 @@ impl TrieNode {
     }
 }
 
-/// Trie-based dictionary for morphological lookup.
-#[derive(Debug, Clone)]
-pub struct Dict {
-    nodes: Vec<TrieNode>,
-    entry_count: usize,
-}
+// ---- Dict with dual backend ----
 
 const MAGIC: &[u8; 4] = b"GARU";
-const VERSION: u32 = 1;
+
+enum DictBackend {
+    Trie {
+        nodes: Vec<TrieNode>,
+        entry_count: usize,
+    },
+    Fst {
+        map: fst::Map<Vec<u8>>,
+    },
+}
+
+/// Dictionary for morphological lookup. Supports Trie (v1) and FST (v2) backends.
+pub struct Dict {
+    backend: DictBackend,
+}
 
 impl Dict {
-    /// Create an empty dictionary.
+    /// Create an empty Trie-based dictionary.
     pub fn new() -> Self {
         Dict {
-            nodes: vec![TrieNode::new()], // root node
-            entry_count: 0,
+            backend: DictBackend::Trie {
+                nodes: vec![TrieNode::new()],
+                entry_count: 0,
+            },
         }
     }
 
-    /// Insert a word with its dictionary entry.
+    /// Insert a word (Trie backend only, panics on FST).
     pub fn insert(&mut self, word: &str, entry: DictEntry) {
-        let mut node_idx = 0;
-        for c in word.chars() {
-            let next_id = self.nodes.len();
-            let (child_idx, created) = self.nodes[node_idx].get_or_create_child(c, next_id);
-            if created {
-                self.nodes.push(TrieNode::new());
+        match &mut self.backend {
+            DictBackend::Trie { nodes, entry_count } => {
+                let mut node_idx = 0;
+                for c in word.chars() {
+                    let next_id = nodes.len();
+                    let (child_idx, created) = nodes[node_idx].get_or_create_child(c, next_id);
+                    if created {
+                        nodes.push(TrieNode::new());
+                    }
+                    node_idx = child_idx;
+                }
+                nodes[node_idx].entries.push(entry);
+                *entry_count += 1;
             }
-            node_idx = child_idx;
+            DictBackend::Fst { .. } => panic!("Cannot insert into FST dict"),
         }
-        self.nodes[node_idx].entries.push(entry);
-        self.entry_count += 1;
     }
 
-    /// Look up an exact word. Returns the entries for that word (empty slice if not found).
-    pub fn lookup(&self, word: &str) -> &[DictEntry] {
-        let mut node_idx = 0;
-        for c in word.chars() {
-            match self.nodes[node_idx].get_child(c) {
-                Some(idx) => node_idx = idx,
-                None => return &[],
+    /// Look up an exact word.
+    pub fn lookup(&self, word: &str) -> Vec<DictEntry> {
+        match &self.backend {
+            DictBackend::Trie { nodes, .. } => {
+                let mut node_idx = 0;
+                for c in word.chars() {
+                    match nodes[node_idx].get_child(c) {
+                        Some(idx) => node_idx = idx,
+                        None => return vec![],
+                    }
+                }
+                nodes[node_idx].entries.clone()
+            }
+            DictBackend::Fst { map } => {
+                match map.get(word.as_bytes()) {
+                    Some(pos_byte) => {
+                        let pos: Pos = if (pos_byte as u8) <= 41 {
+                            unsafe { std::mem::transmute(pos_byte as u8) }
+                        } else {
+                            Pos::NNP
+                        };
+                        vec![DictEntry {
+                            morphemes: vec![Morpheme { text: word.to_string(), pos }],
+                            score: 1.0,
+                        }]
+                    }
+                    None => vec![],
+                }
             }
         }
-        &self.nodes[node_idx].entries
     }
 
     /// Find all prefixes of `text` that exist in the dictionary.
     /// Returns vec of (byte_length_of_prefix, entries).
-    pub fn common_prefix_search(&self, text: &str) -> Vec<(usize, &[DictEntry])> {
-        let mut results = Vec::new();
-        let mut node_idx = 0;
-        let mut byte_pos = 0;
-
-        for c in text.chars() {
-            match self.nodes[node_idx].get_child(c) {
-                Some(idx) => {
-                    node_idx = idx;
-                    byte_pos += c.len_utf8();
-                    let entries = &self.nodes[node_idx].entries;
-                    if !entries.is_empty() {
-                        results.push((byte_pos, entries.as_slice()));
+    pub fn common_prefix_search(&self, text: &str) -> Vec<(usize, Vec<DictEntry>)> {
+        match &self.backend {
+            DictBackend::Trie { nodes, .. } => {
+                let mut results = Vec::new();
+                let mut node_idx = 0;
+                let mut byte_pos = 0;
+                for c in text.chars() {
+                    match nodes[node_idx].get_child(c) {
+                        Some(idx) => {
+                            node_idx = idx;
+                            byte_pos += c.len_utf8();
+                            let entries = &nodes[node_idx].entries;
+                            if !entries.is_empty() {
+                                results.push((byte_pos, entries.clone()));
+                            }
+                        }
+                        None => break,
                     }
                 }
-                None => break,
+                results
             }
-        }
-
-        results
-    }
-
-    /// Total number of entries inserted.
-    pub fn len(&self) -> usize {
-        self.entry_count
-    }
-
-    /// Whether the dictionary is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entry_count == 0
-    }
-
-    /// Serialize the dictionary to bytes.
-    ///
-    /// Format: "GARU" magic + u32 version(1) + u32 entry_count + entries
-    /// Each entry: u16 word_len + word_bytes + u8 num_entries + for each entry:
-    ///   u8 num_morphemes + morphemes + f32 score
-    /// Each morpheme: u16 text_len + text_bytes + u8 pos_byte
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-
-        // Header
-        buf.extend_from_slice(MAGIC);
-        buf.extend_from_slice(&VERSION.to_le_bytes());
-
-        // Collect all words and their entries via DFS
-        let mut word_entries: Vec<(String, &[DictEntry])> = Vec::new();
-        self.collect_entries(0, &mut String::new(), &mut word_entries);
-
-        buf.extend_from_slice(&(word_entries.len() as u32).to_le_bytes());
-
-        for (word, entries) in &word_entries {
-            let word_bytes = word.as_bytes();
-            buf.extend_from_slice(&(word_bytes.len() as u16).to_le_bytes());
-            buf.extend_from_slice(word_bytes);
-            buf.push(entries.len() as u8);
-            for entry in *entries {
-                buf.push(entry.morphemes.len() as u8);
-                for morpheme in &entry.morphemes {
-                    let text_bytes = morpheme.text.as_bytes();
-                    buf.extend_from_slice(&(text_bytes.len() as u16).to_le_bytes());
-                    buf.extend_from_slice(text_bytes);
-                    buf.push(morpheme.pos as u8);
+            DictBackend::Fst { map } => {
+                let bytes = text.as_bytes();
+                let mut results = Vec::new();
+                let mut byte_pos = 0;
+                for ch in text.chars() {
+                    byte_pos += ch.len_utf8();
+                    if let Some(pos_byte) = map.get(&bytes[..byte_pos]) {
+                        let pos: Pos = if (pos_byte as u8) <= 41 {
+                            unsafe { std::mem::transmute(pos_byte as u8) }
+                        } else {
+                            Pos::NNP
+                        };
+                        let surface = std::str::from_utf8(&bytes[..byte_pos]).unwrap_or("");
+                        results.push((byte_pos, vec![DictEntry {
+                            morphemes: vec![Morpheme { text: surface.to_string(), pos }],
+                            score: 1.0,
+                        }]));
+                    }
                 }
-                buf.extend_from_slice(&entry.score.to_le_bytes());
+                results
             }
         }
-
-        buf
     }
 
-    /// Deserialize a dictionary from bytes.
-    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        let mut pos = 0;
+    /// Total number of entries.
+    pub fn len(&self) -> usize {
+        match &self.backend {
+            DictBackend::Trie { entry_count, .. } => *entry_count,
+            DictBackend::Fst { map } => map.len(),
+        }
+    }
 
-        // Magic
-        if data.len() < 12 {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Serialize (Trie backend only).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match &self.backend {
+            DictBackend::Trie { nodes, .. } => {
+                let mut buf = Vec::new();
+                buf.extend_from_slice(MAGIC);
+                buf.extend_from_slice(&1u32.to_le_bytes()); // version 1
+
+                let mut word_entries: Vec<(String, &[DictEntry])> = Vec::new();
+                Self::collect_entries_static(nodes, 0, &mut String::new(), &mut word_entries);
+
+                buf.extend_from_slice(&(word_entries.len() as u32).to_le_bytes());
+
+                for (word, entries) in &word_entries {
+                    let word_bytes = word.as_bytes();
+                    buf.extend_from_slice(&(word_bytes.len() as u16).to_le_bytes());
+                    buf.extend_from_slice(word_bytes);
+                    buf.push(entries.len() as u8);
+                    for entry in *entries {
+                        buf.push(entry.morphemes.len() as u8);
+                        for morpheme in &entry.morphemes {
+                            let text_bytes = morpheme.text.as_bytes();
+                            buf.extend_from_slice(&(text_bytes.len() as u16).to_le_bytes());
+                            buf.extend_from_slice(text_bytes);
+                            buf.push(morpheme.pos as u8);
+                        }
+                        buf.extend_from_slice(&entry.score.to_le_bytes());
+                    }
+                }
+                buf
+            }
+            DictBackend::Fst { .. } => panic!("Use FST bytes directly, not to_bytes()"),
+        }
+    }
+
+    /// Deserialize a dictionary from bytes. Supports v1 (Trie) and v2 (FST).
+    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
             return Err("Data too short for header".into());
         }
         if &data[0..4] != MAGIC {
             return Err("Invalid magic bytes".into());
         }
-        pos += 4;
-
-        // Version
         let version = u32::from_le_bytes(
-            data[pos..pos + 4].try_into().map_err(|_| "Bad version bytes")?
+            data[4..8].try_into().map_err(|_| "Bad version bytes")?
         );
-        if version != VERSION {
-            return Err(format!("Unsupported version: {}", version));
-        }
-        pos += 4;
 
-        // Entry count
+        match version {
+            1 => Self::from_bytes_v1(data),
+            2 => Self::from_bytes_v2(data),
+            _ => Err(format!("Unsupported dict version: {}", version)),
+        }
+    }
+
+    /// Parse v1 Trie format.
+    fn from_bytes_v1(data: &[u8]) -> Result<Self, String> {
+        let mut pos = 8; // skip magic + version
+
         let word_count = u32::from_le_bytes(
             data[pos..pos + 4].try_into().map_err(|_| "Bad entry count bytes")?
         ) as usize;
@@ -193,7 +246,6 @@ impl Dict {
         let mut dict = Dict::new();
 
         for _ in 0..word_count {
-            // Word
             if pos + 2 > data.len() {
                 return Err("Unexpected end of data reading word length".into());
             }
@@ -209,7 +261,6 @@ impl Dict {
                 .map_err(|e| format!("Invalid UTF-8 in word: {}", e))?;
             pos += word_len;
 
-            // Number of entries for this word
             if pos >= data.len() {
                 return Err("Unexpected end of data reading num_entries".into());
             }
@@ -217,7 +268,6 @@ impl Dict {
             pos += 1;
 
             for _ in 0..num_entries {
-                // Number of morphemes
                 if pos >= data.len() {
                     return Err("Unexpected end of data reading num_morphemes".into());
                 }
@@ -251,10 +301,7 @@ impl Dict {
                     if pos_byte > 41 {
                         return Err(format!("Invalid POS byte: {}", pos_byte));
                     }
-                    // Safety: pos_byte is validated to be in range 0..=41,
-                    // matching the 42 variants of Pos (#[repr(u8)]).
                     let pos_tag: Pos = unsafe { std::mem::transmute(pos_byte) };
-
                     morphemes.push(Morpheme { text, pos: pos_tag });
                 }
 
@@ -273,23 +320,46 @@ impl Dict {
         Ok(dict)
     }
 
-    /// DFS helper to collect all words and their entries from the trie.
-    fn collect_entries<'a>(
-        &'a self,
+    /// Parse v2 FST format.
+    /// Format: "GARU" + u32 version(2) + u32 fst_len + [fst bytes]
+    /// The FST maps word_bytes -> pos_byte as u64.
+    fn from_bytes_v2(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 12 {
+            return Err("FST dict data too short".into());
+        }
+        let fst_len = u32::from_le_bytes(
+            data[8..12].try_into().map_err(|_| "Bad FST length")?
+        ) as usize;
+
+        if 12 + fst_len > data.len() {
+            return Err("FST data truncated".into());
+        }
+
+        let fst_data = data[12..12 + fst_len].to_vec();
+        let map = fst::Map::new(fst_data)
+            .map_err(|e| format!("Invalid FST data: {}", e))?;
+
+        Ok(Dict {
+            backend: DictBackend::Fst { map },
+        })
+    }
+
+    /// DFS helper to collect entries from trie nodes.
+    fn collect_entries_static<'a>(
+        nodes: &'a [TrieNode],
         node_idx: usize,
         prefix: &mut String,
         results: &mut Vec<(String, &'a [DictEntry])>,
     ) {
-        let node = &self.nodes[node_idx];
+        let node = &nodes[node_idx];
         if !node.entries.is_empty() {
             results.push((prefix.clone(), node.entries.as_slice()));
         }
-        // Sort children for deterministic serialization order
         let mut children: Vec<_> = node.children.clone();
         children.sort_by_key(|(c, _)| *c);
         for (c, child_idx) in children {
             prefix.push(c);
-            self.collect_entries(child_idx, prefix, results);
+            Self::collect_entries_static(nodes, child_idx, prefix, results);
             prefix.pop();
         }
     }
