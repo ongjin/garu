@@ -50,7 +50,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     Returns (dict_bytes, max_freq).
     """
     # Parse content dict: keep highest-freq POS per word, filter by min freq
-    MIN_CONTENT_FREQ = 5
+    MIN_CONTENT_FREQ = 7
     best = {}  # {word: (tag, freq)}
     max_freq = 0
     with open(dict_path, "r", encoding="utf-8") as f:
@@ -166,7 +166,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     return dict_bytes, max_freq
 
 
-MIN_SUFFIX_FREQ = 50
+MIN_SUFFIX_FREQ = 75
 
 
 def augment_contractions(codebook: dict) -> dict:
