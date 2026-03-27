@@ -443,15 +443,53 @@ impl Model {
 /// Maximum input length before chunking.
 const MAX_INPUT_CHARS: usize = 100_000;
 
-/// High-level analyzer wrapping a loaded Model.
+/// Backend for the analyzer: neural (v1/v2) or codebook (v3).
+pub enum AnalyzerBackend {
+    Neural(Model),
+    Codebook(crate::codebook::CodebookAnalyzer),
+}
+
+/// High-level analyzer wrapping a loaded Model or CodebookAnalyzer.
 pub struct Analyzer {
-    pub model: Model,
+    backend: AnalyzerBackend,
 }
 
 impl Analyzer {
-    /// Create an analyzer from a loaded model.
+    /// Create an analyzer from a loaded neural model (v1/v2).
     pub fn new(model: Model) -> Self {
-        Self { model }
+        Self { backend: AnalyzerBackend::Neural(model) }
+    }
+
+    /// Create an analyzer from a codebook analyzer (v3).
+    pub fn from_codebook(cb: crate::codebook::CodebookAnalyzer) -> Self {
+        Self { backend: AnalyzerBackend::Codebook(cb) }
+    }
+
+    /// Load from GMDL bytes — auto-detects version 1/2 (neural) or 3 (codebook).
+    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err("Data too short for GMDL header".into());
+        }
+        if &data[0..4] != b"GMDL" {
+            return Err("Invalid magic bytes (expected GMDL)".into());
+        }
+        let version = read_u32(data, 4)?;
+
+        if version == 3 {
+            let cb = crate::codebook::CodebookAnalyzer::from_bytes(data)?;
+            Ok(Self { backend: AnalyzerBackend::Codebook(cb) })
+        } else {
+            let model = Model::from_bytes(data)?;
+            Ok(Self { backend: AnalyzerBackend::Neural(model) })
+        }
+    }
+
+    /// Access the neural model (panics if codebook backend).
+    pub fn model(&self) -> &Model {
+        match &self.backend {
+            AnalyzerBackend::Neural(model) => model,
+            AnalyzerBackend::Codebook(_) => panic!("No neural model in codebook backend"),
+        }
     }
 
     /// Build a mapping from Jamo index to (char_index, byte_offset).
@@ -483,7 +521,7 @@ impl Analyzer {
                 elapsed_ms: 0.0,
             };
         }
-        if self.model.version == 2 {
+        if self.model().version == 2 {
             return self.analyze_chunk_v2(text);
         }
 
@@ -502,26 +540,26 @@ impl Analyzer {
         // 2. Embedding lookup
         let embeddings: Vec<Vec<f32>> = ids
             .iter()
-            .map(|&id| self.model.embedding.lookup(id).to_vec())
+            .map(|&id| self.model().embedding.lookup(id).to_vec())
             .collect();
 
         // 3. BiLSTM forward
-        let lstm_out = self.model.bilstm.forward(&embeddings);
+        let lstm_out = self.model().bilstm.forward(&embeddings);
 
         // 4. Output projection: output_weights * h + output_bias
         let emissions: Vec<Vec<f32>> = lstm_out
             .iter()
             .map(|h| {
-                let proj = self.model.output_weights.matvec(h);
+                let proj = self.model().output_weights.matvec(h);
                 proj.iter()
-                    .zip(self.model.output_bias.iter())
+                    .zip(self.model().output_bias.iter())
                     .map(|(&p, &b)| p + b)
                     .collect()
             })
             .collect();
 
         // 5. CRF decode
-        let (tag_ids, crf_score) = self.model.crf.decode(&emissions);
+        let (tag_ids, crf_score) = self.model().crf.decode(&emissions);
 
         // 6. Convert BIO tags to Token spans
         let jamo_to_char = Self::build_jamo_to_char_map(text);
@@ -553,7 +591,7 @@ impl Analyzer {
         let mut current_pos: Option<Pos> = None;
 
         for (jamo_idx, &tag_id) in tag_ids.iter().enumerate() {
-            let (bio, pos_opt) = self.model.tagset.tag_to_bio_pos(tag_id);
+            let (bio, pos_opt) = self.model().tagset.tag_to_bio_pos(tag_id);
 
             match bio {
                 BioTag::B => {
@@ -677,7 +715,7 @@ impl Analyzer {
         tag_ids: &[usize],
         char_offset: usize,
     ) -> Vec<Token> {
-        let tagset_v2 = self.model.tagset_v2.as_ref().unwrap();
+        let tagset_v2 = self.model().tagset_v2.as_ref().unwrap();
         let chars: Vec<char> = text.chars().collect();
         let mut tokens = Vec::new();
         let mut current_chars: Vec<char> = Vec::new();
@@ -820,7 +858,7 @@ impl Analyzer {
         let mut dict_tokens: Vec<Token> = Vec::new();
         let mut covered = vec![false; text.chars().count()];
 
-        if let Some(ref dict) = self.model.dict {
+        if let Some(ref dict) = self.model().dict {
             let chars: Vec<char> = text.chars().collect();
             let mut ci = 0;
             while ci < chars.len() {
@@ -867,16 +905,16 @@ impl Analyzer {
                 let ids = syllable::encode(&span);
                 if !ids.is_empty() {
                     let embeddings: Vec<Vec<f32>> = ids.iter()
-                        .map(|&id| self.model.embedding.lookup(id).to_vec())
+                        .map(|&id| self.model().embedding.lookup(id).to_vec())
                         .collect();
-                    let lstm_out = self.model.bilstm.forward(&embeddings);
+                    let lstm_out = self.model().bilstm.forward(&embeddings);
                     let emissions: Vec<Vec<f32>> = lstm_out.iter()
                         .map(|h| {
-                            let proj = self.model.output_weights.matvec(h);
-                            proj.iter().zip(self.model.output_bias.iter())
+                            let proj = self.model().output_weights.matvec(h);
+                            proj.iter().zip(self.model().output_bias.iter())
                                 .map(|(&p, &b)| p + b).collect()
                         }).collect();
-                    let (tag_ids, _score) = self.model.crf.decode(&emissions);
+                    let (tag_ids, _score) = self.model().crf.decode(&emissions);
                     let span_tokens = self.bio_to_tokens_v2(&span, &tag_ids, start);
                     model_tokens.extend(span_tokens);
                 }
@@ -904,6 +942,11 @@ impl Analyzer {
     /// - Empty string returns empty result.
     /// - Input >100K chars is chunked at spaces and results combined.
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
+        match &self.backend {
+            AnalyzerBackend::Codebook(cb) => return cb.analyze(text),
+            AnalyzerBackend::Neural(_) => {}
+        }
+
         if text.is_empty() {
             return AnalyzeResult {
                 tokens: vec![],
@@ -942,7 +985,11 @@ impl Analyzer {
 
     /// Analyze returning top-N results via CRF beam search.
     pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
-        if self.model.version == 2 {
+        match &self.backend {
+            AnalyzerBackend::Codebook(cb) => return cb.analyze_topn(text, n),
+            AnalyzerBackend::Neural(_) => {}
+        }
+        if self.model().version == 2 {
             // v2: return single result via analyze_chunk_v2 (topn not yet supported for v2)
             return vec![self.analyze_chunk_v2(text)];
         }
@@ -964,17 +1011,17 @@ impl Analyzer {
 
         let embeddings: Vec<Vec<f32>> = ids
             .iter()
-            .map(|&id| self.model.embedding.lookup(id).to_vec())
+            .map(|&id| self.model().embedding.lookup(id).to_vec())
             .collect();
 
-        let lstm_out = self.model.bilstm.forward(&embeddings);
+        let lstm_out = self.model().bilstm.forward(&embeddings);
 
         let emissions: Vec<Vec<f32>> = lstm_out
             .iter()
             .map(|h| {
-                let proj = self.model.output_weights.matvec(h);
+                let proj = self.model().output_weights.matvec(h);
                 proj.iter()
-                    .zip(self.model.output_bias.iter())
+                    .zip(self.model().output_bias.iter())
                     .map(|(&p, &b)| p + b)
                     .collect()
             })
@@ -983,7 +1030,7 @@ impl Analyzer {
         let jamo_to_char = Self::build_jamo_to_char_map(text);
         let elapsed_ms = now_ms() - t0;
 
-        self.model
+        self.model()
             .crf
             .decode_topn(&emissions, n)
             .into_iter()
@@ -1000,6 +1047,10 @@ impl Analyzer {
 
     /// Extract surface forms from analysis.
     pub fn tokenize(&self, text: &str) -> Vec<String> {
+        match &self.backend {
+            AnalyzerBackend::Codebook(cb) => return cb.tokenize(text),
+            AnalyzerBackend::Neural(_) => {}
+        }
         self.analyze(text)
             .tokens
             .into_iter()

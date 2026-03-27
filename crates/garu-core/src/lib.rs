@@ -1,3 +1,4 @@
+pub mod codebook;
 pub mod crf;
 pub mod jamo;
 pub mod syllable;
