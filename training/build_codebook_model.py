@@ -105,6 +105,28 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     else:
         print(f"  Warning: {wiki_path} not found, skipping wiki NNP")
 
+    # Remove single-char content words that conflict with suffix codebook.
+    # E.g., "을"(NNG,freq=2510) vs "을"(JKO,freq=1.2M) — suffix is far more common.
+    FUNC_POS_SET = {"JKS","JKC","JKG","JKO","JKB","JKV","JKQ","JX","JC",
+                    "EP","EF","EC","ETN","ETM","XPN","XSN","XSV","XSA"}
+    codebook_path = DATA_DIR / "suffix_codebook.json"
+    if codebook_path.exists():
+        cb = json.load(open(codebook_path))
+        removed = 0
+        for word in list(best.keys()):
+            if len(word) != 1 or word not in cb:
+                continue
+            _, content_freq = best[word]
+            max_func_freq = max(
+                (a["freq"] for a in cb[word]
+                 if (a["morphemes"][0][1] if isinstance(a["morphemes"][0], list) else a["morphemes"][0]) in FUNC_POS_SET),
+                default=0,
+            )
+            if max_func_freq > content_freq * 10:
+                del best[word]
+                removed += 1
+        print(f"  Removed {removed} single-char entries conflicting with suffix codebook")
+
     # Sort by UTF-8 bytes and write temp input for build-dict
     sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
 
