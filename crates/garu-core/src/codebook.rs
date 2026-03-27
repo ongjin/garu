@@ -902,6 +902,22 @@ impl CodebookAnalyzer {
                     }
                 }
             }
+
+            // Also convert 어→아 for EC/EF endings based on preceding vowel harmony
+            if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
+                && tokens[i].text.starts_with("어")
+            {
+                let prev_text = &tokens[i - 1].text;
+                if let Some(last_char) = prev_text.chars().last() {
+                    let code = last_char as u32;
+                    if code >= 0xAC00 && code <= 0xD7A3 {
+                        let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                        if vowel == 0 || vowel == 8 {
+                            tokens[i].text = tokens[i].text.replacen("어", "아", 1);
+                        }
+                    }
+                }
+            }
         }
 
         (tokens, best_cost)
