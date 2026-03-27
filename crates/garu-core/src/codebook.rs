@@ -882,7 +882,27 @@ impl CodebookAnalyzer {
         }
 
         // Post-process: merge consecutive single-char SL/SN tokens
-        let tokens = Self::merge_sl_sn_tokens(tokens);
+        let mut tokens = Self::merge_sl_sn_tokens(tokens);
+
+        // Post-process: convert 었→았 based on preceding vowel (ㅏ=0, ㅗ=8)
+        for i in 1..tokens.len() {
+            if tokens[i].pos == Pos::EP && (tokens[i].text == "었" || tokens[i].text == "었었") {
+                let prev_text = &tokens[i - 1].text;
+                if let Some(last_char) = prev_text.chars().last() {
+                    let code = last_char as u32;
+                    if code >= 0xAC00 && code <= 0xD7A3 {
+                        let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                        if vowel == 0 || vowel == 8 {
+                            if tokens[i].text == "었" {
+                                tokens[i].text = "았".to_string();
+                            } else {
+                                tokens[i].text = "았었".to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         (tokens, best_cost)
     }
