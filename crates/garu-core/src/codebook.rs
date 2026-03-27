@@ -510,15 +510,24 @@ impl CodebookAnalyzer {
         let mut arcs: Vec<LatticeArc> = Vec::new();
         let mut covered = vec![false; n];
 
-        // Pre-process ASCII runs
+        // Pre-process ASCII runs — check dict for NNP before defaulting to SL/SN
         let ascii_runs = Self::find_ascii_runs(&chars);
-        for &(start, end, pos) in &ascii_runs {
+        for &(start, end, default_pos) in &ascii_runs {
             let surface: String = chars[start..end].iter().collect();
+            // Check if this exact surface is in the content dict (e.g., wiki NNP)
+            let entries = self.content_dict.lookup(&surface);
+            let (pos, freq) = if let Some(entry) = entries.first() {
+                let p = entry.morphemes.first().map(|m| m.pos).unwrap_or(default_pos);
+                let f = self.freq_from_score(entry.score);
+                (p, f.max(100)) // wiki entries get at least freq=100 for reasonable cost
+            } else {
+                (default_pos, 1000)
+            };
             arcs.push(LatticeArc {
                 start,
                 end,
                 morphemes: vec![(surface.clone(), pos)],
-                cost: self.get_word_cost(&surface, pos, 1000), // treat ASCII as known
+                cost: self.get_word_cost(&surface, pos, freq),
             });
             for j in start..end {
                 covered[j] = true;

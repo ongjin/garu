@@ -64,7 +64,7 @@ fn main() {
     // Encode: value = pos_byte | (quantized_freq << 8)
     let mut entries: Vec<(String, u64)> = Vec::new();
     for (word, pos, freq) in &raw_entries {
-        let qfreq = ((*freq as f64 / max_freq as f64) * 65535.0).round() as u64;
+        let qfreq = ((*freq as f64 / max_freq as f64) * 65535.0).round().max(1.0) as u64;
         let qfreq = qfreq.min(65535);
         let value = (*pos as u64) | (qfreq << 8);
         entries.push((word.clone(), value));
