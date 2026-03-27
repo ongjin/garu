@@ -114,8 +114,9 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
 
         with open(input_path, "w", encoding="utf-8") as f:
             for word in sorted_words:
-                tag, _freq = best[word]
-                f.write(f"{word}\t{pos_byte(tag)}\n")
+                tag, freq = best[word]
+                pb = pos_byte(tag) if isinstance(tag, str) else tag
+                f.write(f"{word}\t{pb}\t{freq}\n")
 
         # Run build-dict from repo root
         result = subprocess.run(

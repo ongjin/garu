@@ -39,6 +39,32 @@ impl TrieNode {
     }
 }
 
+// ---- FST value decoding ----
+
+/// Decode FST u64 value into (Pos, score).
+/// Encoding: value = pos_byte | (quantized_freq << 8)
+/// where quantized_freq is u16 (0-65535), log-scaled.
+fn decode_fst_value(value: u64) -> (Pos, f32) {
+    let pos_byte = (value & 0xFF) as u8;
+    let qfreq = ((value >> 8) & 0xFFFF) as u16;
+
+    let pos: Pos = if pos_byte <= 41 {
+        unsafe { std::mem::transmute(pos_byte) }
+    } else {
+        Pos::NNP
+    };
+
+    // Reconstruct score: -ln(qfreq / 65535)
+    // qfreq=65535 → score≈0 (most frequent), qfreq=1 → score≈11.09, qfreq=0 → score=15.0
+    let score = if qfreq > 0 {
+        -(qfreq as f32 / 65535.0).ln()
+    } else {
+        15.0 // very rare / unknown (backward compat with old FST that has no freq)
+    };
+
+    (pos, score)
+}
+
 // ---- Dict with dual backend ----
 
 const MAGIC: &[u8; 4] = b"GARU";
@@ -104,15 +130,11 @@ impl Dict {
             }
             DictBackend::Fst { map } => {
                 match map.get(word.as_bytes()) {
-                    Some(pos_byte) => {
-                        let pos: Pos = if (pos_byte as u8) <= 41 {
-                            unsafe { std::mem::transmute(pos_byte as u8) }
-                        } else {
-                            Pos::NNP
-                        };
+                    Some(value) => {
+                        let (pos, score) = decode_fst_value(value);
                         vec![DictEntry {
                             morphemes: vec![Morpheme { text: word.to_string(), pos }],
-                            score: 1.0,
+                            score,
                         }]
                     }
                     None => vec![],
@@ -150,16 +172,12 @@ impl Dict {
                 let mut byte_pos = 0;
                 for ch in text.chars() {
                     byte_pos += ch.len_utf8();
-                    if let Some(pos_byte) = map.get(&bytes[..byte_pos]) {
-                        let pos: Pos = if (pos_byte as u8) <= 41 {
-                            unsafe { std::mem::transmute(pos_byte as u8) }
-                        } else {
-                            Pos::NNP
-                        };
+                    if let Some(value) = map.get(&bytes[..byte_pos]) {
+                        let (pos, score) = decode_fst_value(value);
                         let surface = std::str::from_utf8(&bytes[..byte_pos]).unwrap_or("");
                         results.push((byte_pos, vec![DictEntry {
                             morphemes: vec![Morpheme { text: surface.to_string(), pos }],
-                            score: 1.0,
+                            score,
                         }]));
                     }
                 }
