@@ -73,35 +73,38 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     if max_freq == 0:
         max_freq = 1
 
-    # Load wiki NNP titles
+    # Load wiki NNP titles (English + Korean proper nouns)
     wiki_path = ROOT / "training" / "kowiki-titles.gz"
-    nnp_byte = pos_byte("NNP")  # = 1
-    wiki_count = 0
+    wiki_ascii = 0
+    wiki_korean = 0
     if wiki_path.exists():
         with gzip.open(wiki_path, "rt", encoding="utf-8") as f:
             for line in f:
                 title = line.strip()
                 if not title or title == "page_title":
                     continue
-                # Clean: replace underscores with spaces, then take as-is
                 title = title.replace("_", " ")
-                # Skip if too long or too short
-                if len(title) < 2 or len(title) > 50:
+                # Remove parenthetical suffixes: "서울 (도시)" → "서울"
+                if "(" in title:
+                    title = title[:title.index("(")].strip()
+                if len(title) < 2 or any(c in title for c in "\t\n\r\x00"):
                     continue
-                # Only keep pure-ASCII titles (English proper nouns)
-                # Mixed Korean+English titles bloat the FST significantly
-                if not all(c.isascii() for c in title):
+                # Don't overwrite content dict entries
+                if title in best:
                     continue
-                if not any(c.isalpha() for c in title):
-                    continue
-                # Skip titles with problematic chars
-                if any(c in title for c in '\t\n\r\x00'):
-                    continue
-                # Don't overwrite content dict entries (they have better POS)
-                if title not in best:
-                    best[title] = ("NNP", 1)
-                    wiki_count += 1
-        print(f"  Wiki NNP entries added: {wiki_count:,}")
+
+                # Type A: Pure ASCII (English proper nouns) — up to 50 chars
+                if all(c.isascii() for c in title) and any(c.isalpha() for c in title):
+                    if len(title) <= 50:
+                        best[title] = ("NNP", 1)
+                        wiki_ascii += 1
+                # Type B: Pure Korean, single word, 3-4 chars (person/place names)
+                # Skip 2-char titles — too many collide with common words (나는, 하다, etc.)
+                elif " " not in title and 3 <= len(title) <= 4:
+                    if all("\uAC00" <= c <= "\uD7A3" for c in title):
+                        best[title] = ("NNP", 1)
+                        wiki_korean += 1
+        print(f"  Wiki NNP added: {wiki_ascii:,} ASCII + {wiki_korean:,} Korean = {wiki_ascii+wiki_korean:,} total")
     else:
         print(f"  Warning: {wiki_path} not found, skipping wiki NNP")
 
