@@ -99,7 +99,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                         best[title] = ("NNP", 1)
                         wiki_ascii += 1
                 # Type B: Pure Korean, single word, 3-4 chars (person/place names)
-                # Skip 2-char titles — too many collide with common words (나는, 하다, etc.)
+                # Skip 2-char titles — too many collide with common words
                 elif " " not in title and 3 <= len(title) <= 4:
                     if all("\uAC00" <= c <= "\uD7A3" for c in title):
                         best[title] = ("NNP", 1)
@@ -108,9 +108,9 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     else:
         print(f"  Warning: {wiki_path} not found, skipping wiki NNP")
 
-    # Remove single-char NOUN entries that conflict with suffix codebook.
-    # Only remove NNG/NNP/NNB (nouns) — keep NP, VV, VA, VX, VCP etc.
-    # E.g., remove 을(NNG) conflicting with 을(JKO), but keep 나(NP), 가(VV).
+    # Remove content dict entries that conflict with suffix codebook.
+    # This prevents low-freq nouns (배가/NNG, 긴/NNP, etc.) from blocking
+    # correct morpheme analysis (배+가, 길+ᆫ).
     REMOVABLE_POS = {"NNG", "NNP", "NNB", "MM", "MAG", "IC"}
     FUNC_POS_SET = {"JKS","JKC","JKG","JKO","JKB","JKV","JKQ","JX","JC",
                     "EP","EF","EC","ETN","ETM","XPN","XSN","XSV","XSA"}
@@ -119,21 +119,29 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         cb = json.load(open(codebook_path))
         removed = 0
         for word in list(best.keys()):
-            if len(word) != 1 or word not in cb:
+            if word not in cb:
                 continue
             content_tag, content_freq = best[word]
             # Only remove nouns/adverbs — never remove pronouns, verbs, copulas
             if content_tag not in REMOVABLE_POS:
                 continue
-            max_func_freq = max(
-                (a["freq"] for a in cb[word]
-                 if (a["morphemes"][0][1] if isinstance(a["morphemes"][0], list) else a["morphemes"][0]) in FUNC_POS_SET),
-                default=0,
-            )
-            if max_func_freq > content_freq * 10:
+            # Check if ANY analysis has at least one functional morpheme
+            max_func_freq = 0
+            for a in cb[word]:
+                has_func = False
+                for m in a["morphemes"]:
+                    mpos = m[1] if isinstance(m, list) else m
+                    if mpos in FUNC_POS_SET:
+                        has_func = True
+                        break
+                if has_func and a["freq"] > max_func_freq:
+                    max_func_freq = a["freq"]
+            # Remove if suffix is significantly more common than content entry
+            threshold = 10
+            if max_func_freq > content_freq * threshold:
                 del best[word]
                 removed += 1
-        print(f"  Removed {removed} single-char noun entries conflicting with suffix codebook")
+        print(f"  Removed {removed} entries conflicting with suffix codebook")
 
     # Sort by UTF-8 bytes and write temp input for build-dict
     sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
