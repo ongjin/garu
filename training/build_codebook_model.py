@@ -172,6 +172,299 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
 MIN_SUFFIX_FREQ = 75
 
 
+def decompose_hangul(ch):
+    """Decompose Hangul syllable -> (lead, vowel, tail) indices."""
+    code = ord(ch) - 0xAC00
+    if code < 0 or code > 11171:
+        return None
+    return (code // (21 * 28), (code % (21 * 28)) // 28, code % 28)
+
+
+def compose_hangul(lead, vowel, tail=0):
+    """Compose Hangul syllable from (lead, vowel, tail) indices."""
+    return chr(0xAC00 + lead * 21 * 28 + vowel * 28 + tail)
+
+
+# Tail consonant indices
+TAIL_NONE = 0; TAIL_BIEUP = 17; TAIL_DIGEUT = 7; TAIL_RIEUL = 8
+TAIL_HIEUT = 27; TAIL_SIOT = 19
+# Vowel indices
+V_A = 0; V_AE = 1; V_EO = 4; V_E = 5; V_O = 8; V_WA = 9; V_WEO = 14
+V_U = 13; V_EU = 18; V_I = 20
+# Lead consonant indices (for reference)
+L_RIEUL = 5
+
+# Known irregular ㄷ stems
+IRREG_DIGEUT_STEMS = {"걷", "듣", "묻", "싣", "깨닫", "일컫", "걷잡"}
+# Known irregular ㅎ stems (VA only)
+IRREG_HIEUT_STEMS = {"빨갛", "파랗", "노랗", "하얗", "까맣", "그렇", "이렇",
+                      "저렇", "어떻", "아무렇", "누렇", "허옇", "시뻘겋",
+                      "뻘겋", "벌겋", "발갛", "새빨갛", "시퍼렇", "퍼렇"}
+
+# Suffixes to generate: (suffix_str, list_of_pos_tags)
+# The first element of the suffix is what attaches directly to the stem
+SUFFIX_COMBOS = [
+    ("어", ["EC"]),
+    ("어서", ["EC"]),
+    ("었", ["EP"]),
+    ("었다", ["EP", "EF"]),
+    ("은", ["ETM"]),
+    ("을", ["ETM"]),
+    ("으니", ["EC"]),
+    ("으면", ["EC"]),
+]
+
+
+def _make_suffix_morphemes(suffix_str, suffix_tags):
+    """Break suffix string into morpheme pairs based on tags.
+
+    For single-tag suffixes like ("어서", ["EC"]), return [["어서", "EC"]].
+    For multi-tag like ("었다", ["EP", "EF"]), return [["었", "EP"], ["다", "EF"]].
+    """
+    if len(suffix_tags) == 1:
+        return [[suffix_str, suffix_tags[0]]]
+    # Multi-tag: first morpheme is first char, rest mapped to remaining tags
+    # "었다" -> [["었","EP"],["다","EF"]]
+    result = [[suffix_str[0], suffix_tags[0]]]
+    remaining = suffix_str[1:]
+    for i, tag in enumerate(suffix_tags[1:]):
+        if i < len(remaining):
+            result.append([remaining[i:] if i == len(suffix_tags) - 2 else remaining[i], tag])
+    return result
+
+
+def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> dict:
+    """Add irregular verb/adjective conjugation forms to the codebook.
+
+    Reads stems from content_dict.txt, applies Korean irregular conjugation
+    rules, and adds generated surface forms to the codebook.
+    """
+    # Read stems from content_dict
+    stems = {}  # {stem_str: (pos, freq)}
+    with open(content_dict_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            word, tag, freq_str = parts[0], parts[1], parts[2]
+            if tag not in ("VA", "VV"):
+                continue
+            freq = int(freq_str)
+            if word not in stems or freq > stems[word][1]:
+                stems[word] = (tag, freq)
+
+    added = 0
+
+    def add_entry(surface, stem_form, stem_pos, suffix_str, suffix_tags, stem_freq):
+        """Add a codebook entry or boost freq of existing matching analysis."""
+        nonlocal added
+        morphemes = [[stem_form, stem_pos]]
+        morphemes.extend(_make_suffix_morphemes(suffix_str, suffix_tags))
+        freq = max(stem_freq, 100)
+
+        if surface not in codebook:
+            codebook[surface] = [{"morphemes": morphemes, "freq": freq}]
+            added += 1
+        else:
+            # Check if this exact analysis already exists
+            new_key = tuple(tuple(m) for m in morphemes)
+            found = False
+            for a in codebook[surface]:
+                existing_key = tuple(tuple(m) for m in a["morphemes"])
+                if existing_key == new_key:
+                    # Boost freq if our generated freq is higher
+                    if freq > a["freq"]:
+                        a["freq"] = freq
+                    found = True
+                    break
+            if not found:
+                codebook[surface].append({"morphemes": morphemes, "freq": freq})
+                added += 1
+
+    def is_bright_vowel(vowel_idx):
+        """Check if vowel is 'bright' (양성모음: ㅏ, ㅗ, ㅘ)."""
+        return vowel_idx in (V_A, V_O, V_WA)
+
+    for stem, (pos, freq) in stems.items():
+        if len(stem) < 1:
+            continue
+        last_ch = stem[-1]
+        dec = decompose_hangul(last_ch)
+        if dec is None:
+            continue
+        lead, vowel, tail = dec
+
+        # === ㅂ불규칙 (VA only, stem ends in ㅂ) ===
+        if pos == "VA" and tail == TAIL_BIEUP:
+            # Remove ㅂ from last syllable
+            stem_base = stem[:-1] + compose_hangul(lead, vowel, TAIL_NONE)
+            stem_form = stem  # dictionary form of the stem
+
+            for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                first_suffix_ch = suffix_str[0]
+                if first_suffix_ch in ("어", "아"):
+                    # ㅂ -> 우 + 어/아 -> 워/와
+                    # Most ㅂ-irregular use 워 (ㅂ+어→워)
+                    conj_char = "워"
+                    rest = suffix_str[1:]
+                    surface = stem_base + conj_char + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "은":
+                    # ㅂ -> 우 + ㄴ -> 운
+                    surface = stem_base + "운"
+                    if len(suffix_str) > 1:
+                        surface += suffix_str[1:]
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "을":
+                    # ㅂ -> 울
+                    surface = stem_base + "울"
+                    if len(suffix_str) > 1:
+                        surface += suffix_str[1:]
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "으":
+                    # ㅂ -> 우 + 으 contracts: 우면, 우니
+                    rest = suffix_str[1:]
+                    surface = stem_base + "우" + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+        # === ㄷ불규칙 (known irregular ㄷ stems) ===
+        elif tail == TAIL_DIGEUT and stem in IRREG_DIGEUT_STEMS:
+            # ㄷ -> ㄹ before vowel suffixes
+            stem_with_rieul = stem[:-1] + compose_hangul(lead, vowel, TAIL_RIEUL)
+            stem_form = stem
+
+            for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                first_suffix_ch = suffix_str[0]
+                if first_suffix_ch in ("어", "아"):
+                    surface = stem_with_rieul + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch in ("은", "을"):
+                    surface = stem_with_rieul + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "으":
+                    # ㄹ tail + 으 -> ㄹ contracts: 걸으니 -> valid
+                    surface = stem_with_rieul + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+        # === 르불규칙 (stem ends in 르) ===
+        elif len(stem) >= 2 and tail == TAIL_NONE and vowel == V_EU and lead == L_RIEUL:
+            prev_ch = stem[-2]
+            prev_dec = decompose_hangul(prev_ch)
+            if prev_dec and prev_dec[2] == TAIL_NONE:
+                # Add ㄹ to previous syllable's tail
+                prev_with_rieul = compose_hangul(prev_dec[0], prev_dec[1], TAIL_RIEUL)
+                stem_prefix = stem[:-2] + prev_with_rieul
+                stem_form = stem
+
+                # Determine 러 vs 라 based on previous vowel
+                use_ra = is_bright_vowel(prev_dec[1])
+
+                for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                    first_suffix_ch = suffix_str[0]
+                    if first_suffix_ch in ("어", "아"):
+                        conj_ch = "라" if use_ra else "러"
+                        rest = suffix_str[1:]
+                        surface = stem_prefix + conj_ch + rest
+                        add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                    elif first_suffix_ch == "었":
+                        conj_ch = "랐" if use_ra else "렀"
+                        rest = suffix_str[1:]
+                        surface = stem_prefix + conj_ch + rest
+                        add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                    elif first_suffix_ch in ("은", "을", "으"):
+                        # 르 + 은/을/으 -> regular: 흐르 + 는 etc.
+                        # Actually 르 stems: 흐른 (흐르+ㄴ), treat as regular
+                        surface = stem + suffix_str
+                        add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+        # === ㅡ탈락 (stem vowel ㅡ, no tail) ===
+        elif tail == TAIL_NONE and vowel == V_EU and lead != L_RIEUL:
+            stem_form = stem
+            # Determine 아 vs 어 based on previous syllable
+            if len(stem) >= 2:
+                prev_ch = stem[-2]
+                prev_dec = decompose_hangul(prev_ch)
+                use_a = prev_dec and is_bright_vowel(prev_dec[1])
+            else:
+                use_a = False
+
+            for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                first_suffix_ch = suffix_str[0]
+                if first_suffix_ch in ("어", "아"):
+                    # ㅡ drops, lead consonant attaches to 아/어
+                    attach_vowel = V_A if use_a else V_EO
+                    new_ch = compose_hangul(lead, attach_vowel, TAIL_NONE)
+                    rest = suffix_str[1:]
+                    if len(stem) >= 2:
+                        surface = stem[:-1] + new_ch + rest
+                    else:
+                        surface = new_ch + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "었":
+                    attach_vowel = V_A if use_a else V_EO
+                    # 았/었 merges: lead + 아/어 + ㅆ tail
+                    new_ch = compose_hangul(lead, attach_vowel, TAIL_NONE)
+                    rest = suffix_str[1:]
+                    if len(stem) >= 2:
+                        surface = stem[:-1] + new_ch + suffix_str
+                    else:
+                        surface = new_ch + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch in ("은", "을", "으"):
+                    surface = stem + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+        # === ㅎ불규칙 (VA only, known stems) ===
+        if pos == "VA" and tail == TAIL_HIEUT and stem in IRREG_HIEUT_STEMS:
+            # ㅎ drops
+            stem_no_hieut = stem[:-1] + compose_hangul(lead, vowel, TAIL_NONE)
+            stem_form = stem
+
+            for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                first_suffix_ch = suffix_str[0]
+                if first_suffix_ch in ("어", "아"):
+                    # ㅎ drops + 어/아 -> 애/에
+                    # If vowel is ㅏ: 빨갛+어 -> 빨개 (ㅏ+ㅎ+어 -> 애)
+                    # If vowel is ㅓ: 그렇+어 -> 그래... actually 그러+ㅎ+어 -> 그래
+                    # ㅎ-irregular: vowel becomes ㅐ (if bright) or ㅐ (for 렇 type too)
+                    new_vowel = V_AE
+                    new_ch = compose_hangul(lead, new_vowel, TAIL_NONE)
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "었":
+                    new_vowel = V_AE
+                    # 빨개 + ㅆ -> not quite; 빨갛+었 -> 빨갰
+                    new_ch = compose_hangul(lead, new_vowel, TAIL_NONE)
+                    rest = suffix_str  # 었다 etc
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "은":
+                    # ㅎ + ㄴ -> ㄴ: 빨갛+은 -> 빨간
+                    new_ch = compose_hangul(lead, vowel, 4)  # tail ㄴ=4
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "을":
+                    # ㅎ + ㄹ -> ㄹ: 빨갛+을 -> 빨갈
+                    new_ch = compose_hangul(lead, vowel, TAIL_RIEUL)
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "으":
+                    # ㅎ drops before 으: 빨갛+으면 -> 빨가면?
+                    # Actually ㅎ-irregular + 으면 -> ㅎ drops: 그렇+으면 -> 그러면
+                    rest = suffix_str[1:]
+                    surface = stem_no_hieut + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+    print(f"  Irregular conjugation augmentation: {added} new entries added")
+    return codebook
+
+
 def augment_contractions(codebook: dict) -> dict:
     """Add prefix entries derived from multi-char codebook entries.
 
@@ -288,6 +581,10 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Augment with contraction entries
     codebook = augment_contractions(codebook)
+
+    # Augment with irregular verb/adjective conjugation forms
+    content_dict_path = DATA_DIR / "content_dict.txt"
+    codebook = augment_irregular_conjugations(codebook, content_dict_path)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
