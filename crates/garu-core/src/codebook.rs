@@ -34,7 +34,10 @@ fn classify_oov_char(ch: char) -> Pos {
     match ch {
         '.' | '!' | '?' => Pos::SF,
         ',' | ';' | ':' => Pos::SP,
-        '(' | ')' | '[' | ']' | '{' | '}' | '\u{201C}' | '\u{201D}' | '\'' => Pos::SS,
+        '(' | ')' | '[' | ']' | '{' | '}' | '"' |
+        '\u{2018}' | '\u{2019}' | '\u{201C}' | '\u{201D}' |
+        '\u{3008}' | '\u{3009}' | '\u{300A}' | '\u{300B}' |
+        '\'' | '<' | '>' | '\u{2015}' | '\u{2014}' => Pos::SS,
         c if c.is_ascii_alphabetic() => Pos::SL,
         c if c.is_ascii_digit() => Pos::SN,
         c if ('\u{AC00}'..='\u{D7A3}').contains(&c) => Pos::NNG,
