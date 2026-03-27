@@ -654,15 +654,38 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
 
-    # Filter analyses by freq >= min_freq, drop surfaces with no remaining analyses
+    # Filter analyses by freq >= min_freq, drop surfaces with no remaining analyses.
+    # Exempt entries whose morphemes contain compatibility jamo (ㄱ-ㅎ, U+3131-U+314E):
+    # these are high-value grammatical endings that should be kept at a lower threshold.
+    JAMO_MIN_FREQ = 5
+
+    def _has_jamo_morpheme(analysis):
+        """Check if any morpheme form contains a jamo character.
+
+        Covers both compatibility jamo (ㄱ-ㅎ, U+3131-U+314E) and
+        Hangul Jamo trailing consonants (ᆨ-ᇂ, U+11A8-U+11C2).
+        """
+        for form, _tag in analysis["morphemes"]:
+            if any(('\u3131' <= ch <= '\u314e') or ('\u11a8' <= ch <= '\u11c2') for ch in form):
+                return True
+        return False
+
     filtered = {}
+    jamo_exempted = 0
     for surface, analyses in codebook.items():
-        kept = [a for a in analyses if a["freq"] >= min_freq]
+        kept = []
+        for a in analyses:
+            if a["freq"] >= min_freq:
+                kept.append(a)
+            elif a["freq"] >= JAMO_MIN_FREQ and _has_jamo_morpheme(a):
+                kept.append(a)
+                jamo_exempted += 1
         if kept:
             filtered[surface] = kept
 
     total_after = sum(len(analyses) for analyses in filtered.values())
     print(f"  Suffix filter: {total_before:,} → {total_after:,} entries (freq >= {min_freq})")
+    print(f"    Jamo-exempted entries: {jamo_exempted} (freq >= {JAMO_MIN_FREQ})")
 
     # Sort entries by surface UTF-8
     sorted_surfaces = sorted(filtered.keys(), key=lambda s: s.encode("utf-8"))
