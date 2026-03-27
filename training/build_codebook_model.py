@@ -136,6 +136,95 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
 MIN_SUFFIX_FREQ = 50
 
 
+def augment_contractions(codebook: dict) -> dict:
+    """Add single-char contracted syllable entries derived from multi-char entries,
+    plus hardcoded entries for contractions not in the data."""
+
+    # Part A: derive from existing multi-char entries
+    derived = {}  # {char: {morph_tuple: freq}}
+    content_pos = {"VV", "VA", "VX", "VCP", "VCN", "NNG", "NNP", "NNB", "NR", "NP", "MAG", "MAJ", "MM", "IC", "XR"}
+
+    for surface, analyses in codebook.items():
+        if len(surface) < 2:
+            continue
+        first_char = surface[0]
+        # Skip if first char is not Hangul
+        if not ('\uAC00' <= first_char <= '\uD7A3'):
+            continue
+        # Skip if first char already in codebook
+        if first_char in codebook:
+            continue
+
+        for a in analyses:
+            morphs = a["morphemes"]
+            if not isinstance(morphs[0], list):
+                continue
+            # Find prefix: all morphemes up to and including first EP
+            prefix = []
+            for m in morphs:
+                prefix.append(tuple(m))
+                if m[1] == "EP":
+                    break
+            # Must have at least 2 morphemes ending with EP
+            if len(prefix) < 2 or prefix[-1][1] != "EP":
+                continue
+
+            key = tuple(prefix)
+            if first_char not in derived:
+                derived[first_char] = {}
+            derived[first_char][key] = derived[first_char].get(key, 0) + a["freq"]
+
+    # Part B: hardcoded contraction table for entries not derivable from data
+    # These are contracted syllables where stem + 었/았 merge into one syllable
+    hardcoded = {
+        "셨": [[["시", "EP"], ["었", "EP"]], 10000],   # honorific past
+        "녔": [[["니", "VV"], ["었", "EP"]], 100],
+        "렸": [[["리", "VV"], ["었", "EP"]], 100],
+        "몄": [[["미", "VV"], ["었", "EP"]], 100],
+        "텄": [[["터", "VV"], ["었", "EP"]], 100],
+        "켰": [[["키", "VV"], ["었", "EP"]], 500],
+        "빴": [[["빠", "VV"], ["았", "EP"]], 100],
+        "꼈": [[["끼", "VV"], ["었", "EP"]], 100],
+        "팠": [[["파", "VV"], ["았", "EP"]], 100],
+        "잤": [[["자", "VV"], ["았", "EP"]], 500],
+        "뤘": [[["루", "VV"], ["었", "EP"]], 50],
+        "챘": [[["채", "VV"], ["었", "EP"]], 100],
+        "맸": [[["매", "VV"], ["었", "EP"]], 100],
+        "댔": [[["대", "VV"], ["었", "EP"]], 100],
+        "랐": [[["라", "VV"], ["았", "EP"]], 100],
+        "뺐": [[["빼", "VV"], ["었", "EP"]], 100],
+        "샜": [[["새", "VV"], ["었", "EP"]], 50],
+    }
+
+    # Merge into codebook
+    added = 0
+    for char, morph_freqs in derived.items():
+        if char not in codebook:
+            entries = []
+            for morph_tuple, freq in sorted(morph_freqs.items(), key=lambda x: -x[1]):
+                if freq >= 10:  # minimum threshold
+                    entries.append({"morphemes": [list(m) for m in morph_tuple], "freq": freq})
+            if entries:
+                codebook[char] = entries
+                added += 1
+
+    for char, (morphs, freq) in hardcoded.items():
+        if char not in codebook:
+            codebook[char] = [{"morphemes": morphs, "freq": freq}]
+            added += 1
+        # If it exists but doesn't have this analysis, add it
+        else:
+            existing_keys = set()
+            for a in codebook[char]:
+                existing_keys.add(tuple(tuple(m) for m in a["morphemes"]))
+            new_key = tuple(tuple(m) for m in morphs)
+            if new_key not in existing_keys:
+                codebook[char].append({"morphemes": morphs, "freq": freq})
+
+    print(f"  Contraction augmentation: {added} new entries added")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -150,6 +239,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
     """
     with open(codebook_path, "r", encoding="utf-8") as f:
         codebook = json.load(f)
+
+    # Augment with contraction entries
+    codebook = augment_contractions(codebook)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
