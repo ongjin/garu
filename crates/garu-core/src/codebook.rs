@@ -43,6 +43,34 @@ fn classify_oov_char(ch: char) -> Pos {
 }
 
 // ---------------------------------------------------------------------------
+// Jamo normalization
+// ---------------------------------------------------------------------------
+
+/// Normalize Hangul jongseong (U+11A8-U+11C2) to compatibility jamo (U+3131-U+314E).
+/// This ensures output matches the convention used by standard Korean morpheme benchmarks.
+fn normalize_jamo(s: &str) -> String {
+    s.chars().map(|c| match c {
+        '\u{11A8}' => '\u{3131}', // ᄀ → ㄱ
+        '\u{11A9}' => '\u{3132}', // ᄁ → ㄲ
+        '\u{11AB}' => '\u{3134}', // ᆫ → ㄴ
+        '\u{11AE}' => '\u{3137}', // ᆮ → ㄷ
+        '\u{11AF}' => '\u{3139}', // ᆯ → ㄹ
+        '\u{11B7}' => '\u{3141}', // ᆷ → ㅁ
+        '\u{11B8}' => '\u{3142}', // ᆸ → ㅂ
+        '\u{11BA}' => '\u{3145}', // ᆺ → ㅅ
+        '\u{11BB}' => '\u{3146}', // ᆻ → ㅆ
+        '\u{11BC}' => '\u{3147}', // ᆼ → ㅇ
+        '\u{11BD}' => '\u{3148}', // ᆽ → ㅈ
+        '\u{11BE}' => '\u{314A}', // ᆾ → ㅊ
+        '\u{11BF}' => '\u{314B}', // ᆿ → ㅋ
+        '\u{11C0}' => '\u{314C}', // ᇀ → ㅌ
+        '\u{11C1}' => '\u{314D}', // ᇁ → ㅍ
+        '\u{11C2}' => '\u{314E}', // ᇂ → ㅎ
+        other => other,
+    }).collect()
+}
+
+// ---------------------------------------------------------------------------
 // Suffix codebook types
 // ---------------------------------------------------------------------------
 
@@ -323,9 +351,10 @@ impl CodebookAnalyzer {
                     if pos + form_len > data.len() {
                         return Err("Suffix morpheme form truncated".into());
                     }
-                    let form = std::str::from_utf8(&data[pos..pos + form_len])
-                        .map_err(|e| format!("Invalid UTF-8 in suffix morpheme: {}", e))?
-                        .to_string();
+                    let form = normalize_jamo(
+                        std::str::from_utf8(&data[pos..pos + form_len])
+                            .map_err(|e| format!("Invalid UTF-8 in suffix morpheme: {}", e))?
+                    );
                     pos += form_len;
 
                     if pos >= data.len() {
@@ -840,7 +869,7 @@ impl CodebookAnalyzer {
             let arc = &arcs[arc_idx];
             for (form, pos) in &arc.morphemes {
                 tokens.push(Token {
-                    text: form.clone(),
+                    text: normalize_jamo(form),
                     pos: *pos,
                     start: arc.start,
                     end: arc.end,
@@ -889,7 +918,7 @@ impl CodebookAnalyzer {
             }
             let pos = classify_oov_char(chars[i]);
             tokens.push(Token {
-                text: chars[i].to_string(),
+                text: normalize_jamo(&chars[i].to_string()),
                 pos,
                 start: i,
                 end: i + 1,
