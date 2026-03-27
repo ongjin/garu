@@ -8,6 +8,8 @@ Usage:
 import json
 import math
 import struct
+import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -39,17 +41,15 @@ def pos_byte(tag: str) -> int:
     return POS_TO_BYTE.get(tag, 1)
 
 
-def build_content_dict_v1(dict_path: Path) -> bytes:
-    """Build Dict v1 (Trie serialization) format from content_dict.txt.
+def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
+    """Build Dict v2 (FST) format from content_dict.txt using the Rust build-dict tool.
 
-    Format matches Rust Dict::to_bytes() / Dict::from_bytes_v1():
-      GARU [4B] + version=1 [u32] + word_count [u32]
-      For each word (sorted UTF-8):
-        word_len [u16] + word_bytes + num_entries [u8]=1
-        num_morphemes [u8]=1 + text_len [u16] + text_bytes + pos [u8] + score [f32]
+    Reads content_dict.txt (word, pos_tag, freq), keeps highest-freq POS per word,
+    shells out to `cargo run --release --bin build-dict` to produce FST binary.
+    Returns (dict_bytes, max_freq).
     """
-    # Parse content dict: group entries by word
-    word_entries = {}  # {word: [(tag, freq), ...]}
+    # Parse content dict: keep highest-freq POS per word
+    best = {}  # {word: (tag, freq)}
     max_freq = 0
     with open(dict_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -63,39 +63,43 @@ def build_content_dict_v1(dict_path: Path) -> bytes:
             freq = int(freq_str)
             if freq > max_freq:
                 max_freq = freq
-            if word not in word_entries:
-                word_entries[word] = []
-            word_entries[word].append((tag, freq))
+            if word not in best or freq > best[word][1]:
+                best[word] = (tag, freq)
 
     if max_freq == 0:
         max_freq = 1
 
-    # Sort by UTF-8 bytes for reproducibility
-    sorted_words = sorted(word_entries.keys(), key=lambda w: w.encode("utf-8"))
+    # Sort by UTF-8 bytes and write temp input for build-dict
+    sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
 
-    buf = bytearray()
-    buf.extend(b"GARU")
-    buf.extend(struct.pack("<I", 1))  # version 1
-    buf.extend(struct.pack("<I", len(sorted_words)))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / "dict_input.txt"
+        output_path = Path(tmpdir) / "dict_output.bin"
 
-    for word in sorted_words:
-        entries = word_entries[word]
-        word_bytes = word.encode("utf-8")
-        buf.extend(struct.pack("<H", len(word_bytes)))
-        buf.extend(word_bytes)
-        buf.extend(struct.pack("B", len(entries)))  # num_entries
+        with open(input_path, "w", encoding="utf-8") as f:
+            for word in sorted_words:
+                tag, _freq = best[word]
+                f.write(f"{word}\t{pos_byte(tag)}\n")
 
-        for tag, freq in entries:
-            buf.extend(struct.pack("B", 1))  # num_morphemes = 1
-            # morpheme text = word itself
-            buf.extend(struct.pack("<H", len(word_bytes)))
-            buf.extend(word_bytes)
-            buf.extend(struct.pack("B", pos_byte(tag)))
-            # score = -log(freq / max_freq), clamped >= 0
-            score = -math.log(max(freq, 1) / max_freq) if freq < max_freq else 0.0
-            buf.extend(struct.pack("<f", score))
+        # Run build-dict from repo root
+        result = subprocess.run(
+            ["cargo", "run", "--release", "--bin", "build-dict", "--",
+             str(input_path), str(output_path)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("build-dict stderr:", result.stderr)
+            raise RuntimeError(f"build-dict failed with code {result.returncode}")
 
-    return bytes(buf), max_freq
+        # Print build-dict info
+        for line in result.stderr.strip().splitlines():
+            print(f"  [build-dict] {line}")
+
+        dict_bytes = output_path.read_bytes()
+
+    return dict_bytes, max_freq
 
 
 def build_suffix_codebook(codebook_path: Path) -> tuple[bytes, int]:
@@ -219,9 +223,9 @@ def main():
     print(f"  Output: {OUT_PATH}")
     print()
 
-    # Section 6: Content dict (Dict v1 format)
-    print("Building content dict (Dict v1)...")
-    dict_data, max_freq = build_content_dict_v1(DATA_DIR / "content_dict.txt")
+    # Section 6: Content dict (Dict v2 FST format)
+    print("Building content dict (Dict v2 FST)...")
+    dict_data, max_freq = build_content_dict_fst(DATA_DIR / "content_dict.txt")
     print(f"  Content dict: {len(dict_data):,} bytes, max_freq={max_freq}")
 
     # Section 7: Suffix codebook
