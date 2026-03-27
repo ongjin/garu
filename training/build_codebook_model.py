@@ -572,6 +572,60 @@ def augment_contractions(codebook: dict) -> dict:
     return codebook
 
 
+def augment_jamo_suffixes(codebook: dict) -> dict:
+    """Add standalone jamo-initial suffix patterns to the codebook.
+
+    Korean morpheme analysis often requires splitting a syllable's tail consonant
+    (받침) from the stem. For example, "온다" = 오/VV + ㄴ다/EF. These jamo-initial
+    suffix patterns must exist in the codebook for correct analysis.
+    """
+    JAMO_SUFFIXES = {
+        "ㄴ": [{"morphemes": [["ㄴ", "ETM"]], "freq": 1000000}],
+        "ㄹ": [{"morphemes": [["ㄹ", "ETM"]], "freq": 500000}],
+        "ㅂ니다": [{"morphemes": [["ㅂ니다", "EF"]], "freq": 100000}],
+        "ㅂ니까": [{"morphemes": [["ㅂ니까", "EF"]], "freq": 50000}],
+        "ㅂ시다": [{"morphemes": [["ㅂ시다", "EF"]], "freq": 10000}],
+        "ㄴ다": [{"morphemes": [["ㄴ다", "EF"]], "freq": 200000}],
+        "ㄴ다고": [{"morphemes": [["ㄴ다고", "EC"]], "freq": 50000}],
+        "ㄴ다면": [{"morphemes": [["ㄴ다면", "EC"]], "freq": 20000}],
+        "ㄴ다며": [{"morphemes": [["ㄴ다며", "EC"]], "freq": 10000}],
+        "ㄴ다는": [{"morphemes": [["ㄴ다는", "ETM"]], "freq": 30000}],
+        "ㄴ데": [{"morphemes": [["ㄴ데", "EC"]], "freq": 30000}],
+        "ㄴ지": [{"morphemes": [["ㄴ지", "EC"]], "freq": 20000}],
+        "ㄴ가": [{"morphemes": [["ㄴ가", "EF"]], "freq": 30000}],
+        "ㄹ까": [{"morphemes": [["ㄹ까", "EF"]], "freq": 20000}],
+        "ㄹ지": [{"morphemes": [["ㄹ지", "EC"]], "freq": 10000}],
+        "ㄹ수록": [{"morphemes": [["ㄹ수록", "EC"]], "freq": 10000}],
+        "ㄹ려고": [{"morphemes": [["ㄹ려고", "EC"]], "freq": 5000}],
+        "ㅁ": [{"morphemes": [["ㅁ", "ETN"]], "freq": 50000}],
+    }
+
+    added = 0
+    for surface, analyses in JAMO_SUFFIXES.items():
+        if surface not in codebook:
+            codebook[surface] = analyses
+            added += len(analyses)
+        else:
+            # Add any missing analyses
+            for a in analyses:
+                new_key = tuple(tuple(m) for m in a["morphemes"])
+                found = False
+                for existing in codebook[surface]:
+                    existing_key = tuple(tuple(m) for m in existing["morphemes"])
+                    if existing_key == new_key:
+                        # Boost freq if ours is higher
+                        if a["freq"] > existing["freq"]:
+                            existing["freq"] = a["freq"]
+                        found = True
+                        break
+                if not found:
+                    codebook[surface].append(a)
+                    added += 1
+
+    print(f"  Jamo suffix augmentation: {added} new entries added")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -593,6 +647,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
     # Augment with irregular verb/adjective conjugation forms
     content_dict_path = DATA_DIR / "content_dict.txt"
     codebook = augment_irregular_conjugations(codebook, content_dict_path)
+
+    # Augment with jamo-initial suffix patterns (ㄴ, ㄹ, ㅂ니다, etc.)
+    codebook = augment_jamo_suffixes(codebook)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
