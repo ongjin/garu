@@ -702,25 +702,8 @@ impl CodebookAnalyzer {
 
         // Forward pass
         for pos in 0..=n {
-            // Handle space pass-through
-            if pos < n && chars[pos].is_whitespace() {
-                let states: Vec<((u8, u8), f32)> = dp[pos].iter()
-                    .map(|(&state, &(cost, _))| (state, cost))
-                    .collect();
-                for (state, cost) in states {
-                    let entry = dp[pos + 1].entry(state).or_insert((f32::INFINITY, None));
-                    if cost < entry.0 {
-                        *entry = (cost, Some(Backpointer {
-                            prev_pos: pos,
-                            prev_state: state,
-                            arc_idx: None,
-                        }));
-                    }
-                }
-                continue;
-            }
-
-            // Try all arcs ending at this position
+            // Process all arcs ending at this position FIRST
+            // (arcs may end at a space position, e.g., "나는" ends where space is)
             for &arc_idx in &arcs_ending_at[pos] {
                 let arc = &arcs[arc_idx];
                 // Last morpheme POS of this arc determines new state
@@ -769,6 +752,23 @@ impl CodebookAnalyzer {
                             prev_pos: arc.start,
                             prev_state: (prev_pos, prev_prev_pos),
                             arc_idx: Some(arc_idx),
+                        }));
+                    }
+                }
+            }
+
+            // Space pass-through: propagate states across whitespace
+            if pos < n && chars[pos].is_whitespace() {
+                let states: Vec<((u8, u8), f32)> = dp[pos].iter()
+                    .map(|(&state, &(cost, _))| (state, cost))
+                    .collect();
+                for (state, cost) in states {
+                    let entry = dp[pos + 1].entry(state).or_insert((f32::INFINITY, None));
+                    if cost < entry.0 {
+                        *entry = (cost, Some(Backpointer {
+                            prev_pos: pos,
+                            prev_state: state,
+                            arc_idx: None,
                         }));
                     }
                 }
