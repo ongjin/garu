@@ -5,6 +5,7 @@ Reads codebook_data/ and produces models/codebook.gmdl in GMDL v3 binary format.
 Usage:
     python training/build_codebook_model.py
 """
+import gzip
 import json
 import math
 import struct
@@ -68,6 +69,36 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
 
     if max_freq == 0:
         max_freq = 1
+
+    # Load wiki NNP titles
+    wiki_path = ROOT / "training" / "kowiki-titles.gz"
+    nnp_byte = pos_byte("NNP")  # = 1
+    wiki_count = 0
+    if wiki_path.exists():
+        with gzip.open(wiki_path, "rt", encoding="utf-8") as f:
+            for line in f:
+                title = line.strip()
+                if not title or title == "page_title":
+                    continue
+                # Clean: replace underscores with spaces, then take as-is
+                title = title.replace("_", " ")
+                # Skip if too long or too short
+                if len(title) < 2 or len(title) > 50:
+                    continue
+                # Skip pure Korean titles (already covered by content dict)
+                # Only add titles containing at least one ASCII letter
+                if not any(c.isascii() and c.isalpha() for c in title):
+                    continue
+                # Skip titles with problematic chars
+                if any(c in title for c in '\t\n\r\x00'):
+                    continue
+                # Don't overwrite content dict entries (they have better POS)
+                if title not in best:
+                    best[title] = ("NNP", 1)
+                    wiki_count += 1
+        print(f"  Wiki NNP entries added: {wiki_count:,}")
+    else:
+        print(f"  Warning: {wiki_path} not found, skipping wiki NNP")
 
     # Sort by UTF-8 bytes and write temp input for build-dict
     sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
