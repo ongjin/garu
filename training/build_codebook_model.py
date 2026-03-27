@@ -102,7 +102,10 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     return dict_bytes, max_freq
 
 
-def build_suffix_codebook(codebook_path: Path) -> tuple[bytes, int]:
+MIN_SUFFIX_FREQ = 50
+
+
+def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
     Format:
@@ -117,15 +120,28 @@ def build_suffix_codebook(codebook_path: Path) -> tuple[bytes, int]:
     with open(codebook_path, "r", encoding="utf-8") as f:
         codebook = json.load(f)
 
+    # Count total entries before filtering
+    total_before = sum(len(analyses) for analyses in codebook.values())
+
+    # Filter analyses by freq >= min_freq, drop surfaces with no remaining analyses
+    filtered = {}
+    for surface, analyses in codebook.items():
+        kept = [a for a in analyses if a["freq"] >= min_freq]
+        if kept:
+            filtered[surface] = kept
+
+    total_after = sum(len(analyses) for analyses in filtered.values())
+    print(f"  Suffix filter: {total_before:,} → {total_after:,} entries (freq >= {min_freq})")
+
     # Sort entries by surface UTF-8
-    sorted_surfaces = sorted(codebook.keys(), key=lambda s: s.encode("utf-8"))
+    sorted_surfaces = sorted(filtered.keys(), key=lambda s: s.encode("utf-8"))
 
     max_suffix_freq = 0
     buf = bytearray()
     buf.extend(struct.pack("<I", len(sorted_surfaces)))
 
     for surface in sorted_surfaces:
-        analyses = codebook[surface]
+        analyses = filtered[surface]
         surface_bytes = surface.encode("utf-8")
         buf.extend(struct.pack("<H", len(surface_bytes)))
         buf.extend(surface_bytes)
