@@ -49,7 +49,8 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     shells out to `cargo run --release --bin build-dict` to produce FST binary.
     Returns (dict_bytes, max_freq).
     """
-    # Parse content dict: keep highest-freq POS per word
+    # Parse content dict: keep highest-freq POS per word, filter by min freq
+    MIN_CONTENT_FREQ = 5
     best = {}  # {word: (tag, freq)}
     max_freq = 0
     with open(dict_path, "r", encoding="utf-8") as f:
@@ -62,6 +63,8 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                 continue
             word, tag, freq_str = parts[0], parts[1], parts[2]
             freq = int(freq_str)
+            if freq < MIN_CONTENT_FREQ:
+                continue
             if freq > max_freq:
                 max_freq = freq
             if word not in best or freq > best[word][1]:
@@ -85,9 +88,11 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                 # Skip if too long or too short
                 if len(title) < 2 or len(title) > 50:
                     continue
-                # Skip pure Korean titles (already covered by content dict)
-                # Only add titles containing at least one ASCII letter
-                if not any(c.isascii() and c.isalpha() for c in title):
+                # Only keep pure-ASCII titles (English proper nouns)
+                # Mixed Korean+English titles bloat the FST significantly
+                if not all(c.isascii() for c in title):
+                    continue
+                if not any(c.isalpha() for c in title):
                     continue
                 # Skip titles with problematic chars
                 if any(c in title for c in '\t\n\r\x00'):
