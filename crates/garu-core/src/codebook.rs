@@ -33,7 +33,8 @@ fn is_functional_pos(pos: Pos) -> bool {
 fn classify_oov_char(ch: char) -> Pos {
     match ch {
         '.' | '!' | '?' => Pos::SF,
-        ',' | ';' | ':' => Pos::SP,
+        ',' | ';' | ':' | '\u{00B7}' => Pos::SP, // · (middle dot) = SP
+        '\u{2026}' => Pos::SE, // … (ellipsis) = SE
         '(' | ')' | '[' | ']' | '{' | '}' | '"' |
         '\u{2018}' | '\u{2019}' | '\u{201C}' | '\u{201D}' |
         '\u{3008}' | '\u{3009}' | '\u{300A}' | '\u{300B}' |
