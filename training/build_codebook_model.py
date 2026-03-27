@@ -173,42 +173,52 @@ MIN_SUFFIX_FREQ = 75
 
 
 def augment_contractions(codebook: dict) -> dict:
-    """Add single-char contracted syllable entries derived from multi-char entries,
-    plus hardcoded entries for contractions not in the data."""
+    """Add prefix entries derived from multi-char codebook entries.
 
-    # Part A: derive from existing multi-char entries
-    derived = {}  # {char: {morph_tuple: freq}}
-    content_pos = {"VV", "VA", "VX", "VCP", "VCN", "NNG", "NNP", "NNB", "NR", "NP", "MAG", "MAJ", "MM", "IC", "XR"}
+    For each multi-char entry (e.g., 걸었다 → [걸,VV][었,EP][다,EF]):
+    - Generate 1-char prefix: 걸 → [걸,VV][었,EP]  (if not in codebook)
+    - Generate 2-char prefix: 걸었 → [걸,VV][었,EP]  (if not in codebook)
+
+    Also adds hardcoded contractions for forms not derivable from data.
+    """
+
+    # Part A: derive 1-char and 2-char prefixes from multi-char entries
+    derived = {}  # {surface: {morph_tuple: freq}}
 
     for surface, analyses in codebook.items():
         if len(surface) < 2:
-            continue
-        first_char = surface[0]
-        # Skip if first char is not Hangul
-        if not ('\uAC00' <= first_char <= '\uD7A3'):
-            continue
-        # Skip if first char already in codebook
-        if first_char in codebook:
             continue
 
         for a in analyses:
             morphs = a["morphemes"]
             if not isinstance(morphs[0], list):
                 continue
-            # Find prefix: all morphemes up to and including first EP
+            # First morpheme must be content POS
+            if morphs[0][1] not in ("VV","VA","VX","VCP","VCN","NNG","NNP","NNB","NR","NP","MAG","MAJ","MM","IC","XR"):
+                continue
+            # Find prefix morphemes: all up to and including first EP
             prefix = []
             for m in morphs:
                 prefix.append(tuple(m))
                 if m[1] == "EP":
                     break
-            # Must have at least 2 morphemes ending with EP
             if len(prefix) < 2 or prefix[-1][1] != "EP":
                 continue
 
             key = tuple(prefix)
-            if first_char not in derived:
-                derived[first_char] = {}
-            derived[first_char][key] = derived[first_char].get(key, 0) + a["freq"]
+            # Generate 1-char prefix (from surface[0])
+            p1 = surface[0]
+            if '\uAC00' <= p1 <= '\uD7A3' and p1 not in codebook:
+                if p1 not in derived:
+                    derived[p1] = {}
+                derived[p1][key] = derived[p1].get(key, 0) + a["freq"]
+            # Generate 2-char prefix (from surface[:2]) for 3+ char entries
+            if len(surface) >= 3:
+                p2 = surface[:2]
+                if p2 not in codebook:
+                    if p2 not in derived:
+                        derived[p2] = {}
+                    derived[p2][key] = derived[p2].get(key, 0) + a["freq"]
 
     # Part B: hardcoded contraction table for entries not derivable from data
     # These are contracted syllables where stem + 었/았 merge into one syllable
@@ -234,14 +244,14 @@ def augment_contractions(codebook: dict) -> dict:
 
     # Merge into codebook
     added = 0
-    for char, morph_freqs in derived.items():
-        if char not in codebook:
+    for prefix_surface, morph_freqs in derived.items():
+        if prefix_surface not in codebook:
             entries = []
             for morph_tuple, freq in sorted(morph_freqs.items(), key=lambda x: -x[1]):
                 if freq >= 10:  # minimum threshold
                     entries.append({"morphemes": [list(m) for m in morph_tuple], "freq": freq})
             if entries:
-                codebook[char] = entries
+                codebook[prefix_surface] = entries
                 added += 1
 
     for char, (morphs, freq) in hardcoded.items():
