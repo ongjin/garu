@@ -36,7 +36,15 @@ SINGLE_CHAR_CONTENT_PENALTY = 4.0
 
 
 def is_pure_functional(morphemes):
-    return all(p in FUNC_POS for p in morphemes)
+    """Check if all morphemes are functional POS tags.
+    Handles both old format (list of POS strings) and new format (list of [form, pos] pairs)."""
+    for m in morphemes:
+        if isinstance(m, list) and len(m) == 2:
+            if m[1] not in FUNC_POS:
+                return False
+        elif m not in FUNC_POS:
+            return False
+    return True
 
 
 class LatticeArc:
@@ -60,6 +68,9 @@ class CodebookAnalyzer:
         self.max_freq = max(word_freqs.values()) if word_freqs else 1
         self.max_word_len = max((len(w) for w in content_dict), default=1)
         self.max_suffix_len = max((len(s) for s in suffix_codebook), default=1)
+        self.max_suffix_freq = max(
+            (a["freq"] for entries in suffix_codebook.values() for a in entries),
+            default=1)
 
     @classmethod
     def load(cls, data_dir: str) -> 'CodebookAnalyzer':
@@ -119,8 +130,11 @@ class CodebookAnalyzer:
     def get_suffix_cost(self, surface, analysis):
         freq = analysis["freq"]
         morphemes = analysis["morphemes"]
-        cost = -math.log(freq + 1)
+        cost = math.log(self.max_suffix_freq / max(freq, 1))
         cost += MORPHEME_PENALTY * len(morphemes)
+        char_len = len(surface)
+        if char_len > 1:
+            cost -= LENGTH_BONUS * (char_len - 1)
         return cost
 
     def classify_oov_char(self, ch):
@@ -189,7 +203,10 @@ class CodebookAnalyzer:
                         for analysis in self.suffix_codebook[suffix]:
                             if not is_pure_functional(analysis["morphemes"]):
                                 continue
-                            suffix_morphemes = [(suffix, p) for p in analysis["morphemes"]]
+                            if isinstance(analysis["morphemes"][0], list):
+                                suffix_morphemes = [(m[0], m[1]) for m in analysis["morphemes"]]
+                            else:
+                                suffix_morphemes = [(suffix, p) for p in analysis["morphemes"]]
                             s_cost = self.get_suffix_cost(suffix, analysis)
                             arcs_from[i].append(LatticeArc(
                                 i, s_end, morphemes + suffix_morphemes, cost + s_cost))
@@ -203,7 +220,25 @@ class CodebookAnalyzer:
                     for analysis in self.suffix_codebook[substr]:
                         if not is_pure_functional(analysis["morphemes"]):
                             continue
-                        morphemes = [(substr, p) for p in analysis["morphemes"]]
+                        if isinstance(analysis["morphemes"][0], list):
+                            morphemes = [(m[0], m[1]) for m in analysis["morphemes"]]
+                        else:
+                            morphemes = [(substr, p) for p in analysis["morphemes"]]
+                        cost = self.get_suffix_cost(substr, analysis)
+                        arcs_from[i].append(LatticeArc(i, end, morphemes, cost))
+
+            # Strategy C: Contracted forms (content+functional) from codebook
+            for end in range(i + 1, min(i + self.max_suffix_len + 1, n + 1)):
+                substr = text[i:end]
+                if ' ' in substr:
+                    break
+                if substr in self.suffix_codebook:
+                    for analysis in self.suffix_codebook[substr]:
+                        if is_pure_functional(analysis["morphemes"]):
+                            continue  # already handled in B
+                        if not isinstance(analysis["morphemes"][0], list):
+                            continue  # old format without surfaces, skip
+                        morphemes = [(m[0], m[1]) for m in analysis["morphemes"]]
                         cost = self.get_suffix_cost(substr, analysis)
                         arcs_from[i].append(LatticeArc(i, end, morphemes, cost))
 

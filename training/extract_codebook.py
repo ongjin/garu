@@ -117,7 +117,7 @@ def main():
             if pos in CONTENT_POS:
                 content_words[surface][pos] += 1
             elif pos in FUNC_POS:
-                suffix_patterns[surface][(pos,)] += 1
+                suffix_patterns[surface][((tok.form, pos),)] += 1
 
         pos_seq.append("<EOS>")
 
@@ -141,7 +141,7 @@ def main():
                 combined_surface = ""
                 while i < len(tokens) and normalize_pos(tokens[i].tag) in FUNC_POS:
                     p = normalize_pos(tokens[i].tag)
-                    func_morphemes.append(p)
+                    func_morphemes.append((tokens[i].form, p))
                     combined_surface += tokens[i].form
                     i += 1
                 if len(func_morphemes) >= 1 and combined_surface:
@@ -163,7 +163,7 @@ def main():
                 while j < len(tokens):
                     next_pos = normalize_pos(tokens[j].tag)
                     if next_pos in FUNC_POS:
-                        func_parts.append(next_pos)
+                        func_parts.append((tokens[j].form, next_pos))
                         j += 1
                     else:
                         break
@@ -173,8 +173,8 @@ def main():
                     end_char = tokens[j-1].end if j-1 < len(tokens) else tok.end
                     span_surface = sent[start_char:end_char]
                     if span_surface and len(span_surface) <= 10:
-                        all_pos = [pos] + func_parts
-                        suffix_patterns[span_surface][tuple(all_pos)] += 1
+                        all_morphs = [(tok.form, pos)] + func_parts
+                        suffix_patterns[span_surface][tuple(all_morphs)] += 1
                 i = j
             else:
                 i += 1
@@ -191,9 +191,15 @@ def main():
     codebook = {}
     for surface, analyses in suffix_patterns.items():
         entries = []
-        for pos_tuple, freq in analyses.items():
+        for morph_tuple, freq in analyses.items():
             if freq >= MIN_FREQ:
-                entries.append({"morphemes": list(pos_tuple), "freq": freq})
+                morphemes = []
+                for m in morph_tuple:
+                    if isinstance(m, tuple) and len(m) == 2:
+                        morphemes.append(list(m))  # [form, pos]
+                    else:
+                        morphemes.append([surface, m])  # fallback
+                entries.append({"morphemes": morphemes, "freq": freq})
         if entries:
             codebook[surface] = sorted(entries, key=lambda e: -e["freq"])
 
