@@ -400,15 +400,15 @@ impl CodebookAnalyzer {
     // -----------------------------------------------------------------------
 
     fn get_trigram_cost(&self, p1: u8, p2: u8, p3: u8) -> f32 {
-        // BOS sentinel uses default_cost via bigram backoff
-        if p1 == BOS || p2 == BOS {
-            if p2 == BOS {
-                return self.default_cost;
+        // Any tag outside POS range (including BOS=255) → default cost or bigram backoff
+        if p1 as usize >= NUM_POS || p2 as usize >= NUM_POS || p3 as usize >= NUM_POS {
+            // Try bigram if p2 and p3 are valid
+            if (p2 as usize) < NUM_POS && (p3 as usize) < NUM_POS {
+                let bg_idx = (p2 as usize) * NUM_POS + (p3 as usize);
+                let bg = self.bigram_costs[bg_idx];
+                return if bg != 0.0 { bg + 2.0 } else { self.default_cost + 2.0 };
             }
-            // p1 == BOS, p2 is real -> use bigram
-            let bg_idx = (p2 as usize) * NUM_POS + (p3 as usize);
-            let bg = self.bigram_costs[bg_idx];
-            return if bg != 0.0 { bg + 2.0 } else { self.default_cost + 2.0 };
+            return self.default_cost;
         }
         let idx = (p1 as usize) * NUM_POS * NUM_POS + (p2 as usize) * NUM_POS + (p3 as usize);
         let cost = self.trigram_costs[idx];
