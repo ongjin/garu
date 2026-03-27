@@ -66,7 +66,8 @@ export class Garu {
    */
   static async load(options?: LoadOptions): Promise<Garu> {
     // Dynamic import of the WASM glue module and initialise it
-    const wasmModule = await import('../../pkg/garu_wasm.js');
+    // @ts-ignore dynamic WASM import
+    const wasmModule = await import('../pkg/garu_wasm.js');
     await wasmModule.default();
 
     // Resolve model bytes

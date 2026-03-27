@@ -127,7 +127,7 @@
 <!-- Analysis -->
 <div class="card">
   <h2>Analyze</h2>
-  <textarea id="input">나는 오늘 학교에서 한국어 형태소 분석기를 만들었다.</textarea>
+  <textarea id="input">Next.js와 React를 활용한 SaaS 플랫폼을 개발하던 중, Google Cloud의 BigQuery에서 BM25 알고리즘으로 검색 성능을 최적화했다. 서울특별시 강남구에 위치한 B2B 스타트업에서 TypeScript와 Node.js 기반의 API 서버를 운영하고 있으며, GitHub Actions로 CI/CD 파이프라인을 구축했다.</textarea>
   <div class="btn-row">
     <button id="btn-analyze" class="btn-primary" disabled>Analyze</button>
     <button id="btn-bench" class="btn-secondary" disabled>Benchmark (1000x)</button>
@@ -197,7 +197,8 @@
     // We manually time download vs init by hooking into Garu.load
     // Since Garu.load bundles both, we just measure total and report it
     const tDownloadStart = performance.now();
-    garu = await Garu.load();
+    const modelUrl = '../models/codebook.gmdl';
+    garu = await Garu.load({ modelUrl });
     const tTotal = performance.now();
 
     const info = garu.modelInfo();
