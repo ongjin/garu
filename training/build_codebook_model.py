@@ -984,6 +984,16 @@ def main():
     write_section(buf, 11, ambig_data)
     write_section(buf, 12, wbigram_data)
 
+    # Section 13: Smart eojeol cache
+    ecache_path = DATA_DIR / "eojeol_cache.bin"
+    if ecache_path.exists():
+        ecache_data = ecache_path.read_bytes()
+        n_ec = int.from_bytes(ecache_data[:4], 'little')
+        print(f"  Eojeol cache: {n_ec} entries, {len(ecache_data):,} bytes")
+        write_section(buf, 13, ecache_data)
+    else:
+        print(f"  Eojeol cache: none")
+
     # Write output
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_PATH, "wb") as f:

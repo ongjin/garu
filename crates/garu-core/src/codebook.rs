@@ -166,8 +166,9 @@ pub struct CodebookAnalyzer {
     /// Word ambiguity table: word → Vec<(Pos, score)>
     ambiguity: HashMap<String, Vec<(Pos, f32)>>,
     /// Word-bigram cost bonuses: (word, prev_pos) → (target_pos, bonus)
-    /// bonus is negative (cheaper) — applied when prev_pos matches
-    word_bigrams: HashMap<String, Vec<(u8, u8, f32)>>,  // word → [(prev_pos, target_pos, bonus)]
+    word_bigrams: HashMap<String, Vec<(u8, u8, f32)>>,
+    /// Smart eojeol cache: pre-analyzed eojeol → morpheme sequence
+    eojeol_cache: HashMap<String, Vec<(String, Pos)>>,
 }
 
 impl CodebookAnalyzer {
@@ -194,6 +195,7 @@ impl CodebookAnalyzer {
         let mut section10: Option<&[u8]> = None;
         let mut section11: Option<&[u8]> = None;
         let mut section12: Option<&[u8]> = None;
+        let mut section13: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -221,6 +223,7 @@ impl CodebookAnalyzer {
                 10 => section10 = Some(section_data),
                 11 => section11 = Some(section_data),
                 12 => section12 = Some(section_data),
+                13 => section13 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
@@ -234,6 +237,7 @@ impl CodebookAnalyzer {
             section10.ok_or("Missing parameters section (10)")?,
             section11,
             section12,
+            section13,
         )
     }
 
@@ -246,6 +250,7 @@ impl CodebookAnalyzer {
         param_data: &[u8],
         ambig_data: Option<&[u8]>,
         wbigram_data: Option<&[u8]>,
+        ecache_data: Option<&[u8]>,
     ) -> Result<Self, String> {
         // Section 6: Content dict
         let content_dict = Dict::from_bytes(dict_data)?;
@@ -294,6 +299,9 @@ impl CodebookAnalyzer {
         // Parse word-bigram table (Section 12, optional)
         let word_bigrams = Self::parse_word_bigrams(wbigram_data)?;
 
+        // Parse eojeol cache (Section 13, optional)
+        let eojeol_cache = Self::parse_eojeol_cache(ecache_data)?;
+
         Ok(CodebookAnalyzer {
             suffix_entries,
             suffix_map,
@@ -311,6 +319,7 @@ impl CodebookAnalyzer {
             max_suffix_len,
             ambiguity,
             word_bigrams,
+            eojeol_cache,
         })
     }
 
@@ -584,6 +593,49 @@ impl CodebookAnalyzer {
             }
         }
         0.0
+    }
+
+    fn parse_eojeol_cache(data: Option<&[u8]>) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
+        let mut map = HashMap::new();
+        let data = match data {
+            Some(d) if d.len() >= 4 => d,
+            _ => return Ok(map),
+        };
+        let num = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad ecache count")?) as usize;
+        let mut pos = 4;
+        for _ in 0..num {
+            if pos + 2 > data.len() { break; }
+            let elen = u16::from_le_bytes(data[pos..pos+2].try_into().map_err(|_| "Bad elen")?) as usize;
+            pos += 2;
+            if pos + elen > data.len() { break; }
+            let eojeol = std::str::from_utf8(&data[pos..pos+elen])
+                .map_err(|_| "Bad UTF-8 in ecache")?.to_string();
+            pos += elen;
+            if pos >= data.len() { break; }
+            let nm = data[pos] as usize;
+            pos += 1;
+            let mut morphs = Vec::with_capacity(nm);
+            for _ in 0..nm {
+                if pos + 2 > data.len() { break; }
+                let flen = u16::from_le_bytes(data[pos..pos+2].try_into().map_err(|_| "Bad flen")?) as usize;
+                pos += 2;
+                if pos + flen + 1 > data.len() { break; }
+                let form = normalize_jamo(
+                    std::str::from_utf8(&data[pos..pos+flen]).map_err(|_| "Bad UTF-8 in ecache form")?
+                );
+                pos += flen;
+                let pos_byte = data[pos];
+                pos += 1;
+                if pos_byte <= 41 {
+                    let p: Pos = unsafe { std::mem::transmute(pos_byte) };
+                    morphs.push((form, p));
+                }
+            }
+            if !morphs.is_empty() {
+                map.insert(eojeol, morphs);
+            }
+        }
+        Ok(map)
     }
 
     fn get_trigram_cost(&self, p1: u8, p2: u8, p3: u8) -> f32 {
@@ -1383,6 +1435,69 @@ impl CodebookAnalyzer {
         }
 
         let t0 = now_ms();
+
+        // Hybrid: eojeol cache + Viterbi fallback
+        if !self.eojeol_cache.is_empty() {
+            let mut tokens = Vec::new();
+            let mut all_cached = true;
+
+            // Split by whitespace into eojeol
+            let eojeol_list: Vec<&str> = text.split_whitespace().collect();
+
+            for eojeol in &eojeol_list {
+                if let Some(cached_morphs) = self.eojeol_cache.get(*eojeol) {
+                    for (form, pos) in cached_morphs {
+                        tokens.push(Token {
+                            text: form.clone(),
+                            pos: *pos,
+                            start: 0,
+                            end: 0,
+                            score: None,
+                        });
+                    }
+                } else {
+                    all_cached = false;
+                    break;
+                }
+            }
+
+            if all_cached {
+                return AnalyzeResult {
+                    tokens,
+                    score: 0.0,
+                    elapsed_ms: now_ms() - t0,
+                };
+            }
+
+            // Partial cache: analyze each eojeol separately
+            let mut tokens = Vec::new();
+            for eojeol in &eojeol_list {
+                if let Some(cached_morphs) = self.eojeol_cache.get(*eojeol) {
+                    for (form, pos) in cached_morphs {
+                        tokens.push(Token {
+                            text: form.clone(),
+                            pos: *pos,
+                            start: 0,
+                            end: 0,
+                            score: None,
+                        });
+                    }
+                } else {
+                    // Viterbi fallback for this eojeol
+                    let arcs = self.build_lattice(eojeol);
+                    let (mut eojeol_tokens, _) = self.viterbi(eojeol, &arcs);
+                    tokens.append(&mut eojeol_tokens);
+                }
+            }
+
+            return AnalyzeResult {
+                tokens,
+                score: 0.0,
+                elapsed_ms: now_ms() - t0,
+            };
+        }
+
+        // No cache: full Viterbi
         let arcs = self.build_lattice(text);
         let (tokens, score) = self.viterbi(text, &arcs);
 
