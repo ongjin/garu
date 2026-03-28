@@ -2,9 +2,19 @@ target/
 node_modules/
 dist/
 pkg/
-models/*.bin
-training/__pycache__/
+*.pyc
+__pycache__/
+.DS_Store
+
+# Training artifacts (large files, not needed for usage)
 training/*.jsonl
 training/checkpoints/
-*.pyc
-.DS_Store
+training/codebook_data/
+training/codebook_data_backup/
+training/charmodel/
+training/data.parquet
+training/kowikitext.txt
+training/error_analysis_results.json
+
+# Internal docs
+docs/superpowers/
