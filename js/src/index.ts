@@ -38,7 +38,7 @@ export interface ModelInfo {
 }
 
 const DEFAULT_MODEL_URL =
-  'https://cdn.jsdelivr.net/npm/garu@latest/models/base.gmdl';
+  new URL('../models/base.gmdl', import.meta.url).href;
 
 const EMPTY_RESULT: AnalyzeResult = Object.freeze({
   tokens: [],
@@ -138,7 +138,7 @@ export class Garu {
     return {
       version: this._wasm.constructor.version(),
       size: this._modelSize,
-      accuracy: 0.8,
+      accuracy: 0.938,
     };
   }
 

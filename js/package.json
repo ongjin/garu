@@ -1,11 +1,11 @@
 {
   "name": "garu",
   "version": "0.1.0",
-  "description": "Ultra-lightweight Korean morphological analyzer for the web (~5MB)",
+  "description": "Ultra-lightweight Korean morphological analyzer for the web (2.1MB, F1 93.8%)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "pkg"],
+  "files": ["dist", "pkg", "models"],
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/garu-wasm --target web --out-dir ../../js/pkg",
     "build:js": "tsc",
