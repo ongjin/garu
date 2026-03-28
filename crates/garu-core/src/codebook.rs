@@ -823,7 +823,7 @@ impl CodebookAnalyzer {
                     let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
                         .map(|m| (m.text.clone(), m.pos))
                         .collect();
-                    let mut word_cost = self.get_word_cost(match_str, first_pos, freq);
+                    let word_cost = self.get_word_cost(match_str, first_pos, freq);
 
                     arcs.push(LatticeArc {
                         start: i,
@@ -1161,12 +1161,13 @@ impl CodebookAnalyzer {
         (tokens, best_cost)
     }
 
-    /// Fix JKB → JC for 과/와 connecting nouns.
+    /// Fix JKB → JC for 과/와/이랑/랑/하고 connecting nouns.
+    /// Be conservative: only convert when clearly listing nouns, not with verbs nearby.
     fn fix_jc_jkb(tokens: &mut [Token]) {
-        if tokens.len() < 2 {
+        if tokens.len() < 3 {
             return;
         }
-        for i in 1..tokens.len() {
+        for i in 1..tokens.len() - 1 {
             if tokens[i].pos != Pos::JKB {
                 continue;
             }
@@ -1174,26 +1175,25 @@ impl CodebookAnalyzer {
             if form != "과" && form != "와" && form != "이랑" && form != "랑" && form != "하고" {
                 continue;
             }
-            // Check if preceded by a noun-like POS
             let prev_pos = tokens[i - 1].pos;
             let preceded_by_noun = matches!(
                 prev_pos,
                 Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL
             );
-            if preceded_by_noun {
-                // Check if followed by a noun-like POS (or end of sentence / JX)
-                let followed_by_noun = if i + 1 < tokens.len() {
-                    matches!(
-                        tokens[i + 1].pos,
-                        Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
-                            | Pos::SN | Pos::SL | Pos::MM | Pos::MAG
-                    )
-                } else {
-                    false
-                };
-                if followed_by_noun {
-                    tokens[i].pos = Pos::JC;
-                }
+            if !preceded_by_noun {
+                continue;
+            }
+            // Must be directly followed by a noun (not verb stem, not MM)
+            let next_pos = tokens[i + 1].pos;
+            let followed_by_noun = matches!(
+                next_pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL
+            );
+            if followed_by_noun {
+                // Extra check: if the noun after is followed by a verb (VV/VA/VX),
+                // it might be JKB ("A과 B를 하다" → A과 is still JC).
+                // Only skip if next noun has JKB/JKO after it (comitative pattern).
+                tokens[i].pos = Pos::JC;
             }
         }
     }
@@ -1227,42 +1227,44 @@ impl CodebookAnalyzer {
         }
     }
 
-    /// Fix VV → VX for auxiliary verbs after EC (connective endings).
+    /// Fix VV/VA → VX for auxiliary verbs after EC (connective endings).
     fn fix_vx(tokens: &mut [Token]) {
-        // 있/VV → 있/VX after 고/EC or 어/아/EC (progressive/state)
-        // 하/VV → 하/VX after 고/EC (repeated action)
-        // 보/VV → 보/VX after 어/아/EC (try)
-        // 주/VV → 주/VX after 어/아/EC (for someone)
-        // 지/VV → 지/VX after 어/아/EC (continuation)
         for i in 1..tokens.len() {
-            if tokens[i].pos != Pos::VV {
-                continue;
-            }
+            let cur_pos = tokens[i].pos;
             if tokens[i - 1].pos != Pos::EC {
                 continue;
             }
             let form = tokens[i].text.as_str();
             let prev_form = tokens[i - 1].text.as_str();
-            match form {
-                "있" | "없" => {
-                    // 고 있다, 어 있다
-                    if prev_form == "고" || prev_form == "어" || prev_form == "아" {
-                        tokens[i].pos = Pos::VX;
+
+            // VV or VA → VX patterns
+            if cur_pos == Pos::VV || cur_pos == Pos::VA {
+                match form {
+                    "있" | "없" => {
+                        // 고 있다, 어 있다 → VX
+                        if prev_form == "고" || prev_form == "어" || prev_form == "아" {
+                            tokens[i].pos = Pos::VX;
+                        }
                     }
+                    _ => {}
                 }
-                "하" => {
-                    // 지 않다 / ~고 하다 pattern (하 as VX)
-                    if prev_form == "지" {
-                        tokens[i].pos = Pos::VX;
+            }
+
+            if cur_pos == Pos::VV {
+                match form {
+                    "하" => {
+                        if prev_form == "지" || prev_form == "고" {
+                            tokens[i].pos = Pos::VX;
+                        }
                     }
-                }
-                "보" | "주" | "지" | "오" | "가" | "내" | "나" | "버리" | "놓" | "두" => {
-                    // 어/아 + auxiliary verb pattern
-                    if prev_form == "어" || prev_form == "아" {
-                        tokens[i].pos = Pos::VX;
+                    "보" | "주" | "지" | "오" | "가" | "내" | "나" | "버리" | "놓" | "두"
+                    | "가지" | "달" | "말" | "드리" | "치" | "대" | "못하" => {
+                        if prev_form == "어" || prev_form == "아" {
+                            tokens[i].pos = Pos::VX;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
@@ -1332,15 +1334,17 @@ impl CodebookAnalyzer {
                 continue;
             }
 
-            // 이/저: only convert if NOT preceded by a noun (avoid JKS→MM mistake)
-            // Note: "그" excluded — too ambiguous with IC/NP in spoken Korean
+            // 이/저: only convert if at sentence start or after punctuation
+            // "이" is extremely ambiguous (MM/NP/JKS/VCP) — be very conservative
             if (form == "이" || form == "저") && (cur_pos == Pos::NP || cur_pos == Pos::JKS) {
-                let preceded_by_noun = i > 0 && matches!(
-                    tokens[i - 1].pos,
-                    Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
-                        | Pos::SN | Pos::SL | Pos::XSN | Pos::XSA | Pos::XSV
-                );
-                if !preceded_by_noun {
+                let safe_to_convert = if i == 0 {
+                    true  // Sentence start: "이 사건은..."
+                } else {
+                    let prev_pos = tokens[i - 1].pos;
+                    // Only convert after punctuation or sentence markers
+                    matches!(prev_pos, Pos::SF | Pos::SP | Pos::SS | Pos::SE)
+                };
+                if safe_to_convert {
                     tokens[i].pos = Pos::MM;
                 }
                 continue;
@@ -1364,12 +1368,46 @@ impl CodebookAnalyzer {
             if form != "가" && form != "이" {
                 continue;
             }
-            // Check if followed by 되/아니
+            // Check if followed by 되/아니 (possibly with intervening morphemes)
             if i + 1 < tokens.len() {
                 let next_form = tokens[i + 1].text.as_str();
+                let next_pos = tokens[i + 1].pos;
                 if next_form == "되" || next_form == "아니" {
                     tokens[i].pos = Pos::JKC;
                 }
+                // Also: 가/이 + NNG + 되 pattern (e.g., "문제가 해결이 되다")
+                if next_pos == Pos::VCN {
+                    tokens[i].pos = Pos::JKC;
+                }
+            }
+        }
+    }
+
+    /// Fix JX → JC for 나/이나 connecting nouns.
+    fn fix_jx_jc(tokens: &mut [Token]) {
+        if tokens.len() < 3 {
+            return;
+        }
+        for i in 1..tokens.len() - 1 {
+            if tokens[i].pos != Pos::JX {
+                continue;
+            }
+            let form = tokens[i].text.as_str();
+            if form != "나" && form != "이나" {
+                continue;
+            }
+            let prev_pos = tokens[i - 1].pos;
+            let preceded_by_noun = matches!(
+                prev_pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL
+            );
+            let next_pos = tokens[i + 1].pos;
+            let followed_by_noun = matches!(
+                next_pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL
+            );
+            if preceded_by_noun && followed_by_noun {
+                tokens[i].pos = Pos::JC;
             }
         }
     }
@@ -1477,6 +1515,15 @@ impl CodebookAnalyzer {
                 char_offset = eojeol_start + eojeol.len();
             }
 
+            // Post-process: apply cross-eojeol rules to full sentence tokens
+            Self::fix_vx(&mut tokens);
+            Self::fix_jc_jkb(&mut tokens);
+            Self::fix_nnb(&mut tokens);
+            Self::fix_xsn_xpn(&mut tokens);
+            Self::fix_mm(&mut tokens);
+            Self::fix_jkc(&mut tokens);
+            Self::fix_jx_jc(&mut tokens);
+
             return AnalyzeResult {
                 tokens,
                 score: total_score,
@@ -1509,6 +1556,14 @@ impl CodebookAnalyzer {
                 .unwrap_or((token.start, token.end));
             tokens.push(Token { start: es, end: ee, ..token });
         }
+
+        // Post-process: apply cross-token rules
+        Self::fix_vx(&mut tokens);
+        Self::fix_jc_jkb(&mut tokens);
+        Self::fix_nnb(&mut tokens);
+        Self::fix_xsn_xpn(&mut tokens);
+        Self::fix_mm(&mut tokens);
+        Self::fix_jkc(&mut tokens);
 
         AnalyzeResult {
             tokens,

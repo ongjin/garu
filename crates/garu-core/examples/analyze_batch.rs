@@ -4,7 +4,8 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 
 fn main() {
-    let model_data = fs::read("models/codebook.gmdl").expect("Failed to read model");
+    let model_path = std::env::var("GARU_MODEL").unwrap_or_else(|_| "models/codebook.gmdl".to_string());
+    let model_data = fs::read(&model_path).expect("Failed to read model");
     let analyzer = Analyzer::from_bytes(&model_data)
         .expect("Failed to load model");
 
