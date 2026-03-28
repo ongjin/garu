@@ -65,6 +65,9 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
             freq = int(freq_str)
             if freq < MIN_CONTENT_FREQ:
                 continue
+            # Skip punctuation/symbols in content dict — they should be handled by OOV classifier
+            if len(word) == 1 and not ('\uAC00' <= word <= '\uD7A3') and not word.isalnum():
+                continue
             if freq > max_freq:
                 max_freq = freq
             if word not in best or freq > best[word][1]:
@@ -73,40 +76,10 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     if max_freq == 0:
         max_freq = 1
 
-    # Load wiki NNP titles (English + Korean proper nouns)
-    wiki_path = ROOT / "training" / "kowiki-titles.gz"
-    wiki_ascii = 0
-    wiki_korean = 0
-    if wiki_path.exists():
-        with gzip.open(wiki_path, "rt", encoding="utf-8") as f:
-            for line in f:
-                title = line.strip()
-                if not title or title == "page_title":
-                    continue
-                title = title.replace("_", " ")
-                # Remove parenthetical suffixes: "서울 (도시)" → "서울"
-                if "(" in title:
-                    title = title[:title.index("(")].strip()
-                if len(title) < 2 or any(c in title for c in "\t\n\r\x00"):
-                    continue
-                # Don't overwrite content dict entries
-                if title in best:
-                    continue
-
-                # Type A: Pure ASCII (English proper nouns) — up to 50 chars
-                if all(c.isascii() for c in title) and any(c.isalpha() for c in title):
-                    if len(title) <= 50:
-                        best[title] = ("NNP", 1)
-                        wiki_ascii += 1
-                # Type B: Pure Korean, single word, 3-4 chars (person/place names)
-                # Skip 2-char titles — too many collide with common words
-                elif " " not in title and 3 <= len(title) <= 4:
-                    if all("\uAC00" <= c <= "\uD7A3" for c in title):
-                        best[title] = ("NNP", 1)
-                        wiki_korean += 1
-        print(f"  Wiki NNP added: {wiki_ascii:,} ASCII + {wiki_korean:,} Korean = {wiki_ascii+wiki_korean:,} total")
-    else:
-        print(f"  Warning: {wiki_path} not found, skipping wiki NNP")
+    # Wiki NNP disabled — experiments show removing wiki entries
+    # improves F1 (+0.4%p) while halving model size (4.4MB → 2.0MB).
+    # Wiki NNP entries collide with common words and suffix patterns.
+    print(f"  Wiki NNP: disabled (improves F1 and reduces size)")
 
     # Remove content dict entries that conflict with suffix codebook.
     # This prevents low-freq nouns (배가/NNG, 긴/NNP, etc.) from blocking
@@ -136,15 +109,45 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                         break
                 if has_func and a["freq"] > max_func_freq:
                     max_func_freq = a["freq"]
-            # Remove if suffix is significantly more common than content entry
-            threshold = 10
+            # Remove if suffix is more common than content entry.
+            # Aggressive for multi-char: these are almost always suffix patterns (e.g., 해서→하+어서)
+            word_len = len(word)
+            threshold = 2 if word_len >= 2 else 5
             if max_func_freq > content_freq * threshold:
                 del best[word]
                 removed += 1
         print(f"  Removed {removed} entries conflicting with suffix codebook")
 
-    # Sort by UTF-8 bytes and write temp input for build-dict
+    # Build multi-POS content dict: for ambiguous words, include top 2 POS
+    # Load NIKL word→POS distribution for secondary POS
+    nikl_word_pos = {}
+    nikl_dir = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+    NIKL_MAP_LOCAL = {'MMD':'MM','MMN':'MM','MMA':'MM','NA':'NNG','NAP':'NNG','NF':'NNG','NV':'VV'}
+    POS_SET_LOCAL = set(POS_TAGS)
+    def np_local(t):
+        if t in POS_SET_LOCAL: return t
+        if t in NIKL_MAP_LOCAL: return NIKL_MAP_LOCAL[t]
+        b = t.split('-')[0]
+        return b if b in POS_SET_LOCAL else 'SW'
+    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
+        npath = nikl_dir / fname
+        if not npath.exists(): continue
+        with open(npath) as nf:
+            ndata = json.load(nf)
+        for doc in ndata["document"]:
+            if doc is None: continue
+            for sent in (doc.get("sentence") or []):
+                for m in (sent.get("morpheme") or []):
+                    form = m.get("form", "").strip()
+                    label = np_local(m.get("label", ""))
+                    if form and label:
+                        if form not in nikl_word_pos:
+                            nikl_word_pos[form] = {}
+                        nikl_word_pos[form][label] = nikl_word_pos[form].get(label, 0) + 1
+
+    # Build input lines: word\tpos_byte\tfreq (allow duplicate words for 2nd POS)
     sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
+    dual_count = 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = Path(tmpdir) / "dict_input.txt"
@@ -155,6 +158,21 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                 tag, freq = best[word]
                 pb = pos_byte(tag) if isinstance(tag, str) else tag
                 f.write(f"{word}\t{pb}\t{freq}\n")
+
+                # Add secondary POS from NIKL if significantly different
+                if word in nikl_word_pos:
+                    total = sum(nikl_word_pos[word].values())
+                    if total >= 100:
+                        for alt_tag, alt_count in sorted(nikl_word_pos[word].items(), key=lambda x: -x[1]):
+                            if alt_tag == tag: continue
+                            alt_pct = alt_count / total
+                            if alt_pct >= 0.15:  # at least 15%
+                                alt_freq = int(alt_pct * freq)  # scale to content dict range
+                                alt_pb = pos_byte(alt_tag)
+                                f.write(f"{word}\t{alt_pb}\t{alt_freq}\n")
+                                dual_count += 1
+                                break  # only 1 secondary
+        print(f"  Dual-POS words: {dual_count}")
 
         # Run build-dict from repo root
         result = subprocess.run(
@@ -718,13 +736,17 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
 
 def build_trigram_costs(costs_path: Path) -> bytes:
-    """Build Section 8: Dense trigram cost table.
+    """Build Section 8: Sparse trigram cost table with u8 quantization.
 
-    Format:
+    Format v2 (sparse bitmap + quantized values):
       num_pos [u32] = 42
       default_cost [f32]
-      trigram_data [42*42*42 f32] — 0.0 means use bigram backoff
-      bigram_data [42*42 f32] — default_cost for missing bigrams
+      tg_min [f32], tg_max [f32]  — quantization range for trigrams
+      bg_min [f32], bg_max [f32]  — quantization range for bigrams
+      tg_bitmap [ceil(42^3/8) bytes] — 1 bit per trigram entry (1=present)
+      tg_values [N_tg u8]         — quantized costs for present entries
+      bg_bitmap [ceil(42^2/8) bytes]
+      bg_values [N_bg u8]
     """
     with open(costs_path, "r", encoding="utf-8") as f:
         costs = json.load(f)
@@ -733,38 +755,67 @@ def build_trigram_costs(costs_path: Path) -> bytes:
     trigrams = costs.get("trigram", {})
     bigrams = costs.get("bigram", {})
 
-    # Initialize arrays
-    trigram_data = [0.0] * (NUM_POS * NUM_POS * NUM_POS)
-    bigram_data = [default_cost] * (NUM_POS * NUM_POS)
+    tg_count = NUM_POS * NUM_POS * NUM_POS
+    bg_count = NUM_POS * NUM_POS
 
-    # Fill bigrams
+    # Build dense arrays first
+    tg_data = [0.0] * tg_count
+    bg_data = [0.0] * bg_count
+
     for key, cost in bigrams.items():
         parts = key.split(",")
-        if len(parts) != 2:
-            continue
-        i = POS_TO_BYTE.get(parts[0].strip())
-        j = POS_TO_BYTE.get(parts[1].strip())
+        if len(parts) != 2: continue
+        i, j = POS_TO_BYTE.get(parts[0].strip()), POS_TO_BYTE.get(parts[1].strip())
         if i is not None and j is not None:
-            bigram_data[i * NUM_POS + j] = cost
+            bg_data[i * NUM_POS + j] = cost
 
-    # Fill trigrams
     for key, cost in trigrams.items():
         parts = key.split(",")
-        if len(parts) != 3:
-            continue
-        i = POS_TO_BYTE.get(parts[0].strip())
-        j = POS_TO_BYTE.get(parts[1].strip())
-        k = POS_TO_BYTE.get(parts[2].strip())
+        if len(parts) != 3: continue
+        i, j, k = POS_TO_BYTE.get(parts[0].strip()), POS_TO_BYTE.get(parts[1].strip()), POS_TO_BYTE.get(parts[2].strip())
         if i is not None and j is not None and k is not None:
-            trigram_data[i * NUM_POS * NUM_POS + j * NUM_POS + k] = cost
+            tg_data[i * NUM_POS * NUM_POS + j * NUM_POS + k] = cost
+
+    # Compute min/max for quantization (non-zero values only)
+    tg_nz = [v for v in tg_data if v != 0.0]
+    bg_nz = [v for v in bg_data if v != 0.0]
+    tg_min = min(tg_nz) if tg_nz else 0.0
+    tg_max = max(tg_nz) if tg_nz else 1.0
+    bg_min = min(bg_nz) if bg_nz else 0.0
+    bg_max = max(bg_nz) if bg_nz else 1.0
+
+    def quantize_u8(val, vmin, vmax):
+        if vmax == vmin: return 128
+        return max(0, min(255, int((val - vmin) / (vmax - vmin) * 255 + 0.5)))
+
+    # Build bitmaps and quantized values
+    def build_sparse(data, count, vmin, vmax):
+        bitmap = bytearray((count + 7) // 8)
+        values = bytearray()
+        for idx, v in enumerate(data):
+            if v != 0.0:
+                bitmap[idx // 8] |= (1 << (idx % 8))
+                values.append(quantize_u8(v, vmin, vmax))
+        return bytes(bitmap), bytes(values)
+
+    tg_bitmap, tg_values = build_sparse(tg_data, tg_count, tg_min, tg_max)
+    bg_bitmap, bg_values = build_sparse(bg_data, bg_count, bg_min, bg_max)
 
     buf = bytearray()
     buf.extend(struct.pack("<I", NUM_POS))
     buf.extend(struct.pack("<f", default_cost))
-    for v in trigram_data:
-        buf.extend(struct.pack("<f", v))
-    for v in bigram_data:
-        buf.extend(struct.pack("<f", v))
+    buf.extend(struct.pack("<f", tg_min))
+    buf.extend(struct.pack("<f", tg_max))
+    buf.extend(struct.pack("<f", bg_min))
+    buf.extend(struct.pack("<f", bg_max))
+    buf.extend(tg_bitmap)
+    buf.extend(tg_values)
+    buf.extend(bg_bitmap)
+    buf.extend(bg_values)
+
+    n_tg = sum(1 for v in tg_data if v != 0.0)
+    n_bg = sum(1 for v in bg_data if v != 0.0)
+    print(f"  Sparse trigram: {n_tg} nonzero/{tg_count} total, {n_bg} nonzero/{bg_count} bigram")
 
     return bytes(buf)
 
@@ -777,13 +828,104 @@ def build_word_frequencies(max_freq: int, max_suffix_freq: int) -> bytes:
     return bytes(buf)
 
 
+def build_ambiguity_table(content_dict_path: Path, max_freq: int) -> bytes:
+    """Build Section 11: Word ambiguity table.
+
+    For words that have multiple POS tags in NIKL data, store alternative POS
+    entries so the lattice can consider them alongside the primary FST entry.
+
+    Format:
+      num_entries [u32]
+      For each entry:
+        word_len [u16]
+        word_utf8 [word_len bytes]
+        num_alts [u8]
+        For each alt:
+          pos_byte [u8]
+          quantized_freq [u16]  (same scale as content dict FST)
+    """
+    import math
+    from collections import defaultdict, Counter
+
+    NIKL_DIR_LOCAL = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+    POS_SET_LOCAL = set(POS_TAGS)
+    NIKL_MAP_LOCAL = {'MMD':'MM','MMN':'MM','MMA':'MM','NA':'NNG','NAP':'NNG','NF':'NNG','NV':'VV'}
+
+    def np_local(t):
+        if t in POS_SET_LOCAL: return t
+        if t in NIKL_MAP_LOCAL: return NIKL_MAP_LOCAL[t]
+        b = t.split('-')[0]
+        return b if b in POS_SET_LOCAL else 'SW'
+
+    # Count word→POS from NIKL
+    word_pos = defaultdict(Counter)
+    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
+        path = NIKL_DIR_LOCAL / fname
+        if not path.exists(): continue
+        with open(path) as f:
+            data = json.load(f)
+        for doc in data["document"]:
+            if doc is None: continue
+            for sent in (doc.get("sentence") or []):
+                for m in (sent.get("morpheme") or []):
+                    form = m.get("form", "").strip()
+                    label = np_local(m.get("label", ""))
+                    if form and label:
+                        word_pos[form][label] += 1
+
+    # Load primary POS from content dict
+    primary_pos = {}
+    with open(content_dict_path) as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) >= 3:
+                primary_pos[parts[0]] = parts[1]
+
+    # Build ambiguity entries: words where NIKL has significant alternative POS
+    entries = []
+    for word, pos_counts in word_pos.items():
+        if word not in primary_pos: continue
+        total = sum(pos_counts.values())
+        if total < 1000: continue  # Only very high-frequency words
+
+        prim = primary_pos[word]
+        alts = []
+        for pos, count in pos_counts.most_common(2):  # Top 2 only
+            if pos == prim: continue
+            pct = count / total
+            if pct < 0.25: continue  # At least 25% (very strong alternative)
+            # Scale: make alternative slightly more expensive than primary
+            # Use 10% of proportional frequency — let trigram decide
+            scaled_freq = int(pct * max_freq * 0.1)
+            qfreq = max(1, min(65535, int(math.log(max(scaled_freq, 1)) / math.log(max_freq) * 65535)))
+            alts.append((POS_TO_BYTE[pos], qfreq))
+
+        if alts:
+            entries.append((word, alts))
+
+    # Encode
+    buf = bytearray()
+    buf.extend(struct.pack("<I", len(entries)))
+    for word, alts in entries:
+        word_bytes = word.encode("utf-8")
+        buf.extend(struct.pack("<H", len(word_bytes)))
+        buf.extend(word_bytes)
+        buf.extend(struct.pack("B", len(alts)))
+        for pos_b, qfreq in alts:
+            buf.extend(struct.pack("B", pos_b))
+            buf.extend(struct.pack("<H", qfreq))
+
+    print(f"  Ambiguity table: {len(entries)} words, {sum(len(a) for _, a in entries)} alt entries")
+    return bytes(buf)
+
+
 def build_analyzer_params() -> bytes:
     """Build Section 10: Analyzer parameters."""
     buf = bytearray()
-    buf.extend(struct.pack("<f", 3.0))   # morpheme_penalty
-    buf.extend(struct.pack("<f", 15.0))  # oov_penalty
-    buf.extend(struct.pack("<f", 2.5))   # length_bonus
-    buf.extend(struct.pack("<f", 4.0))   # single_char_content_penalty
+    buf.extend(struct.pack("<f", 0.25))  # morpheme_penalty (tuned)
+    buf.extend(struct.pack("<f", 4.0))   # oov_penalty (tuned)
+    buf.extend(struct.pack("<f", 1.5))   # length_bonus (tuned)
+    buf.extend(struct.pack("<f", 3.5))   # single_char_content_penalty
     return bytes(buf)
 
 
@@ -814,6 +956,19 @@ def main():
     # Section 10: Analyzer parameters
     params_data = build_analyzer_params()
 
+    # Section 11: Word ambiguity table (disabled)
+    ambig_data = b'\x00\x00\x00\x00'
+
+    # Section 12: Word-bigram cost bonuses
+    wbigram_path = DATA_DIR / "word_bigrams.bin"
+    if wbigram_path.exists():
+        wbigram_data = wbigram_path.read_bytes()
+        n_entries = int.from_bytes(wbigram_data[:4], 'little')
+        print(f"  Word bigrams: {n_entries} entries, {len(wbigram_data)} bytes")
+    else:
+        wbigram_data = b'\x00\x00\x00\x00'
+        print(f"  Word bigrams: none")
+
     # Assemble GMDL v3
     print()
     print("Assembling GMDL v3...")
@@ -826,6 +981,8 @@ def main():
     write_section(buf, 8, trigram_data)
     write_section(buf, 9, freq_data)
     write_section(buf, 10, params_data)
+    write_section(buf, 11, ambig_data)
+    write_section(buf, 12, wbigram_data)
 
     # Write output
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

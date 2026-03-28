@@ -41,9 +41,9 @@ impl TrieNode {
 
 // ---- FST value decoding ----
 
-/// Decode FST u64 value into (Pos, score).
-/// Encoding: value = pos_byte | (quantized_freq << 8)
-/// where quantized_freq is u16 (0-65535), log-scaled.
+/// Decode FST u64 value into one or two (Pos, score) pairs.
+/// Encoding v2: value = pos1(8) | qfreq1(16) | pos2(8) | qfreq2(16) | flags(16)
+/// pos2=0xFF means no secondary entry.
 fn decode_fst_value(value: u64) -> (Pos, f32) {
     let pos_byte = (value & 0xFF) as u8;
     let qfreq = ((value >> 8) & 0xFFFF) as u16;
@@ -54,15 +54,39 @@ fn decode_fst_value(value: u64) -> (Pos, f32) {
         Pos::NNP
     };
 
-    // Reconstruct score: -ln(qfreq / 65535)
-    // qfreq=65535 → score≈0 (most frequent), qfreq=1 → score≈11.09, qfreq=0 → score=15.0
     let score = if qfreq > 0 {
         -(qfreq as f32 / 65535.0).ln()
     } else {
-        15.0 // very rare / unknown (backward compat with old FST that has no freq)
+        15.0
     };
 
     (pos, score)
+}
+
+/// Decode FST value returning all POS entries (primary + optional secondary).
+fn decode_fst_value_multi(value: u64) -> Vec<(Pos, f32)> {
+    let pos1_byte = (value & 0xFF) as u8;
+    let qfreq1 = ((value >> 8) & 0xFFFF) as u16;
+    let pos2_byte = ((value >> 24) & 0xFF) as u8;
+    let qfreq2 = ((value >> 32) & 0xFFFF) as u16;
+
+    let mut results = Vec::with_capacity(2);
+
+    // Primary
+    if pos1_byte <= 41 {
+        let pos: Pos = unsafe { std::mem::transmute(pos1_byte) };
+        let score = if qfreq1 > 0 { -(qfreq1 as f32 / 65535.0).ln() } else { 15.0 };
+        results.push((pos, score));
+    }
+
+    // Secondary (if present: pos2_byte != 0xFF and qfreq2 > 0)
+    if pos2_byte <= 41 && qfreq2 > 0 {
+        let pos: Pos = unsafe { std::mem::transmute(pos2_byte) };
+        let score = if qfreq2 > 0 { -(qfreq2 as f32 / 65535.0).ln() } else { 15.0 };
+        results.push((pos, score));
+    }
+
+    results
 }
 
 // ---- Dict with dual backend ----
@@ -131,11 +155,12 @@ impl Dict {
             DictBackend::Fst { map } => {
                 match map.get(word.as_bytes()) {
                     Some(value) => {
-                        let (pos, score) = decode_fst_value(value);
-                        vec![DictEntry {
-                            morphemes: vec![Morpheme { text: word.to_string(), pos }],
-                            score,
-                        }]
+                        decode_fst_value_multi(value).into_iter().map(|(pos, score)| {
+                            DictEntry {
+                                morphemes: vec![Morpheme { text: word.to_string(), pos }],
+                                score,
+                            }
+                        }).collect()
                     }
                     None => vec![],
                 }
@@ -173,12 +198,17 @@ impl Dict {
                 for ch in text.chars() {
                     byte_pos += ch.len_utf8();
                     if let Some(value) = map.get(&bytes[..byte_pos]) {
-                        let (pos, score) = decode_fst_value(value);
                         let surface = std::str::from_utf8(&bytes[..byte_pos]).unwrap_or("");
-                        results.push((byte_pos, vec![DictEntry {
-                            morphemes: vec![Morpheme { text: surface.to_string(), pos }],
-                            score,
-                        }]));
+                        let entries: Vec<DictEntry> = decode_fst_value_multi(value)
+                            .into_iter()
+                            .map(|(pos, score)| DictEntry {
+                                morphemes: vec![Morpheme { text: surface.to_string(), pos }],
+                                score,
+                            })
+                            .collect();
+                        if !entries.is_empty() {
+                            results.push((byte_pos, entries));
+                        }
                     }
                 }
                 results

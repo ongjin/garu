@@ -33,15 +33,22 @@ fn is_functional_pos(pos: Pos) -> bool {
 fn classify_oov_char(ch: char) -> Pos {
     match ch {
         '.' | '!' | '?' => Pos::SF,
-        ',' | ';' | ':' | '\u{00B7}' => Pos::SP, // · (middle dot) = SP
+        ',' | ';' | ':' | '/' | '\u{00B7}' => Pos::SP, // · / = SP
         '\u{2026}' => Pos::SE, // … (ellipsis) = SE
-        '(' | ')' | '[' | ']' | '{' | '}' | '"' |
+        '~' | '-' | '\u{2013}' | '\u{2212}' => Pos::SO, // ~, -, –, − = SO
+        // SS: brackets, quotes, parentheses (Sejong tagset standard)
+        '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' |
         '\u{2018}' | '\u{2019}' | '\u{201C}' | '\u{201D}' |
-        '\u{3008}' | '\u{3009}' | '\u{300A}' | '\u{300B}' |
-        '\'' | '<' | '>' | '\u{2015}' | '\u{2014}' => Pos::SS,
+        '<' | '>' | '\u{2015}' | '\u{2014}' |
+        '\u{300C}' | '\u{300D}' | '\u{300E}' | '\u{300F}' |
+        '\u{3008}' | '\u{3009}' | '\u{300A}' | '\u{300B}' => Pos::SS,
         c if c.is_ascii_alphabetic() => Pos::SL,
         c if c.is_ascii_digit() => Pos::SN,
         c if ('\u{AC00}'..='\u{D7A3}').contains(&c) => Pos::NNG,
+        // CJK Ideographs: treat as NNG (Kiwi convention — Hanja in Korean text is usually NNG)
+        c if ('\u{4E00}'..='\u{9FFF}').contains(&c) ||
+             ('\u{3400}'..='\u{4DBF}').contains(&c) ||
+             ('\u{F900}'..='\u{FAFF}').contains(&c) => Pos::NNG,
         _ => Pos::SW,
     }
 }
@@ -156,6 +163,11 @@ pub struct CodebookAnalyzer {
     #[allow(dead_code)]
     max_word_len: usize,        // max char length of content words in dict
     max_suffix_len: usize,      // max char length of suffix patterns
+    /// Word ambiguity table: word → Vec<(Pos, score)>
+    ambiguity: HashMap<String, Vec<(Pos, f32)>>,
+    /// Word-bigram cost bonuses: (word, prev_pos) → (target_pos, bonus)
+    /// bonus is negative (cheaper) — applied when prev_pos matches
+    word_bigrams: HashMap<String, Vec<(u8, u8, f32)>>,  // word → [(prev_pos, target_pos, bonus)]
 }
 
 impl CodebookAnalyzer {
@@ -180,6 +192,8 @@ impl CodebookAnalyzer {
         let mut section8: Option<&[u8]> = None;
         let mut section9: Option<&[u8]> = None;
         let mut section10: Option<&[u8]> = None;
+        let mut section11: Option<&[u8]> = None;
+        let mut section12: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -205,6 +219,8 @@ impl CodebookAnalyzer {
                 8 => section8 = Some(section_data),
                 9 => section9 = Some(section_data),
                 10 => section10 = Some(section_data),
+                11 => section11 = Some(section_data),
+                12 => section12 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
@@ -216,6 +232,8 @@ impl CodebookAnalyzer {
             section8.ok_or("Missing trigram costs section (8)")?,
             section9.ok_or("Missing frequencies section (9)")?,
             section10.ok_or("Missing parameters section (10)")?,
+            section11,
+            section12,
         )
     }
 
@@ -226,6 +244,8 @@ impl CodebookAnalyzer {
         trigram_data: &[u8],
         freq_data: &[u8],
         param_data: &[u8],
+        ambig_data: Option<&[u8]>,
+        wbigram_data: Option<&[u8]>,
     ) -> Result<Self, String> {
         // Section 6: Content dict
         let content_dict = Dict::from_bytes(dict_data)?;
@@ -268,6 +288,12 @@ impl CodebookAnalyzer {
             param_data[12..16].try_into().map_err(|_| "Bad single_char_content_penalty")?,
         );
 
+        // Parse ambiguity table (Section 11, optional)
+        let ambiguity = Self::parse_ambiguity_table(ambig_data, max_freq)?;
+
+        // Parse word-bigram table (Section 12, optional)
+        let word_bigrams = Self::parse_word_bigrams(wbigram_data)?;
+
         Ok(CodebookAnalyzer {
             suffix_entries,
             suffix_map,
@@ -283,6 +309,8 @@ impl CodebookAnalyzer {
             single_char_content_penalty,
             max_word_len,
             max_suffix_len,
+            ambiguity,
+            word_bigrams,
         })
     }
 
@@ -400,29 +428,75 @@ impl CodebookAnalyzer {
 
         let trigram_count = NUM_POS * NUM_POS * NUM_POS;
         let bigram_count = NUM_POS * NUM_POS;
-        let expected_len = 8 + (trigram_count + bigram_count) * 4;
-        if data.len() < expected_len {
-            return Err(format!(
-                "Trigram costs section too short: expected {} bytes, got {}",
-                expected_len, data.len()
-            ));
+
+        // Detect format: sparse (v2) has 24-byte header, dense (v1) has 8-byte header
+        let expected_dense = 8 + (trigram_count + bigram_count) * 4;
+        if data.len() == expected_dense {
+            // Dense format (v1)
+            let mut trigram_costs = Vec::with_capacity(trigram_count);
+            let mut pos = 8;
+            for _ in 0..trigram_count {
+                trigram_costs.push(f32::from_le_bytes(
+                    data[pos..pos + 4].try_into().map_err(|_| "Bad trigram f32")?,
+                ));
+                pos += 4;
+            }
+            let mut bigram_costs = Vec::with_capacity(bigram_count);
+            for _ in 0..bigram_count {
+                bigram_costs.push(f32::from_le_bytes(
+                    data[pos..pos + 4].try_into().map_err(|_| "Bad bigram f32")?,
+                ));
+                pos += 4;
+            }
+            return Ok((trigram_costs, bigram_costs, default_cost));
         }
 
-        let mut trigram_costs = Vec::with_capacity(trigram_count);
-        let mut pos = 8;
-        for _ in 0..trigram_count {
-            trigram_costs.push(f32::from_le_bytes(
-                data[pos..pos + 4].try_into().map_err(|_| "Bad trigram f32")?,
-            ));
-            pos += 4;
+        // Sparse bitmap + u8 quantized format (v2)
+        if data.len() < 24 {
+            return Err("Sparse trigram section too short for header".into());
+        }
+        let tg_min = f32::from_le_bytes(data[8..12].try_into().map_err(|_| "Bad tg_min")?);
+        let tg_max = f32::from_le_bytes(data[12..16].try_into().map_err(|_| "Bad tg_max")?);
+        let bg_min = f32::from_le_bytes(data[16..20].try_into().map_err(|_| "Bad bg_min")?);
+        let bg_max = f32::from_le_bytes(data[20..24].try_into().map_err(|_| "Bad bg_max")?);
+
+        let tg_bitmap_len = (trigram_count + 7) / 8;
+        let bg_bitmap_len = (bigram_count + 7) / 8;
+
+        let mut pos = 24;
+        // Read trigram bitmap
+        let tg_bitmap = &data[pos..pos + tg_bitmap_len];
+        pos += tg_bitmap_len;
+        // Count set bits for trigram values
+        let tg_nz: usize = tg_bitmap.iter().map(|b| b.count_ones() as usize).sum();
+        let tg_values = &data[pos..pos + tg_nz];
+        pos += tg_nz;
+        // Read bigram bitmap
+        let bg_bitmap = &data[pos..pos + bg_bitmap_len];
+        pos += bg_bitmap_len;
+        let bg_nz: usize = bg_bitmap.iter().map(|b| b.count_ones() as usize).sum();
+        let bg_values = &data[pos..pos + bg_nz];
+
+        // Expand trigrams
+        let tg_range = tg_max - tg_min;
+        let mut trigram_costs = vec![0.0f32; trigram_count];
+        let mut vi = 0;
+        for idx in 0..trigram_count {
+            if tg_bitmap[idx / 8] & (1 << (idx % 8)) != 0 {
+                trigram_costs[idx] = tg_min + (tg_values[vi] as f32 / 255.0) * tg_range;
+                vi += 1;
+            }
         }
 
-        let mut bigram_costs = Vec::with_capacity(bigram_count);
-        for _ in 0..bigram_count {
-            bigram_costs.push(f32::from_le_bytes(
-                data[pos..pos + 4].try_into().map_err(|_| "Bad bigram f32")?,
-            ));
-            pos += 4;
+        // Expand bigrams
+        let bg_range = bg_max - bg_min;
+        let mut bigram_costs = vec![0.0f32; bigram_count];
+        vi = 0;
+        for idx in 0..bigram_count {
+            if bg_bitmap[idx / 8] & (1 << (idx % 8)) != 0 {
+                bigram_costs[idx] = bg_min + (bg_values[vi] as f32 / 255.0) * bg_range;
+                vi += 1;
+            }
         }
 
         Ok((trigram_costs, bigram_costs, default_cost))
@@ -431,6 +505,86 @@ impl CodebookAnalyzer {
     // -----------------------------------------------------------------------
     // Cost functions
     // -----------------------------------------------------------------------
+
+    fn parse_ambiguity_table(data: Option<&[u8]>, max_freq: f32) -> Result<HashMap<String, Vec<(Pos, f32)>>, String> {
+        let mut map = HashMap::new();
+        let data = match data {
+            Some(d) => d,
+            None => return Ok(map),
+        };
+        if data.len() < 4 { return Ok(map); }
+        let num_entries = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad ambig count")?) as usize;
+        let mut pos = 4;
+        for _ in 0..num_entries {
+            if pos + 2 > data.len() { break; }
+            let wlen = u16::from_le_bytes(data[pos..pos+2].try_into().map_err(|_| "Bad wlen")?) as usize;
+            pos += 2;
+            if pos + wlen > data.len() { break; }
+            let word = std::str::from_utf8(&data[pos..pos+wlen])
+                .map_err(|_| "Bad UTF-8 in ambig word")?.to_string();
+            pos += wlen;
+            if pos >= data.len() { break; }
+            let num_alts = data[pos] as usize;
+            pos += 1;
+            let mut alts = Vec::new();
+            for _ in 0..num_alts {
+                if pos + 3 > data.len() { break; }
+                let pos_byte = data[pos];
+                let qfreq = u16::from_le_bytes(data[pos+1..pos+3].try_into().map_err(|_| "Bad qfreq")?);
+                pos += 3;
+                if pos_byte < NUM_POS as u8 {
+                    let p: Pos = unsafe { std::mem::transmute(pos_byte) };
+                    // Dequantize: score = -ln(freq/max_freq), freq = max_freq * (qfreq/65535)
+                    let freq = max_freq * (qfreq as f32 / 65535.0);
+                    let score = (max_freq / freq.max(1.0)).ln();
+                    alts.push((p, score));
+                }
+            }
+            if !alts.is_empty() {
+                map.insert(word, alts);
+            }
+        }
+        Ok(map)
+    }
+
+    fn parse_word_bigrams(data: Option<&[u8]>) -> Result<HashMap<String, Vec<(u8, u8, f32)>>, String> {
+        let mut map: HashMap<String, Vec<(u8, u8, f32)>> = HashMap::new();
+        let data = match data {
+            Some(d) if d.len() >= 4 => d,
+            _ => return Ok(map),
+        };
+        let num = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad wbigram count")?) as usize;
+        let mut pos = 4;
+        for _ in 0..num {
+            if pos + 2 > data.len() { break; }
+            let wlen = u16::from_le_bytes(data[pos..pos+2].try_into().map_err(|_| "Bad wlen")?) as usize;
+            pos += 2;
+            if pos + wlen + 3 > data.len() { break; }
+            let word = std::str::from_utf8(&data[pos..pos+wlen])
+                .map_err(|_| "Bad UTF-8 in wbigram")?.to_string();
+            pos += wlen;
+            let prev_pos = data[pos];
+            let target_pos = data[pos + 1];
+            let bonus_q = data[pos + 2] as i8;
+            pos += 3;
+            let bonus = bonus_q as f32 / 25.0;  // dequantize (scale=25)
+            map.entry(word).or_default().push((prev_pos, target_pos, bonus));
+        }
+        Ok(map)
+    }
+
+    /// Get word-bigram cost bonus for (word, prev_pos, target_pos).
+    /// Returns a negative bonus (cheaper) if context strongly favors target_pos.
+    fn get_word_bigram_bonus(&self, word: &str, prev_pos: u8, target_pos: u8) -> f32 {
+        if let Some(entries) = self.word_bigrams.get(word) {
+            for &(pp, tp, bonus) in entries {
+                if pp == prev_pos && tp == target_pos {
+                    return bonus;
+                }
+            }
+        }
+        0.0
+    }
 
     fn get_trigram_cost(&self, p1: u8, p2: u8, p3: u8) -> f32 {
         // Any tag outside POS range (including BOS=255) → default cost or bigram backoff
@@ -543,25 +697,33 @@ impl CodebookAnalyzer {
         let mut arcs: Vec<LatticeArc> = Vec::new();
         let mut covered = vec![false; n];
 
-        // Pre-process ASCII runs — check dict for NNP before defaulting to SL/SN
+        // Pre-process ASCII runs — always create SL/SN arc, optionally NNP from dict
         let ascii_runs = Self::find_ascii_runs(&chars);
         for &(start, end, default_pos) in &ascii_runs {
             let surface: String = chars[start..end].iter().collect();
-            // Check if this exact surface is in the content dict (e.g., wiki NNP)
-            let entries = self.content_dict.lookup(&surface);
-            let (pos, freq) = if let Some(entry) = entries.first() {
-                let p = entry.morphemes.first().map(|m| m.pos).unwrap_or(default_pos);
-                let f = self.freq_from_score(entry.score);
-                (p, f.max(100)) // wiki entries get at least freq=100 for reasonable cost
-            } else {
-                (default_pos, 1000)
-            };
+
+            // Always create default SL/SN arc
             arcs.push(LatticeArc {
                 start,
                 end,
-                morphemes: vec![(surface.clone(), pos)],
-                cost: self.get_word_cost(&surface, pos, freq),
+                morphemes: vec![(surface.clone(), default_pos)],
+                cost: self.get_word_cost(&surface, default_pos, 1000),
             });
+
+            // Also check dict for NNP — create competing arc if found
+            let entries = self.content_dict.lookup(&surface);
+            if let Some(entry) = entries.first() {
+                let p = entry.morphemes.first().map(|m| m.pos).unwrap_or(default_pos);
+                if p != default_pos {
+                    let f = self.freq_from_score(entry.score).max(100);
+                    arcs.push(LatticeArc {
+                        start,
+                        end,
+                        morphemes: vec![(surface.clone(), p)],
+                        cost: self.get_word_cost(&surface, p, f),
+                    });
+                }
+            }
             for j in start..end {
                 covered[j] = true;
             }
@@ -605,17 +767,33 @@ impl CodebookAnalyzer {
 
                     let freq = self.freq_from_score(entry.score);
 
-                    // A1: Content word alone
+                    // A1: Content word alone (primary POS from FST)
                     let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
                         .map(|m| (m.text.clone(), m.pos))
                         .collect();
-                    let word_cost = self.get_word_cost(match_str, first_pos, freq);
+                    let mut word_cost = self.get_word_cost(match_str, first_pos, freq);
+
                     arcs.push(LatticeArc {
                         start: i,
                         end: content_end,
                         morphemes: morphemes.clone(),
                         cost: word_cost,
                     });
+
+                    // A1b: Alternative POS from ambiguity table
+                    if let Some(alts) = self.ambiguity.get(match_str) {
+                        for &(alt_pos, alt_score) in alts {
+                            if alt_pos == first_pos { continue; }
+                            let alt_freq = self.freq_from_score(alt_score);
+                            let alt_cost = self.get_word_cost(match_str, alt_pos, alt_freq);
+                            arcs.push(LatticeArc {
+                                start: i,
+                                end: content_end,
+                                morphemes: vec![(match_str.to_string(), alt_pos)],
+                                cost: alt_cost,
+                            });
+                        }
+                    }
 
                     // A2: Content word + suffix
                     if content_end < n {
@@ -761,6 +939,10 @@ impl CodebookAnalyzer {
                     let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
                     let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos, first_pos);
 
+                    // Word-bigram bonus: context-dependent cost adjustment
+                    let first_form = &arc.morphemes[0].0;
+                    let wb_bonus = self.get_word_bigram_bonus(first_form, prev_pos, first_pos);
+
                     // Internal morpheme transitions (if arc has multiple morphemes)
                     let mut internal_cost = 0.0;
                     if arc.morphemes.len() > 1 {
@@ -778,7 +960,7 @@ impl CodebookAnalyzer {
                         }
                     }
 
-                    let total_cost = prev_cost + arc.cost + transition_cost + internal_cost;
+                    let total_cost = prev_cost + arc.cost + transition_cost + internal_cost + wb_bonus;
 
                     // New state: (last_pos, second_to_last_pos)
                     let new_prev_prev = if arc.morphemes.len() >= 2 {
@@ -921,7 +1103,223 @@ impl CodebookAnalyzer {
             }
         }
 
+        // Post-process: minimal — NIKL trigram handles most disambiguation
+        Self::fix_xsv_xsa(&mut tokens);
+
         (tokens, best_cost)
+    }
+
+    /// Fix JKB → JC for 과/와 connecting nouns.
+    fn fix_jc_jkb(tokens: &mut [Token]) {
+        if tokens.len() < 2 {
+            return;
+        }
+        for i in 1..tokens.len() {
+            if tokens[i].pos != Pos::JKB {
+                continue;
+            }
+            let form = tokens[i].text.as_str();
+            if form != "과" && form != "와" && form != "이랑" && form != "랑" && form != "하고" {
+                continue;
+            }
+            // Check if preceded by a noun-like POS
+            let prev_pos = tokens[i - 1].pos;
+            let preceded_by_noun = matches!(
+                prev_pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL
+            );
+            if preceded_by_noun {
+                // Check if followed by a noun-like POS (or end of sentence / JX)
+                let followed_by_noun = if i + 1 < tokens.len() {
+                    matches!(
+                        tokens[i + 1].pos,
+                        Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
+                            | Pos::SN | Pos::SL | Pos::MM | Pos::MAG
+                    )
+                } else {
+                    false
+                };
+                if followed_by_noun {
+                    tokens[i].pos = Pos::JC;
+                }
+            }
+        }
+    }
+
+    /// Fix XSV/XSA: 하/되 after NNG → XSV; 하/VA after NNG → XSA.
+    /// Only apply when NNG is directly attached (no JKO/JKS intervening).
+    fn fix_xsv_xsa(tokens: &mut [Token]) {
+        if tokens.len() < 2 {
+            return;
+        }
+        for i in 1..tokens.len() {
+            let prev_pos = tokens[i - 1].pos;
+            // Only apply after NNG (not NNP/NNB — those are rarely 하다 verb stems)
+            if prev_pos != Pos::NNG {
+                continue;
+            }
+            // Don't apply if there's a case marker between NNG and 하/되
+            // (e.g., "일을 하다" → 하 stays VV)
+            if i >= 2 {
+                let pp = tokens[i - 1].pos;
+                if matches!(pp, Pos::JKO | Pos::JKS | Pos::JKB) {
+                    continue;
+                }
+            }
+            let form = tokens[i].text.as_str();
+            if tokens[i].pos == Pos::VV && (form == "하" || form == "되" || form == "시키") {
+                tokens[i].pos = Pos::XSV;
+            } else if tokens[i].pos == Pos::VA && form == "하" {
+                tokens[i].pos = Pos::XSA;
+            }
+        }
+    }
+
+    /// Fix VV → VX for auxiliary verbs after EC (connective endings).
+    fn fix_vx(tokens: &mut [Token]) {
+        // 있/VV → 있/VX after 고/EC or 어/아/EC (progressive/state)
+        // 하/VV → 하/VX after 고/EC (repeated action)
+        // 보/VV → 보/VX after 어/아/EC (try)
+        // 주/VV → 주/VX after 어/아/EC (for someone)
+        // 지/VV → 지/VX after 어/아/EC (continuation)
+        for i in 1..tokens.len() {
+            if tokens[i].pos != Pos::VV {
+                continue;
+            }
+            if tokens[i - 1].pos != Pos::EC {
+                continue;
+            }
+            let form = tokens[i].text.as_str();
+            let prev_form = tokens[i - 1].text.as_str();
+            match form {
+                "있" | "없" => {
+                    // 고 있다, 어 있다
+                    if prev_form == "고" || prev_form == "어" || prev_form == "아" {
+                        tokens[i].pos = Pos::VX;
+                    }
+                }
+                "하" => {
+                    // 지 않다 / ~고 하다 pattern (하 as VX)
+                    if prev_form == "지" {
+                        tokens[i].pos = Pos::VX;
+                    }
+                }
+                "보" | "주" | "지" | "오" | "가" | "내" | "나" | "버리" | "놓" | "두" => {
+                    // 어/아 + auxiliary verb pattern
+                    if prev_form == "어" || prev_form == "아" {
+                        tokens[i].pos = Pos::VX;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Fix NNG → NNB for common dependency nouns after ETM.
+    fn fix_nnb(tokens: &mut [Token]) {
+        // Conservative list: only clearly NNB items after ETM
+        // Removed: 때(often NNG), 일(often NNG), 가지(often VX), 곳(often NNG)
+        const NNB_AFTER_ETM: &[&str] = &[
+            "수", "것", "데", "바", "번", "개", "군", "줄",
+            "뿐", "채", "척", "듯", "리", "셈", "나름", "탓", "만큼",
+        ];
+        for i in 1..tokens.len() {
+            if tokens[i].pos != Pos::NNG && tokens[i].pos != Pos::VV {
+                continue;
+            }
+            if tokens[i - 1].pos == Pos::ETM {
+                let form = tokens[i].text.as_str();
+                if NNB_AFTER_ETM.iter().any(|&w| w == form) {
+                    tokens[i].pos = Pos::NNB;
+                }
+            }
+        }
+    }
+
+    /// Fix NNG → XSN/XPN for common suffix/prefix morphemes.
+    fn fix_xsn_xpn(tokens: &mut [Token]) {
+        // Conservative: only clear suffixes. Removed: 제(NP 제), 상/장(NNG)
+        const XSN_FORMS: &[&str] = &[
+            "성", "형", "적", "식", "계", "권", "화", "률", "율", "급",
+        ];
+        const XPN_FORMS: &[&str] = &[
+            "비", "재", "초", "무", "탈", "반", "불",
+        ];
+        for i in 0..tokens.len() {
+            if tokens[i].pos != Pos::NNG {
+                continue;
+            }
+            let form = tokens[i].text.as_str();
+            // XSN: single-char after NNG
+            if form.chars().count() == 1 && i > 0 && tokens[i - 1].pos == Pos::NNG {
+                if XSN_FORMS.iter().any(|&w| w == form) {
+                    tokens[i].pos = Pos::XSN;
+                }
+            }
+            // XPN: single-char before NNG
+            if form.chars().count() == 1 && i + 1 < tokens.len() && tokens[i + 1].pos == Pos::NNG {
+                if XPN_FORMS.iter().any(|&w| w == form) {
+                    tokens[i].pos = Pos::XPN;
+                }
+            }
+        }
+    }
+
+    /// Fix NP/JKS → MM for demonstratives before nouns.
+    fn fix_mm(tokens: &mut [Token]) {
+        for i in 0..tokens.len() {
+            let form = tokens[i].text.as_str();
+            let cur_pos = tokens[i].pos;
+
+            // Must be followed by a noun
+            let followed_by_noun = i + 1 < tokens.len() && matches!(
+                tokens[i + 1].pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::XR
+            );
+            if !followed_by_noun {
+                continue;
+            }
+
+            // 이/저: only convert if NOT preceded by a noun (avoid JKS→MM mistake)
+            // Note: "그" excluded — too ambiguous with IC/NP in spoken Korean
+            if (form == "이" || form == "저") && (cur_pos == Pos::NP || cur_pos == Pos::JKS) {
+                let preceded_by_noun = i > 0 && matches!(
+                    tokens[i - 1].pos,
+                    Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
+                        | Pos::SN | Pos::SL | Pos::XSN | Pos::XSA | Pos::XSV
+                );
+                if !preceded_by_noun {
+                    tokens[i].pos = Pos::MM;
+                }
+                continue;
+            }
+
+            // 새/각/온: convert from NNG to MM before nouns
+            // Removed: 현/전 — too ambiguous with NNG
+            if cur_pos == Pos::NNG && (form == "새" || form == "각" || form == "온") {
+                tokens[i].pos = Pos::MM;
+            }
+        }
+    }
+
+    /// Fix JKS → JKC for 가/이 before 되다/아니다.
+    fn fix_jkc(tokens: &mut [Token]) {
+        for i in 0..tokens.len() {
+            if tokens[i].pos != Pos::JKS {
+                continue;
+            }
+            let form = tokens[i].text.as_str();
+            if form != "가" && form != "이" {
+                continue;
+            }
+            // Check if followed by 되/아니
+            if i + 1 < tokens.len() {
+                let next_form = tokens[i + 1].text.as_str();
+                if next_form == "되" || next_form == "아니" {
+                    tokens[i].pos = Pos::JKC;
+                }
+            }
+        }
     }
 
     /// Merge consecutive single-char SL or SN tokens that are adjacent.

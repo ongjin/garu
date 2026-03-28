@@ -22,6 +22,20 @@ POS_TAGS = [
     "XPN", "XSN", "XSV", "XSA", "XR",
     "SF", "SP", "SS", "SE", "SO", "SW", "SH", "SL", "SN",
 ]
+
+# Jongseong → compatibility jamo mapping
+_JONGSEONG_TO_COMPAT = {
+    '\u11A8': '\u3131', '\u11A9': '\u3132', '\u11AB': '\u3134',
+    '\u11AE': '\u3137', '\u11AF': '\u3139', '\u11B7': '\u3141',
+    '\u11B8': '\u3142', '\u11BA': '\u3145', '\u11BB': '\u3146',
+    '\u11BC': '\u3147', '\u11BD': '\u3148', '\u11BE': '\u314A',
+    '\u11BF': '\u314B', '\u11C0': '\u314C', '\u11C1': '\u314D',
+    '\u11C2': '\u314E',
+}
+
+def normalize_jamo(s):
+    """Normalize Hangul jongseong to compatibility jamo."""
+    return ''.join(_JONGSEONG_TO_COMPAT.get(c, c) for c in s)
 POS_TO_IDX = {p: i for i, p in enumerate(POS_TAGS)}
 
 CONTENT_POS = {"NNG", "NNP", "NNB", "NR", "NP", "VV", "VA", "VX", "VCP", "VCN",
@@ -140,10 +154,16 @@ class CodebookAnalyzer:
     def classify_oov_char(self, ch):
         if ch in '.!?':
             return 'SF'
-        if ch in ',;:':
+        if ch in ',;:/\u00B7':
             return 'SP'
-        if ch in '()[]{}""\'\'':
-            return 'SS'
+        if ch == '\u2026':  # …
+            return 'SE'
+        if ch in '~-\u2013\u2212':  # ~, -, –, −
+            return 'SO'
+        if ch in '\u300C\u300D\u300E\u300F':
+            return 'SS'  # CJK brackets only (「」『』)
+        if ch in '()[]{}"\'\u2018\u2019\u201C\u201D\u2015\u2014<>\u3008\u3009\u300A\u300B':
+            return 'SW'  # parentheses, brackets, quotes → SW (Kiwi convention)
         if ch.isascii() and ch.isalpha():
             return 'SL'
         if ch.isdigit():
@@ -151,6 +171,8 @@ class CodebookAnalyzer:
         code = ord(ch)
         if 0xAC00 <= code <= 0xD7A3:
             return 'NNG'
+        if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF or 0xF900 <= code <= 0xFAFF:
+            return 'NNG'  # Kiwi treats Hanja as NNG
         return 'SW'
 
     def _preprocess_ascii_runs(self, text):
@@ -318,6 +340,79 @@ class CodebookAnalyzer:
                 result[-1] = (result[-1][0] + surface, pos)
             else:
                 result.append((surface, pos))
+
+        # Post-process: JKB → JC for 과/와 between nouns
+        NOUN_POS = {'NNG', 'NNP', 'NNB', 'NR', 'NP', 'SN', 'SL'}
+        NOUN_LIKE = {'NNG', 'NNP', 'NNB', 'NR', 'NP', 'SN', 'SL', 'MM', 'MAG'}
+        for i in range(1, len(result)):
+            if result[i][1] == 'JKB' and result[i][0] in ('과', '와', '이랑', '랑', '하고'):
+                if result[i - 1][1] in NOUN_POS:
+                    if i + 1 < len(result) and result[i + 1][1] in NOUN_LIKE:
+                        result[i] = (result[i][0], 'JC')
+
+        # Post-process: VX - auxiliary verbs after EC
+        for i in range(1, len(result)):
+            if result[i][1] == 'VV' and result[i - 1][1] == 'EC':
+                form, prev_form = result[i][0], result[i - 1][0]
+                if form in ('있', '없') and prev_form in ('고', '어', '아'):
+                    result[i] = (form, 'VX')
+                elif form == '하' and prev_form == '지':
+                    result[i] = (form, 'VX')
+                elif form in ('보', '주', '지', '오', '가', '내', '나', '버리', '놓', '두') and prev_form in ('어', '아'):
+                    result[i] = (form, 'VX')
+
+        # Post-process: XSV/XSA - 하/되 after NNG → XSV; 하/VA after NNG → XSA
+        for i in range(1, len(result)):
+            if result[i - 1][1] == 'NNG':
+                if result[i][1] == 'VV' and result[i][0] in ('하', '되', '시키'):
+                    result[i] = (result[i][0], 'XSV')
+                elif result[i][1] == 'VA' and result[i][0] == '하':
+                    result[i] = (result[i][0], 'XSA')
+
+        # Post-process: NNB - dependency nouns after ETM
+        NNB_AFTER_ETM = {'수', '것', '때', '데', '바', '번', '개', '시', '군', '줄',
+                         '뿐', '채', '척', '듯', '리', '셈', '나름', '탓', '만큼',
+                         '가지', '곳'}
+        for i in range(1, len(result)):
+            if result[i][1] in ('NNG', 'VV') and result[i - 1][1] == 'ETM':
+                if result[i][0] in NNB_AFTER_ETM:
+                    result[i] = (result[i][0], 'NNB')
+
+        # Post-process: XSN - suffix nouns after NNG
+        XSN_FORMS = {'성', '형', '적', '식', '계', '권', '자', '화', '률', '율',
+                      '상', '장', '급', '제'}
+        for i in range(1, len(result)):
+            if result[i][1] == 'NNG' and len(result[i][0]) == 1:
+                if result[i - 1][1] == 'NNG' and result[i][0] in XSN_FORMS:
+                    result[i] = (result[i][0], 'XSN')
+
+        # Post-process: XPN - prefix before NNG
+        XPN_FORMS = {'비', '재', '초', '무', '탈', '반', '불'}
+        for i in range(len(result) - 1):
+            if result[i][1] == 'NNG' and len(result[i][0]) == 1:
+                if result[i + 1][1] == 'NNG' and result[i][0] in XPN_FORMS:
+                    result[i] = (result[i][0], 'XPN')
+
+        # Post-process: MM - demonstratives before nouns
+        NOUN_LIKE_PREV = {'NNG', 'NNP', 'NNB', 'NR', 'NP', 'SN', 'SL', 'XSN', 'XSA', 'XSV'}
+        for i in range(len(result) - 1):
+            if result[i + 1][1] not in ('NNG', 'NNP', 'NNB', 'NR', 'XR'):
+                continue
+            form, pos = result[i]
+            # 이/그/저: only if NOT preceded by noun
+            if form in ('이', '그', '저') and pos in ('NP', 'JKS'):
+                preceded_by_noun = i > 0 and result[i - 1][1] in NOUN_LIKE_PREV
+                if not preceded_by_noun:
+                    result[i] = (form, 'MM')
+            # 새/각/온/현/전: NNG → MM before nouns
+            elif form in ('새', '각', '온', '현', '전') and pos == 'NNG':
+                result[i] = (form, 'MM')
+
+        # Post-process: JKC - complement marker before 되/아니
+        for i in range(len(result) - 1):
+            if result[i][1] == 'JKS' and result[i][0] in ('가', '이'):
+                if result[i + 1][0] in ('되', '아니'):
+                    result[i] = (result[i][0], 'JKC')
 
         return result
 
