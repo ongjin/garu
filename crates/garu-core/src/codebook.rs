@@ -1452,29 +1452,25 @@ impl CodebookAnalyzer {
                 let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
 
                 if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
-                    // Cache hit: use stored analysis with correct offsets
-                    let mut pos_in_eojeol = eojeol_char_start;
                     for (form, pos) in cached_morphs {
-                        let form_len = form.chars().count();
                         tokens.push(Token {
                             text: form.clone(),
                             pos: *pos,
-                            start: pos_in_eojeol,
-                            end: pos_in_eojeol + form_len,
+                            start: eojeol_char_start,
+                            end: eojeol_char_end,
                             score: None,
                         });
-                        pos_in_eojeol += form_len;
                     }
                 } else {
-                    // Cache miss: Viterbi fallback for this eojeol
                     let arcs = self.build_lattice(eojeol);
-                    let (mut eojeol_tokens, score) = self.viterbi(eojeol, &arcs);
-                    // Adjust offsets to global position
-                    for token in &mut eojeol_tokens {
-                        token.start += eojeol_char_start;
-                        token.end += eojeol_char_start;
+                    let (eojeol_tokens, score) = self.viterbi(eojeol, &arcs);
+                    for token in eojeol_tokens {
+                        tokens.push(Token {
+                            start: eojeol_char_start,
+                            end: eojeol_char_end,
+                            ..token
+                        });
                     }
-                    tokens.append(&mut eojeol_tokens);
                     total_score += score;
                 }
 
@@ -1488,9 +1484,31 @@ impl CodebookAnalyzer {
             };
         }
 
-        // No cache: full Viterbi
+        // No cache: full Viterbi with eojeol-level spans
         let arcs = self.build_lattice(text);
-        let (tokens, score) = self.viterbi(text, &arcs);
+        let (raw_tokens, score) = self.viterbi(text, &arcs);
+
+        // Assign eojeol-level spans to each token
+        let mut tokens = Vec::with_capacity(raw_tokens.len());
+        let mut eojeol_boundaries: Vec<(usize, usize)> = Vec::new();
+        let mut char_offset = 0;
+        for eojeol in text.split_whitespace() {
+            let byte_start = text[char_offset..].find(eojeol)
+                .map(|p| char_offset + p).unwrap_or(char_offset);
+            let cs = text[..byte_start].chars().count();
+            let ce = cs + eojeol.chars().count();
+            eojeol_boundaries.push((cs, ce));
+            char_offset = byte_start + eojeol.len();
+        }
+
+        for token in raw_tokens {
+            // Find which eojeol this token belongs to
+            let (es, ee) = eojeol_boundaries.iter()
+                .find(|&&(s, e)| token.start >= s && token.start < e)
+                .copied()
+                .unwrap_or((token.start, token.end));
+            tokens.push(Token { start: es, end: ee, ..token });
+        }
 
         AnalyzeResult {
             tokens,
