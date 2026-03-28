@@ -1439,60 +1439,51 @@ impl CodebookAnalyzer {
         // Hybrid: eojeol cache + Viterbi fallback
         if !self.eojeol_cache.is_empty() {
             let mut tokens = Vec::new();
-            let mut all_cached = true;
+            let mut total_score = 0.0f32;
+            let mut char_offset = 0usize;
 
-            // Split by whitespace into eojeol
-            let eojeol_list: Vec<&str> = text.split_whitespace().collect();
+            // Find eojeol boundaries in original text (split by whitespace)
+            for eojeol in text.split_whitespace() {
+                // Find this eojeol's position in the original text
+                let eojeol_start = text[char_offset..].find(eojeol)
+                    .map(|p| char_offset + p)
+                    .unwrap_or(char_offset);
+                let eojeol_char_start = text[..eojeol_start].chars().count();
+                let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
 
-            for eojeol in &eojeol_list {
-                if let Some(cached_morphs) = self.eojeol_cache.get(*eojeol) {
+                if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
+                    // Cache hit: use stored analysis with correct offsets
+                    let mut pos_in_eojeol = eojeol_char_start;
                     for (form, pos) in cached_morphs {
+                        let form_len = form.chars().count();
                         tokens.push(Token {
                             text: form.clone(),
                             pos: *pos,
-                            start: 0,
-                            end: 0,
+                            start: pos_in_eojeol,
+                            end: pos_in_eojeol + form_len,
                             score: None,
                         });
+                        pos_in_eojeol += form_len;
                     }
                 } else {
-                    all_cached = false;
-                    break;
-                }
-            }
-
-            if all_cached {
-                return AnalyzeResult {
-                    tokens,
-                    score: 0.0,
-                    elapsed_ms: now_ms() - t0,
-                };
-            }
-
-            // Partial cache: analyze each eojeol separately
-            let mut tokens = Vec::new();
-            for eojeol in &eojeol_list {
-                if let Some(cached_morphs) = self.eojeol_cache.get(*eojeol) {
-                    for (form, pos) in cached_morphs {
-                        tokens.push(Token {
-                            text: form.clone(),
-                            pos: *pos,
-                            start: 0,
-                            end: 0,
-                            score: None,
-                        });
-                    }
-                } else {
-                    // Viterbi fallback for this eojeol
+                    // Cache miss: Viterbi fallback for this eojeol
                     let arcs = self.build_lattice(eojeol);
-                    let (mut eojeol_tokens, _) = self.viterbi(eojeol, &arcs);
+                    let (mut eojeol_tokens, score) = self.viterbi(eojeol, &arcs);
+                    // Adjust offsets to global position
+                    for token in &mut eojeol_tokens {
+                        token.start += eojeol_char_start;
+                        token.end += eojeol_char_start;
+                    }
                     tokens.append(&mut eojeol_tokens);
+                    total_score += score;
                 }
+
+                char_offset = eojeol_start + eojeol.len();
             }
 
             return AnalyzeResult {
                 tokens,
-                score: 0.0,
+                score: total_score,
                 elapsed_ms: now_ms() - t0,
             };
         }
