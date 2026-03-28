@@ -30,10 +30,12 @@
 
 ---
 
+> **Note**: npm 패키지는 아직 배포 전입니다. 현재는 소스에서 직접 빌드하여 사용할 수 있습니다.
+
 ## Quick Start
 
 ```bash
-npm install garu
+npm install garu  # (배포 후 사용 가능)
 ```
 
 ```typescript
