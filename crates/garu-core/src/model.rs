@@ -17,6 +17,7 @@ impl Analyzer {
         self.codebook.analyze(text)
     }
 
+
     pub fn analyze_topn(&self, _text: &str, _n: usize) -> Vec<AnalyzeResult> {
         // Codebook doesn't support topN — return single result
         vec![self.analyze(_text)]

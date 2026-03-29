@@ -1463,6 +1463,10 @@ impl CodebookAnalyzer {
     // -----------------------------------------------------------------------
 
     /// Analyze text, returning morphological tokens.
+    ///
+    /// Builds a full-sentence lattice where eojeol cache entries are injected as
+    /// low-cost arcs competing with Viterbi alternatives. This allows cross-eojeol
+    /// trigram context to disambiguate homographs like "나는" (NP+JX vs VV+ETM).
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
         if text.is_empty() {
             return AnalyzeResult {
@@ -1474,68 +1478,46 @@ impl CodebookAnalyzer {
 
         let t0 = now_ms();
 
-        // Hybrid: eojeol cache + Viterbi fallback
+        // Build full-sentence lattice with cache entries as arcs
+        let mut arcs = self.build_lattice(text);
+
+        // Inject eojeol cache entries as competing arcs in the lattice
         if !self.eojeol_cache.is_empty() {
-            let mut tokens = Vec::new();
-            let mut total_score = 0.0f32;
             let mut char_offset = 0usize;
 
-            // Find eojeol boundaries in original text (split by whitespace)
             for eojeol in text.split_whitespace() {
-                // Find this eojeol's position in the original text
-                let eojeol_start = text[char_offset..].find(eojeol)
+                let byte_start = text[char_offset..].find(eojeol)
                     .map(|p| char_offset + p)
                     .unwrap_or(char_offset);
-                let eojeol_char_start = text[..eojeol_start].chars().count();
+                let eojeol_char_start = text[..byte_start].chars().count();
                 let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
 
                 if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
-                    for (form, pos) in cached_morphs {
-                        tokens.push(Token {
-                            text: form.clone(),
-                            pos: *pos,
-                            start: eojeol_char_start,
-                            end: eojeol_char_end,
-                            score: None,
-                        });
-                    }
-                } else {
-                    let arcs = self.build_lattice(eojeol);
-                    let (eojeol_tokens, score) = self.viterbi(eojeol, &arcs);
-                    for token in eojeol_tokens {
-                        tokens.push(Token {
-                            start: eojeol_char_start,
-                            end: eojeol_char_end,
-                            ..token
-                        });
-                    }
-                    total_score += score;
+                    // Add cache entry as a very low-cost arc
+                    let morphemes: Vec<(String, Pos)> = cached_morphs.iter()
+                        .map(|(f, p)| (f.clone(), *p))
+                        .collect();
+
+                    // Give cache entries a strong bonus (low cost) but not absolute
+                    // -2.0 bonus: very strong prior, but cross-eojeol trigram can still override
+                    let cache_cost = -2.0;
+
+                    arcs.push(LatticeArc {
+                        start: eojeol_char_start,
+                        end: eojeol_char_end,
+                        morphemes,
+                        cost: cache_cost,
+                    });
                 }
 
-                char_offset = eojeol_start + eojeol.len();
+                char_offset = byte_start + eojeol.len();
             }
-
-            // Post-process: apply cross-eojeol rules to full sentence tokens
-            Self::fix_vx(&mut tokens);
-            Self::fix_jc_jkb(&mut tokens);
-            Self::fix_nnb(&mut tokens);
-            Self::fix_xsn_xpn(&mut tokens);
-            Self::fix_mm(&mut tokens);
-            Self::fix_jkc(&mut tokens);
-            Self::fix_jx_jc(&mut tokens);
-
-            return AnalyzeResult {
-                tokens,
-                score: total_score,
-                elapsed_ms: now_ms() - t0,
-            };
         }
 
-        // No cache: full Viterbi with eojeol-level spans
-        let arcs = self.build_lattice(text);
+        // Run sentence-level Viterbi on the full lattice
         let (raw_tokens, score) = self.viterbi(text, &arcs);
 
-        // Assign eojeol-level spans to each token
+        // Assign eojeol-level spans
         let mut tokens = Vec::with_capacity(raw_tokens.len());
         let mut eojeol_boundaries: Vec<(usize, usize)> = Vec::new();
         let mut char_offset = 0;
@@ -1549,7 +1531,6 @@ impl CodebookAnalyzer {
         }
 
         for token in raw_tokens {
-            // Find which eojeol this token belongs to
             let (es, ee) = eojeol_boundaries.iter()
                 .find(|&&(s, e)| token.start >= s && token.start < e)
                 .copied()
@@ -1557,13 +1538,14 @@ impl CodebookAnalyzer {
             tokens.push(Token { start: es, end: ee, ..token });
         }
 
-        // Post-process: apply cross-token rules
+        // Post-process
         Self::fix_vx(&mut tokens);
         Self::fix_jc_jkb(&mut tokens);
         Self::fix_nnb(&mut tokens);
         Self::fix_xsn_xpn(&mut tokens);
         Self::fix_mm(&mut tokens);
         Self::fix_jkc(&mut tokens);
+        Self::fix_jx_jc(&mut tokens);
 
         AnalyzeResult {
             tokens,
