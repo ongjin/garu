@@ -25,6 +25,7 @@ name = "garu-core"
 version = "0.1.0"
 dependencies = [
  "fst",
+ "js-sys",
 ]
 
 [[package]]

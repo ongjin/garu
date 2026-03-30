@@ -193,19 +193,43 @@ def main():
         morphs_str = " + ".join(f"{f}/{p}" for f, p in morphs)
         print(f"    {eojeol:15s} (freq={freq:4d}, cv={cv}) → {morphs_str}")
 
-    # Build binary cache
-    buf = bytearray()
-    buf.extend(struct.pack("<I", len(selected)))
+    # Build string table for morpheme forms
+    all_forms = set()
+    for _, morphs, _, _, _ in selected:
+        for form, _ in morphs:
+            all_forms.add(form)
+    sorted_forms = sorted(all_forms, key=lambda s: s.encode("utf-8"))
+    form_to_index = {f: i for i, f in enumerate(sorted_forms)}
+    string_table = bytearray()
+    string_offsets = []
+    for form in sorted_forms:
+        string_offsets.append(len(string_table))
+        string_table.extend(form.encode("utf-8"))
+    string_offsets.append(len(string_table))  # sentinel
 
+    print(f"\n  String table: {len(sorted_forms)} unique forms, {len(string_table):,} bytes")
+
+    # Build compact binary cache (v1 format)
+    buf = bytearray()
+    buf.extend(struct.pack("<I", 0xFFFFFFFF))  # format marker
+    buf.extend(struct.pack("B", 1))            # sub-version 1
+
+    # String table
+    buf.extend(struct.pack("<I", len(string_table)))
+    buf.extend(string_table)
+    buf.extend(struct.pack("<H", len(sorted_forms)))
+    for off in string_offsets:
+        buf.extend(struct.pack("<H", off))
+
+    # Entries
+    buf.extend(struct.pack("<I", len(selected)))
     for eojeol, morphs, _, _, _ in selected:
         eojeol_bytes = eojeol.encode("utf-8")
-        buf.extend(struct.pack("<H", len(eojeol_bytes)))
+        buf.extend(struct.pack("B", len(eojeol_bytes)))
         buf.extend(eojeol_bytes)
         buf.extend(struct.pack("B", len(morphs)))
         for form, pos in morphs:
-            form_bytes = form.encode("utf-8")
-            buf.extend(struct.pack("<H", len(form_bytes)))
-            buf.extend(form_bytes)
+            buf.extend(struct.pack("<H", form_to_index[form]))
             buf.extend(struct.pack("B", POS_TO_BYTE.get(pos, 0)))
 
     out_path = DATA_DIR / "eojeol_cache.bin"

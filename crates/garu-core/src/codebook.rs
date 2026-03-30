@@ -142,7 +142,7 @@ fn now_ms() -> f64 {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        0.0
+        js_sys::Date::now()
     }
 }
 
@@ -327,6 +327,14 @@ impl CodebookAnalyzer {
         if data.len() < 4 {
             return Err("Suffix codebook too short".into());
         }
+        let marker = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad header")?);
+        if marker == 0xFFFFFFFF {
+            return Self::parse_suffix_codebook_v1(data);
+        }
+        Self::parse_suffix_codebook_legacy(data)
+    }
+
+    fn parse_suffix_codebook_legacy(data: &[u8]) -> Result<(Vec<SuffixEntry>, HashMap<String, usize>, usize), String> {
         let num_entries = u32::from_le_bytes(
             data[0..4].try_into().map_err(|_| "Bad num_entries")?,
         ) as usize;
@@ -406,6 +414,115 @@ impl CodebookAnalyzer {
 
                     if pos_byte > 41 {
                         return Err(format!("Invalid POS byte in suffix: {}", pos_byte));
+                    }
+                    let pos_tag: Pos = unsafe { std::mem::transmute(pos_byte) };
+                    morphemes.push(SuffixMorpheme { form, pos: pos_tag });
+                }
+
+                analyses.push(SuffixAnalysis { morphemes, freq });
+            }
+
+            map.insert(surface.clone(), i);
+            entries.push(SuffixEntry { surface, analyses });
+        }
+
+        Ok((entries, map, max_suffix_len))
+    }
+
+    fn parse_suffix_codebook_v1(data: &[u8]) -> Result<(Vec<SuffixEntry>, HashMap<String, usize>, usize), String> {
+        let mut pos = 5; // skip 0xFFFFFFFF marker + sub-version byte
+
+        // String table
+        let st_len = u32::from_le_bytes(
+            data[pos..pos + 4].try_into().map_err(|_| "Bad st_len")?,
+        ) as usize;
+        pos += 4;
+        let string_table = &data[pos..pos + st_len];
+        pos += st_len;
+
+        let num_strings = u16::from_le_bytes(
+            data[pos..pos + 2].try_into().map_err(|_| "Bad num_strings")?,
+        ) as usize;
+        pos += 2;
+
+        let mut string_offsets = Vec::with_capacity(num_strings + 1);
+        for _ in 0..=num_strings {
+            let off = u16::from_le_bytes(
+                data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
+            ) as usize;
+            string_offsets.push(off);
+            pos += 2;
+        }
+
+        // Precompute form strings
+        let mut forms: Vec<String> = Vec::with_capacity(num_strings);
+        for i in 0..num_strings {
+            let s = std::str::from_utf8(&string_table[string_offsets[i]..string_offsets[i + 1]])
+                .map_err(|e| format!("Invalid UTF-8 in string table: {}", e))?;
+            forms.push(normalize_jamo(s));
+        }
+
+        // Max freq for dequantization
+        let max_freq_raw = u32::from_le_bytes(
+            data[pos..pos + 4].try_into().map_err(|_| "Bad max_freq")?,
+        );
+        pos += 4;
+        let ln_max_freq = (max_freq_raw.max(2) as f64).ln();
+
+        // Entries
+        let num_entries = u32::from_le_bytes(
+            data[pos..pos + 4].try_into().map_err(|_| "Bad num_entries")?,
+        ) as usize;
+        pos += 4;
+
+        let mut entries = Vec::with_capacity(num_entries);
+        let mut map = HashMap::with_capacity(num_entries);
+        let mut max_suffix_len: usize = 0;
+
+        for i in 0..num_entries {
+            let surface_len = data[pos] as usize;
+            pos += 1;
+            let surface = std::str::from_utf8(&data[pos..pos + surface_len])
+                .map_err(|e| format!("Invalid UTF-8 in surface {}: {}", i, e))?
+                .to_string();
+            pos += surface_len;
+
+            let char_len = surface.chars().count();
+            if char_len > max_suffix_len {
+                max_suffix_len = char_len;
+            }
+
+            let num_analyses = data[pos] as usize;
+            pos += 1;
+
+            let mut analyses = Vec::with_capacity(num_analyses);
+            for _ in 0..num_analyses {
+                let freq_q = data[pos];
+                pos += 1;
+                let freq = if freq_q == 0 {
+                    1u32
+                } else {
+                    ((freq_q as f64 / 255.0 * ln_max_freq).exp()).round() as u32
+                };
+
+                let num_morphemes = data[pos] as usize;
+                pos += 1;
+
+                let mut morphemes = Vec::with_capacity(num_morphemes);
+                for _ in 0..num_morphemes {
+                    let string_idx = u16::from_le_bytes(
+                        data[pos..pos + 2].try_into().map_err(|_| "Bad string_idx")?,
+                    ) as usize;
+                    pos += 2;
+                    if string_idx >= forms.len() {
+                        return Err(format!("String index {} out of range", string_idx));
+                    }
+                    let form = forms[string_idx].clone();
+
+                    let pos_byte = data[pos];
+                    pos += 1;
+                    if pos_byte > 41 {
+                        return Err(format!("Invalid POS byte: {}", pos_byte));
                     }
                     let pos_tag: Pos = unsafe { std::mem::transmute(pos_byte) };
                     morphemes.push(SuffixMorpheme { form, pos: pos_tag });
@@ -596,11 +713,19 @@ impl CodebookAnalyzer {
     }
 
     fn parse_eojeol_cache(data: Option<&[u8]>) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
-        let mut map = HashMap::new();
         let data = match data {
             Some(d) if d.len() >= 4 => d,
-            _ => return Ok(map),
+            _ => return Ok(HashMap::new()),
         };
+        let marker = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad header")?);
+        if marker == 0xFFFFFFFF {
+            return Self::parse_eojeol_cache_v1(data);
+        }
+        Self::parse_eojeol_cache_legacy(data)
+    }
+
+    fn parse_eojeol_cache_legacy(data: &[u8]) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
+        let mut map = HashMap::new();
         let num = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad ecache count")?) as usize;
         let mut pos = 4;
         for _ in 0..num {
@@ -629,6 +754,77 @@ impl CodebookAnalyzer {
                 if pos_byte <= 41 {
                     let p: Pos = unsafe { std::mem::transmute(pos_byte) };
                     morphs.push((form, p));
+                }
+            }
+            if !morphs.is_empty() {
+                map.insert(eojeol, morphs);
+            }
+        }
+        Ok(map)
+    }
+
+    fn parse_eojeol_cache_v1(data: &[u8]) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
+        let mut pos = 5; // skip marker + sub-version
+
+        // String table
+        let st_len = u32::from_le_bytes(
+            data[pos..pos + 4].try_into().map_err(|_| "Bad st_len")?,
+        ) as usize;
+        pos += 4;
+        let string_table = &data[pos..pos + st_len];
+        pos += st_len;
+
+        let num_strings = u16::from_le_bytes(
+            data[pos..pos + 2].try_into().map_err(|_| "Bad num_strings")?,
+        ) as usize;
+        pos += 2;
+
+        let mut string_offsets = Vec::with_capacity(num_strings + 1);
+        for _ in 0..=num_strings {
+            let off = u16::from_le_bytes(
+                data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
+            ) as usize;
+            string_offsets.push(off);
+            pos += 2;
+        }
+
+        let mut forms: Vec<String> = Vec::with_capacity(num_strings);
+        for i in 0..num_strings {
+            let s = std::str::from_utf8(&string_table[string_offsets[i]..string_offsets[i + 1]])
+                .map_err(|e| format!("Invalid UTF-8 in ecache string table: {}", e))?;
+            forms.push(normalize_jamo(s));
+        }
+
+        // Entries
+        let num = u32::from_le_bytes(
+            data[pos..pos + 4].try_into().map_err(|_| "Bad ecache count")?,
+        ) as usize;
+        pos += 4;
+
+        let mut map = HashMap::with_capacity(num);
+        for _ in 0..num {
+            if pos >= data.len() { break; }
+            let elen = data[pos] as usize;
+            pos += 1;
+            if pos + elen > data.len() { break; }
+            let eojeol = std::str::from_utf8(&data[pos..pos + elen])
+                .map_err(|_| "Bad UTF-8 in ecache")?.to_string();
+            pos += elen;
+            if pos >= data.len() { break; }
+            let nm = data[pos] as usize;
+            pos += 1;
+            let mut morphs = Vec::with_capacity(nm);
+            for _ in 0..nm {
+                if pos + 3 > data.len() { break; }
+                let string_idx = u16::from_le_bytes(
+                    data[pos..pos + 2].try_into().map_err(|_| "Bad string_idx")?,
+                ) as usize;
+                pos += 2;
+                let pos_byte = data[pos];
+                pos += 1;
+                if string_idx < forms.len() && pos_byte <= 41 {
+                    let p: Pos = unsafe { std::mem::transmute(pos_byte) };
+                    morphs.push((forms[string_idx].clone(), p));
                 }
             }
             if !morphs.is_empty() {

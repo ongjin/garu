@@ -708,28 +708,65 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
     # Sort entries by surface UTF-8
     sorted_surfaces = sorted(filtered.keys(), key=lambda s: s.encode("utf-8"))
 
+    # Collect max_suffix_freq and unique morpheme forms
     max_suffix_freq = 0
-    buf = bytearray()
-    buf.extend(struct.pack("<I", len(sorted_surfaces)))
+    all_forms = set()
+    for surface in sorted_surfaces:
+        for analysis in filtered[surface]:
+            if analysis["freq"] > max_suffix_freq:
+                max_suffix_freq = analysis["freq"]
+            for form, _tag in analysis["morphemes"]:
+                all_forms.add(form)
 
+    # Build deduplicated string table
+    sorted_forms = sorted(all_forms, key=lambda s: s.encode("utf-8"))
+    form_to_index = {f: i for i, f in enumerate(sorted_forms)}
+    string_table = bytearray()
+    string_offsets = []
+    for form in sorted_forms:
+        string_offsets.append(len(string_table))
+        string_table.extend(form.encode("utf-8"))
+    string_offsets.append(len(string_table))  # sentinel
+
+    print(f"  String table: {len(sorted_forms)} unique forms, {len(string_table):,} bytes")
+
+    def quantize_freq(freq, max_freq):
+        if freq <= 0 or max_freq <= 0:
+            return 0
+        ratio = math.log(max(freq, 1)) / math.log(max(max_freq, 2))
+        return max(1, min(255, round(ratio * 255)))
+
+    # Build compact binary (v1 format)
+    buf = bytearray()
+    buf.extend(struct.pack("<I", 0xFFFFFFFF))  # format marker
+    buf.extend(struct.pack("B", 1))            # sub-version 1
+
+    # String table
+    buf.extend(struct.pack("<I", len(string_table)))
+    buf.extend(string_table)
+    buf.extend(struct.pack("<H", len(sorted_forms)))
+    for off in string_offsets:
+        buf.extend(struct.pack("<H", off))
+
+    # Max freq for dequantization
+    buf.extend(struct.pack("<I", max_suffix_freq))
+
+    # Entries
+    buf.extend(struct.pack("<I", len(sorted_surfaces)))
     for surface in sorted_surfaces:
         analyses = filtered[surface]
         surface_bytes = surface.encode("utf-8")
-        buf.extend(struct.pack("<H", len(surface_bytes)))
+        buf.extend(struct.pack("B", len(surface_bytes)))
         buf.extend(surface_bytes)
-        buf.extend(struct.pack("<H", len(analyses)))
+        buf.extend(struct.pack("B", len(analyses)))
 
         for analysis in analyses:
-            freq = analysis["freq"]
-            if freq > max_suffix_freq:
-                max_suffix_freq = freq
+            freq_q = quantize_freq(analysis["freq"], max_suffix_freq)
             morphemes = analysis["morphemes"]
-            buf.extend(struct.pack("<I", freq))
+            buf.extend(struct.pack("B", freq_q))
             buf.extend(struct.pack("B", len(morphemes)))
             for form, tag in morphemes:
-                form_bytes = form.encode("utf-8")
-                buf.extend(struct.pack("<H", len(form_bytes)))
-                buf.extend(form_bytes)
+                buf.extend(struct.pack("<H", form_to_index[form]))
                 buf.extend(struct.pack("B", pos_byte(tag)))
 
     return bytes(buf), max_suffix_freq
@@ -988,7 +1025,15 @@ def main():
     ecache_path = DATA_DIR / "eojeol_cache.bin"
     if ecache_path.exists():
         ecache_data = ecache_path.read_bytes()
-        n_ec = int.from_bytes(ecache_data[:4], 'little')
+        marker = int.from_bytes(ecache_data[:4], 'little')
+        if marker == 0xFFFFFFFF:
+            # v1 compact format: skip marker(4) + version(1) + string table, read entry count later
+            st_len = int.from_bytes(ecache_data[5:9], 'little')
+            ns = int.from_bytes(ecache_data[9+st_len:11+st_len], 'little')
+            ec_off = 11 + st_len + (ns + 1) * 2
+            n_ec = int.from_bytes(ecache_data[ec_off:ec_off+4], 'little')
+        else:
+            n_ec = marker
         print(f"  Eojeol cache: {n_ec} entries, {len(ecache_data):,} bytes")
         write_section(buf, 13, ecache_data)
     else:
