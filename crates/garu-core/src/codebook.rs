@@ -1415,17 +1415,9 @@ impl CodebookAnalyzer {
         }
         for i in 1..tokens.len() {
             let prev_pos = tokens[i - 1].pos;
-            // Only apply after NNG (not NNP/NNB — those are rarely 하다 verb stems)
+            // Apply after NNG (하다 verb stems)
             if prev_pos != Pos::NNG {
                 continue;
-            }
-            // Don't apply if there's a case marker between NNG and 하/되
-            // (e.g., "일을 하다" → 하 stays VV)
-            if i >= 2 {
-                let pp = tokens[i - 2].pos;
-                if matches!(pp, Pos::JKO | Pos::JKS | Pos::JKB) {
-                    continue;
-                }
             }
             let form = tokens[i].text.as_str();
             if tokens[i].pos == Pos::VV && (form == "하" || form == "되" || form == "시키") {
@@ -1621,6 +1613,79 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Fix NNB → NNG when not preceded by ETM.
+    /// Dependency nouns (NNB) require a preceding adnominal ending (ETM).
+    /// Without ETM, single-char NNB like 이(tooth), 수(number) should be NNG.
+    fn fix_nnb_no_etm(tokens: &mut [Token]) {
+        for i in 0..tokens.len() {
+            if tokens[i].pos != Pos::NNB {
+                continue;
+            }
+            // Check if preceded by ETM
+            let has_etm = i > 0 && tokens[i - 1].pos == Pos::ETM;
+            if has_etm {
+                continue; // correct NNB usage
+            }
+            let form = tokens[i].text.as_str();
+            // Only convert specific single-char NNB that are commonly NNG
+            // Skip: 것/수/바/데/줄 — these are legitimate NNB even without ETM in colloquial speech
+            // Target: 이(tooth), 초(seconds) — almost always NNG when standalone
+            if form == "이" {
+                tokens[i].pos = Pos::NNG;
+            }
+        }
+    }
+
+    /// Fix XPN in standalone eojeol → NNG or MM.
+    /// Prefixes cannot be independent eojeols. If XPN's start differs from next token's start,
+    /// it's a separate eojeol and should not be XPN.
+    fn fix_xpn_standalone(tokens: &mut [Token]) {
+        for i in 0..tokens.len() {
+            if tokens[i].pos != Pos::XPN {
+                continue;
+            }
+            // Check if next token is in the same eojeol (same start position)
+            let same_eojeol = i + 1 < tokens.len() && tokens[i].start == tokens[i + 1].start;
+            if same_eojeol {
+                continue; // attached to next word, XPN is correct
+            }
+            // Standalone eojeol — convert to appropriate POS
+            let form = tokens[i].text.as_str();
+            if form == "저" {
+                // Check if followed by a noun → MM (관형사)
+                let followed_by_noun = i + 1 < tokens.len() && matches!(
+                    tokens[i + 1].pos,
+                    Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::XR
+                );
+                tokens[i].pos = if followed_by_noun { Pos::MM } else { Pos::NP };
+            } else {
+                tokens[i].pos = Pos::NNG;
+            }
+        }
+    }
+
+    /// Fix EC → EF at end-of-sentence for endings that can be terminal.
+    fn fix_ec_eos(tokens: &mut [Token]) {
+        if tokens.is_empty() {
+            return;
+        }
+        // Find the last non-SF token
+        let last_idx = if tokens.last().map_or(false, |t| t.pos == Pos::SF) && tokens.len() >= 2 {
+            tokens.len() - 2
+        } else {
+            tokens.len() - 1
+        };
+        let last = &tokens[last_idx];
+        if last.pos != Pos::EC {
+            return;
+        }
+        // Only convert specific endings that can be EF
+        let form = last.text.as_str();
+        if matches!(form, "다" | "니" | "자" | "으니" | "라" | "지") {
+            tokens[last_idx].pos = Pos::EF;
+        }
+    }
+
     /// Merge consecutive single-char SL or SN tokens that are adjacent.
     fn merge_sl_sn_tokens(tokens: Vec<Token>) -> Vec<Token> {
         if tokens.is_empty() {
@@ -1755,6 +1820,9 @@ impl CodebookAnalyzer {
         Self::fix_mm(&mut tokens);
         Self::fix_jkc(&mut tokens);
         Self::fix_jx_jc(&mut tokens);
+        Self::fix_nnb_no_etm(&mut tokens);
+        Self::fix_xpn_standalone(&mut tokens);
+        Self::fix_ec_eos(&mut tokens);
 
         AnalyzeResult {
             tokens,
