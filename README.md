@@ -89,7 +89,7 @@ const garu = await Garu.load({ modelData });
 └──────────────────┬──────────────────────┘
                    ↓
          ┌─────────┴──────────┐
-         │  어절 캐시 조회     │  Hit → 즉시 반환 (10K entries, 328KB)
+         │  어절 캐시 조회     │  Hit → 즉시 반환 (10K entries, ~235KB)
          └─────────┬──────────┘
                    ↓ Miss
          ┌─────────┴──────────┐
@@ -140,7 +140,7 @@ WASM 모듈을 초기화하고 모델을 로드합니다.
 형태소 분석을 수행합니다.
 
 - `text` -- 분석할 한국어 텍스트
-- `options.topN` -- 1보다 크면 N-best 결과를 배열로 반환
+- `options.topN` -- 1보다 크면 N-best 결과를 배열로 반환 (아직 완전히 지원되지 않으며, 결과가 더 적을 수 있음)
 
 ```typescript
 interface AnalyzeResult {
@@ -173,7 +173,7 @@ WASM 분석기가 초기화되어 사용 가능한 상태이면 `true`를 반환
 interface ModelInfo {
   version: string;  // 모델 버전
   size: number;     // 모델 크기 (바이트)
-  accuracy: number; // 보고된 정확도 (0.951)
+  accuracy: number; // 보고된 정확도 (0.953)
 }
 ```
 

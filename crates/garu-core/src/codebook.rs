@@ -4,6 +4,15 @@ use std::collections::HashMap;
 use crate::trie::Dict;
 use crate::types::{AnalyzeResult, Pos, Token};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(inline_js = "export function performance_now() { return performance.now(); }")]
+extern "C" {
+    fn performance_now() -> f64;
+}
+
 const NUM_POS: usize = 42;
 const BOS: u8 = 255;
 
@@ -142,7 +151,7 @@ fn now_ms() -> f64 {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        js_sys::Date::now()
+        performance_now()
     }
 }
 
@@ -994,8 +1003,9 @@ impl CodebookAnalyzer {
 
             // Strategy A: Content word + optional suffix
             // Use common_prefix_search on the remaining text from position i
-            let remaining: String = chars[i..].iter().collect();
-            let prefix_matches = self.content_dict.common_prefix_search(&remaining);
+            let byte_start = char_to_byte[i];
+            let remaining = &text[byte_start..];
+            let prefix_matches = self.content_dict.common_prefix_search(remaining);
 
             for (byte_len, entries) in &prefix_matches {
                 let match_str = &remaining[..*byte_len];
@@ -1409,7 +1419,7 @@ impl CodebookAnalyzer {
             // Don't apply if there's a case marker between NNG and 하/되
             // (e.g., "일을 하다" → 하 stays VV)
             if i >= 2 {
-                let pp = tokens[i - 1].pos;
+                let pp = tokens[i - 2].pos;
                 if matches!(pp, Pos::JKO | Pos::JKS | Pos::JKB) {
                     continue;
                 }

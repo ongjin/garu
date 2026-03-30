@@ -85,7 +85,7 @@ interface Token {
 }
 ```
 
-Set `options.topN > 1` to get N-best results as an array.
+Set `options.topN > 1` to get N-best results as an array. Note: topN > 1 is not yet fully supported and may return fewer results.
 
 ### `garu.nouns(text): string[]`
 

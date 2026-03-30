@@ -41,28 +41,6 @@ impl TrieNode {
 
 // ---- FST value decoding ----
 
-/// Decode FST u64 value into one or two (Pos, score) pairs.
-/// Encoding v2: value = pos1(8) | qfreq1(16) | pos2(8) | qfreq2(16) | flags(16)
-/// pos2=0xFF means no secondary entry.
-fn decode_fst_value(value: u64) -> (Pos, f32) {
-    let pos_byte = (value & 0xFF) as u8;
-    let qfreq = ((value >> 8) & 0xFFFF) as u16;
-
-    let pos: Pos = if pos_byte <= 41 {
-        unsafe { std::mem::transmute(pos_byte) }
-    } else {
-        Pos::NNP
-    };
-
-    let score = if qfreq > 0 {
-        -(qfreq as f32 / 65535.0).ln()
-    } else {
-        15.0
-    };
-
-    (pos, score)
-}
-
 /// Decode FST value returning all POS entries (primary + optional secondary).
 fn decode_fst_value_multi(value: u64) -> Vec<(Pos, f32)> {
     let pos1_byte = (value & 0xFF) as u8;

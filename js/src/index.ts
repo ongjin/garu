@@ -122,8 +122,13 @@ export class Garu {
    *
    * When `options.topN` is greater than 1, returns an array of N-best results.
    * Otherwise returns a single AnalyzeResult.
+   *
+   * Note: topN > 1 is not yet fully supported and may return fewer results.
    */
   analyze(text: string, options?: AnalyzeOptions): AnalyzeResult | AnalyzeResult[] {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
     const topN = options?.topN ?? 1;
 
     if (topN > 1) {
@@ -143,6 +148,9 @@ export class Garu {
    * Quick tokenisation — returns an array of surface-form strings.
    */
   tokenize(text: string): string[] {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
     if (text === '') {
       return [];
     }
@@ -153,6 +161,9 @@ export class Garu {
    * Extract nouns (NNG, NNP) from text.
    */
   nouns(text: string): string[] {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
     if (text === '') {
       return [];
     }
