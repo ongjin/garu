@@ -7,6 +7,7 @@
 - **F1 95.3%** on NIKL MP benchmark (vs. Kiwi 87.9%)
 - **< 1ms** inference per sentence
 - **Offline-ready** -- works without network
+- **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
 
 ## Comparison
 
