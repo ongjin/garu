@@ -10,6 +10,9 @@ fn main() {
         .expect("Failed to load model");
 
     let input_path = std::env::args().nth(1).expect("Need input file path");
+    let output_format = std::env::args().nth(2).unwrap_or_default();
+    let json_mode = output_format == "--json";
+
     let file = fs::File::open(&input_path).expect("Failed to open input");
     let reader = io::BufReader::new(file);
 
@@ -20,14 +23,27 @@ fn main() {
         let line = line.expect("Failed to read line");
         let line = line.trim();
         if line.is_empty() {
-            writeln!(out, "[]").unwrap();
+            if json_mode {
+                writeln!(out, "[]").unwrap();
+            } else {
+                writeln!(out, "[]").unwrap();
+            }
             continue;
         }
         let result = analyzer.analyze(line);
-        let tokens: Vec<String> = result.tokens.iter()
-            .map(|t| format!("{}\t{}", t.text, t.pos.as_str()))
-            .collect();
-        writeln!(out, "{}", tokens.join("\n")).unwrap();
-        writeln!(out, "---").unwrap();
+
+        if json_mode {
+            // JSON output: [["morpheme", "POS"], ...]
+            let tokens: Vec<String> = result.tokens.iter()
+                .map(|t| format!("[\"{}\",\"{}\"]", t.text.replace('"', "\\\""), t.pos.as_str()))
+                .collect();
+            writeln!(out, "[{}]", tokens.join(",")).unwrap();
+        } else {
+            let tokens: Vec<String> = result.tokens.iter()
+                .map(|t| format!("{}\t{}", t.text, t.pos.as_str()))
+                .collect();
+            writeln!(out, "{}", tokens.join("\n")).unwrap();
+            writeln!(out, "---").unwrap();
+        }
     }
 }
