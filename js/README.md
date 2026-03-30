@@ -108,6 +108,10 @@ Returns surface-form strings only. Lightweight alternative to `analyze()`.
 
 Free WASM memory. Instance is unusable after this call.
 
+## Acknowledgments
+
+The morphological analysis model is trained on the **NIKL Morpheme-Tagged Corpus (v1.1)** provided by the National Institute of Korean Language (국립국어원). The model contains only derived frequency statistics, not original text.
+
 ## License
 
 MIT
