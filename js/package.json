@@ -1,18 +1,30 @@
 {
   "name": "garu-ko",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Ultra-lightweight Korean morphological analyzer for the web (2.2MB model, WASM 93KB, F1 95.3%)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "pkg", "models", "README.md"],
+  "files": [
+    "dist",
+    "pkg",
+    "models",
+    "README.md"
+  ],
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/garu-wasm --target web --out-dir ../../js/pkg",
     "build:js": "tsc",
     "build": "npm run build:wasm && npm run build:js",
     "test": "vitest run"
   },
-  "keywords": ["korean", "morphological-analysis", "nlp", "wasm", "lightweight", "browser"],
+  "keywords": [
+    "korean",
+    "morphological-analysis",
+    "nlp",
+    "wasm",
+    "lightweight",
+    "browser"
+  ],
   "author": "cyj <dydwls140@naver.com>",
   "repository": {
     "type": "git",
@@ -20,6 +32,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "typescript": "^5.4",
     "vitest": "^2.0"
   }

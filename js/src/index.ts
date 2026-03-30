@@ -37,8 +37,10 @@ export interface ModelInfo {
   accuracy: number;
 }
 
-const DEFAULT_MODEL_URL =
-  new URL('../models/base.gmdl', import.meta.url).href;
+const isNode =
+  typeof process !== 'undefined' &&
+  process.versions != null &&
+  process.versions.node != null;
 
 const EMPTY_RESULT: AnalyzeResult = Object.freeze({
   tokens: [],
@@ -75,16 +77,30 @@ export class Garu {
 
     if (options?.modelData) {
       modelBytes = new Uint8Array(options.modelData);
+    } else if (options?.modelUrl) {
+      const response = await fetch(options.modelUrl);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch model from ${options.modelUrl}: ${response.status} ${response.statusText}`,
+        );
+      }
+      modelBytes = new Uint8Array(await response.arrayBuffer());
+    } else if (isNode) {
+      const { readFile } = await import('fs/promises');
+      const { fileURLToPath } = await import('url');
+      const { join, dirname } = await import('path');
+      const dir = dirname(fileURLToPath(import.meta.url));
+      const buf = await readFile(join(dir, '..', 'models', 'base.gmdl'));
+      modelBytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     } else {
-      const url = options?.modelUrl ?? DEFAULT_MODEL_URL;
+      const url = new URL('../models/base.gmdl', import.meta.url).href;
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(
           `Failed to fetch model from ${url}: ${response.status} ${response.statusText}`,
         );
       }
-      const buffer = await response.arrayBuffer();
-      modelBytes = new Uint8Array(buffer);
+      modelBytes = new Uint8Array(await response.arrayBuffer());
     }
 
     // Construct the WASM analyzer
