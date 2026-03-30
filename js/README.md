@@ -87,13 +87,16 @@ interface Token {
 
 Set `options.topN > 1` to get N-best results as an array. Note: topN > 1 is not yet fully supported and may return fewer results.
 
-### `garu.nouns(text): string[]`
+### `garu.nouns(text, options?): string[]`
 
-Extract nouns (NNG, NNP) from text.
+Extract nouns (NNG, NNP) from text. Set `options.includeSL` to also include foreign tokens (SL) like "AI", "BM25".
 
 ```js
 garu.nouns('인공지능 기술이 발전했다');
 // ["인공", "지능", "기술", "발전"]
+
+garu.nouns('AI 기술이 발전했다', { includeSL: true });
+// ["AI", "기술", "발전"]
 ```
 
 ### `garu.tokenize(text): string[]`
