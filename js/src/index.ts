@@ -125,6 +125,19 @@ export class Garu {
   }
 
   /**
+   * Extract nouns (NNG, NNP) from text.
+   */
+  nouns(text: string): string[] {
+    if (text === '') {
+      return [];
+    }
+    const result = this._wasm.analyze(text) as AnalyzeResult;
+    return result.tokens
+      .filter((t) => t.pos === 'NNG' || t.pos === 'NNP')
+      .map((t) => t.text);
+  }
+
+  /**
    * Whether the WASM analyzer is loaded and ready.
    */
   isLoaded(): boolean {
