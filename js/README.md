@@ -87,6 +87,15 @@ interface Token {
 
 Set `options.topN > 1` to get N-best results as an array.
 
+### `garu.nouns(text): string[]`
+
+Extract nouns (NNG, NNP) from text.
+
+```js
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공", "지능", "기술", "발전"]
+```
+
 ### `garu.tokenize(text): string[]`
 
 Returns surface-form strings only. Lightweight alternative to `analyze()`.
