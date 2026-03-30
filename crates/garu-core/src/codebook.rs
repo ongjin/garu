@@ -907,18 +907,21 @@ impl CodebookAnalyzer {
         let mut i = 0;
         while i < chars.len() {
             if chars[i].is_ascii_alphabetic() {
-                // SL run: [A-Za-z][A-Za-z.]*[A-Za-z] or single [A-Za-z]
+                // SL run: starts with alpha, may include digits/hyphens (b2b, BM25, GPT-4o)
                 let start = i;
                 i += 1;
-                while i < chars.len() && (chars[i].is_ascii_alphabetic() || chars[i] == '.') {
+                while i < chars.len()
+                    && (chars[i].is_ascii_alphanumeric() || chars[i] == '-' || chars[i] == '.')
+                {
                     i += 1;
                 }
-                // Trim trailing dots
-                while i > start + 1 && chars[i - 1] == '.' {
+                // Trim trailing dots/hyphens
+                while i > start + 1 && (chars[i - 1] == '.' || chars[i - 1] == '-') {
                     i -= 1;
                 }
                 runs.push((start, i, Pos::SL));
             } else if chars[i].is_ascii_digit() {
+                // SN run: digits only
                 let start = i;
                 i += 1;
                 while i < chars.len() && chars[i].is_ascii_digit() {
@@ -1815,6 +1818,15 @@ mod tests {
         assert_eq!(runs[0], (0, 5, Pos::SL));
         assert_eq!(runs[1], (6, 9, Pos::SN));
         assert_eq!(runs[2], (10, 15, Pos::SL));
+
+        // Mixed alphanumeric: alpha-start includes digits/hyphens
+        let chars2: Vec<char> = "b2b BM25 GPT-4o 2024".chars().collect();
+        let runs2 = CodebookAnalyzer::find_ascii_runs(&chars2);
+        assert_eq!(runs2.len(), 4);
+        assert_eq!(runs2[0], (0, 3, Pos::SL));   // b2b
+        assert_eq!(runs2[1], (4, 8, Pos::SL));   // BM25
+        assert_eq!(runs2[2], (9, 15, Pos::SL));  // GPT-4o
+        assert_eq!(runs2[3], (16, 20, Pos::SN)); // 2024
     }
 
     #[test]
