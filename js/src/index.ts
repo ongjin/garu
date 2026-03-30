@@ -26,6 +26,10 @@ export interface AnalyzeOptions {
   topN?: number;
 }
 
+export interface NounsOptions {
+  includeSL?: boolean;
+}
+
 export interface LoadOptions {
   modelData?: ArrayBuffer;
   modelUrl?: string;
@@ -159,8 +163,9 @@ export class Garu {
 
   /**
    * Extract nouns (NNG, NNP) from text.
+   * Set `options.includeSL` to also include foreign tokens (SL) like "AI", "BM25".
    */
-  nouns(text: string): string[] {
+  nouns(text: string, options?: NounsOptions): string[] {
     if (!this._loaded) {
       throw new Error('Garu instance has been destroyed');
     }
@@ -168,8 +173,9 @@ export class Garu {
       return [];
     }
     const result = this._wasm.analyze(text) as AnalyzeResult;
+    const includeSL = options?.includeSL ?? false;
     return result.tokens
-      .filter((t) => t.pos === 'NNG' || t.pos === 'NNP')
+      .filter((t) => t.pos === 'NNG' || t.pos === 'NNP' || (includeSL && t.pos === 'SL'))
       .map((t) => t.text);
   }
 
