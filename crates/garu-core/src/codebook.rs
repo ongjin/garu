@@ -1133,6 +1133,27 @@ impl CodebookAnalyzer {
             }
         }
 
+        // Inject VCP+EF arcs for "입니다/입니까" patterns.
+        // These high-frequency endings often lose to dictionary entries like 진입/NNG.
+        let text_chars: &[char] = &chars;
+        for i in 0..n {
+            if i + 3 <= n {
+                let three: String = text_chars[i..i + 3].iter().collect();
+                if three == "입니다" || three == "입니까" {
+                    let ef = if three == "입니다" { "ㅂ니다" } else { "ㅂ니까" };
+                    arcs.push(LatticeArc {
+                        start: i,
+                        end: i + 3,
+                        morphemes: vec![
+                            ("이".to_string(), Pos::VCP),
+                            (ef.to_string(), Pos::EF),
+                        ],
+                        cost: -1.0, // negative cost to strongly favor VCP+EF
+                    });
+                }
+            }
+        }
+
         // OOV fallback: single-character arcs for uncovered positions
         // Check which positions have at least one arc starting there
         let mut has_arc = vec![false; n];
