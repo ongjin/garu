@@ -54,4 +54,16 @@ fn test_codebook_analyzer_v3() {
         let got: Vec<&str> = r.tokens.iter().map(|t| t.text.as_str()).collect();
         assert_eq!(got, *expected, "Mismatch for '{input}'");
     }
+
+    // XSV/XSA disambiguation tests
+    let xsa_cases = [
+        "어제 늦게까지 공부했더니 피곤하다",
+        "피곤한 하루",
+        "공부하는 학생",
+    ];
+    for input in &xsa_cases {
+        let r = analyzer.analyze(input);
+        println!("\n{input}:");
+        for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+    }
 }

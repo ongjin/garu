@@ -1684,24 +1684,70 @@ impl CodebookAnalyzer {
         }
     }
 
-    /// Fix XSV/XSA: 하/되 after NNG → XSV; 하/VA after NNG → XSA.
-    /// Only apply when NNG is directly attached (no JKO/JKS intervening).
+    /// Fix XSV/XSA: 하/되 after NNG → XSV or XSA based on context.
+    /// Uses following morpheme patterns to disambiguate:
+    ///   + 는/ETM → XSV (VA can't take 는 for present adnominal)
+    ///   + ㄴ/ETM → XSA (VA present adnominal: 피곤한)
+    ///   + 게/EC  → XSA (VA adverbial: 피곤하게)
+    ///   + default → XSV
     fn fix_xsv_xsa(tokens: &mut [Token]) {
         if tokens.len() < 2 {
             return;
         }
         for i in 1..tokens.len() {
             let prev_pos = tokens[i - 1].pos;
-            // Apply after NNG (하다 verb stems)
             if prev_pos != Pos::NNG {
                 continue;
             }
             let form = tokens[i].text.as_str();
-            if tokens[i].pos == Pos::VV && (form == "하" || form == "되" || form == "시키") {
-                tokens[i].pos = Pos::XSV;
-            } else if tokens[i].pos == Pos::VA && form == "하" {
-                tokens[i].pos = Pos::XSA;
+            if form == "되" || form == "시키" {
+                if tokens[i].pos == Pos::VV || tokens[i].pos == Pos::VA {
+                    tokens[i].pos = Pos::XSV;
+                }
+                continue;
             }
+            if form != "하" {
+                continue;
+            }
+            if tokens[i].pos != Pos::VV && tokens[i].pos != Pos::VA
+                && tokens[i].pos != Pos::XSV && tokens[i].pos != Pos::XSA {
+                continue;
+            }
+
+            // If Viterbi already chose VA → XSA
+            if tokens[i].pos == Pos::VA {
+                tokens[i].pos = Pos::XSA;
+                continue;
+            }
+
+            // Disambiguate VV/XSV vs XSA using following morpheme
+            let next_form = if i + 1 < tokens.len() { tokens[i + 1].text.as_str() } else { "" };
+            let next_pos = if i + 1 < tokens.len() { tokens[i + 1].pos } else { Pos::SF };
+
+            let is_xsa = match (next_pos, next_form) {
+                // ㄴ/ETM after 하 → VA present adnominal (피곤한)
+                (Pos::ETM, "ㄴ") => true,
+                // 게/EC → VA adverbial (피곤하게)
+                (Pos::EC, "게") => true,
+                // 어/아 + 지다 patterns → VA (피곤해지다)
+                (Pos::EC, "어" | "아") => {
+                    if i + 2 < tokens.len() && tokens[i + 2].text == "지" {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                // 는/ETM → definitely VV (공부하는)
+                (Pos::ETM, "는") => false,
+                // 하+다/EF directly → XSA (피곤하다 = 형용사, 현재 상태)
+                (Pos::EF, "다") => true,
+                // 하+EP(었/았) → XSV (공부했다 = 동사, 과거)
+                (Pos::EP, _) => false,
+                // Default: XSV
+                _ => false,
+            };
+
+            tokens[i].pos = if is_xsa { Pos::XSA } else { Pos::XSV };
         }
     }
 
