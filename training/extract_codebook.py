@@ -81,7 +81,27 @@ def load_sentences(max_sentences=1_200_000):
             sentences.append(text)
             if len(sentences) >= max_sentences:
                 break
-    print(f"Loaded {len(sentences):,} sentences")
+    print(f"  kowikitext: {len(sentences):,} sentences")
+
+    # Namuwikiltext via Korpora (if available) — adds colloquial/slang coverage
+    namu_path = Path("/tmp/korpora/namuwikitext/namuwikitext_20200302.train")
+    if namu_path.exists():
+        namu_max = 500_000
+        namu_count = 0
+        with open(namu_path) as f:
+            for line in f:
+                text = line.strip()
+                if not text or text.startswith('=') or len(text) < 5 or len(text) > 200:
+                    continue
+                sentences.append(text)
+                namu_count += 1
+                if namu_count >= namu_max:
+                    break
+        print(f"  namuwikitext: {namu_count:,} sentences")
+    else:
+        print(f"  namuwikitext: not found (skipped)")
+
+    print(f"Total: {len(sentences):,} sentences")
     return sentences
 
 

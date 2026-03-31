@@ -22,6 +22,9 @@ export interface AnalyzeResult {
   elapsed: number;
 }
 
+export { normalizeText, splitSentences } from './normalize.js';
+export type { NormalizeOptions, Segment } from './normalize.js';
+
 export interface AnalyzeOptions {
   topN?: number;
 }

@@ -1159,8 +1159,11 @@ impl CodebookAnalyzer {
         // This lets Viterbi choose EF when trigram context supports it,
         // compensating for EC's structural frequency advantage in the codebook.
         {
+            // Include SF punctuation and compatibility jamo (ㄱ-ㅣ, U+3131-U+3163)
+            // Trailing jamo like ㅋ/ㅠ/ㅜ signal sentence-end in informal text.
             let sf_positions: Vec<usize> = chars.iter().enumerate()
-                .filter(|(_, &c)| matches!(c, '.' | '!' | '?' | '…'))
+                .filter(|(_, &c)| matches!(c, '.' | '!' | '?' | '…')
+                    || (c >= '\u{3131}' && c <= '\u{3163}'))
                 .map(|(i, _)| i)
                 .collect();
 
@@ -1181,6 +1184,46 @@ impl CodebookAnalyzer {
                     }
                 }
                 arcs.extend(ef_arcs);
+            }
+        }
+
+        // Eojeol-level NNG span arcs for OOV recovery.
+        // For each whitespace-delimited eojeol of 3–7 pure-Hangul syllables,
+        // inject a single NNG arc spanning the whole eojeol.
+        // Cost formula: oov_penalty * 1.2 * sqrt(n)
+        // This ensures well-analyzed eojeols (됐다=8.11, 봤다=7.42) retain their
+        // decomposition while truly OOV eojeols (탕후루~35) use the span arc.
+        {
+            const SPAN_FACTOR: f32 = 2.8;
+            const SPAN_MIN_LEN: usize = 3;
+            const SPAN_MAX_LEN: usize = 7;
+            let mut ej_start = 0;
+            while ej_start < n {
+                if chars[ej_start].is_whitespace() {
+                    ej_start += 1;
+                    continue;
+                }
+                let mut ej_end = ej_start;
+                while ej_end < n && !chars[ej_end].is_whitespace() {
+                    ej_end += 1;
+                }
+                let ej_len = ej_end - ej_start;
+                if ej_len >= SPAN_MIN_LEN && ej_len <= SPAN_MAX_LEN {
+                    let all_hangul = chars[ej_start..ej_end]
+                        .iter()
+                        .all(|&c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
+                    if all_hangul {
+                        let surface: String = chars[ej_start..ej_end].iter().collect();
+                        let span_cost = self.oov_penalty * SPAN_FACTOR * (ej_len as f32).sqrt();
+                        arcs.push(LatticeArc {
+                            start: ej_start,
+                            end: ej_end,
+                            morphemes: vec![(surface, Pos::NNG)],
+                            cost: span_cost,
+                        });
+                    }
+                }
+                ej_start = ej_end;
             }
         }
 
@@ -1828,7 +1871,9 @@ impl CodebookAnalyzer {
                     // For the last eojeol ending with EC, weaken the bonus so Viterbi
                     // can choose EF if the SF-aware arc (above) provides a better path.
                     let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
-                        .any(|c| !c.is_whitespace() && !matches!(c, '.' | '!' | '?' | '…'));
+                        .any(|c| !c.is_whitespace()
+                            && !matches!(c, '.' | '!' | '?' | '…')
+                            && !(c >= '\u{3131}' && c <= '\u{3163}'));
                     let last_is_ec = cached_morphs.last()
                         .map_or(false, |(_, p)| *p == Pos::EC);
                     let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };

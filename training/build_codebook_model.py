@@ -654,6 +654,34 @@ def augment_contractions(codebook: dict) -> dict:
             if new_key not in existing_keys:
                 codebook[char].append({"morphemes": morphs, "freq": freq})
 
+    # Dialect endings: bypass MIN_SUFFIX_FREQ filter (same as jamo suffixes above)
+    DIALECT_SUFFIXES = {
+        "유":   [{"morphemes": [["유",  "EF"]], "freq": 200}],   # 충청 ~유
+        "어유": [{"morphemes": [["어유","EF"]], "freq": 200}],   # 충청 먹+어유
+        "아유": [{"morphemes": [["아유","EF"]], "freq": 200}],   # 충청 봐유
+        "슈":   [{"morphemes": [["슈",  "EF"]], "freq": 300}],   # 충청 ~슈 (EF 신규)
+        "제":   [{"morphemes": [["제",  "EF"]], "freq": 300}],   # 경상 ~제
+        "노":   [{"morphemes": [["노",  "EF"]], "freq": 800}],   # 경상 가노
+        "당게": [{"morphemes": [["당게","EF"]], "freq": 200}],   # 전라 ~당게
+        "당께": [{"morphemes": [["당께","EF"]], "freq": 200}],   # 전라 ~당께
+        "랑께": [{"morphemes": [["랑께","EF"]], "freq": 200}],   # 전라 ~랑께
+        "쿠다": [{"morphemes": [["쿠다","EF"]], "freq": 200}],   # 제주 ~쿠다
+    }
+    dialect_added = 0
+    for surface, analyses in DIALECT_SUFFIXES.items():
+        if surface not in codebook:
+            codebook[surface] = analyses
+            dialect_added += len(analyses)
+        else:
+            for a in analyses:
+                new_key = tuple(tuple(m) for m in a["morphemes"])
+                found = any(tuple(tuple(m) for m in e["morphemes"]) == new_key
+                            for e in codebook[surface])
+                if not found:
+                    codebook[surface].append(a)
+                    dialect_added += 1
+    print(f"  Dialect suffix augmentation: {dialect_added} entries added")
+
     print(f"  Contraction augmentation: {added} new entries added")
     return codebook
 
