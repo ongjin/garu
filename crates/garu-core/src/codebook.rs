@@ -1,6 +1,7 @@
 //! Codebook-based morphological analyzer (lattice + Viterbi).
 
 use std::collections::HashMap;
+use std::io::Read as IoRead;
 use crate::trie::Dict;
 use crate::types::{AnalyzeResult, Pos, Token};
 
@@ -221,8 +222,20 @@ pub struct CodebookAnalyzer {
 }
 
 impl CodebookAnalyzer {
-    /// Parse a GMDL v3 file from raw bytes.
+    /// Parse a GMDL v3 file from raw bytes (supports gzip-compressed input).
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        // Auto-detect gzip (magic bytes 1f 8b) and decompress
+        if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+            let mut decoder = flate2::read::GzDecoder::new(data);
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed)
+                .map_err(|e| format!("Gzip decompression failed: {}", e))?;
+            return Self::from_bytes_inner(&decompressed);
+        }
+        Self::from_bytes_inner(data)
+    }
+
+    fn from_bytes_inner(data: &[u8]) -> Result<Self, String> {
         if data.len() < 8 {
             return Err("Data too short for GMDL header".into());
         }
