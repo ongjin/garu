@@ -63,6 +63,46 @@ fn classify_oov_char(ch: char) -> Pos {
 }
 
 // ---------------------------------------------------------------------------
+// Hangul syllable decomposition (for jongseong splitting)
+// ---------------------------------------------------------------------------
+
+/// Split a Hangul syllable's jongseong: returns (syllable_without_jong, jamo_char).
+/// e.g. '친' → Some(('치', 'ㄴ')), '다' → None (no jongseong).
+fn split_jongseong(ch: char) -> Option<(char, char)> {
+    let code = ch as u32;
+    if code < 0xAC00 || code > 0xD7A3 {
+        return None;
+    }
+    let offset = code - 0xAC00;
+    let jong = offset % 28;
+    if jong == 0 {
+        return None; // no jongseong
+    }
+    // Only handle single jongseong (skip double jongseong like ㄳ, ㄵ, etc.)
+    let jamo = match jong {
+        1 => 'ㄱ',
+        2 => 'ㄲ',
+        4 => 'ㄴ',
+        7 => 'ㄷ',
+        8 => 'ㄹ',
+        16 => 'ㅁ',
+        17 => 'ㅂ',
+        19 => 'ㅅ',
+        20 => 'ㅆ',
+        21 => 'ㅇ',
+        22 => 'ㅈ',
+        23 => 'ㅊ',
+        24 => 'ㅋ',
+        25 => 'ㅌ',
+        26 => 'ㅍ',
+        27 => 'ㅎ',
+        _ => return None, // double jongseong — skip
+    };
+    let base = 0xAC00 + (offset / 28) * 28; // remove jongseong
+    Some((char::from_u32(base).unwrap(), jamo))
+}
+
+// ---------------------------------------------------------------------------
 // Jamo normalization
 // ---------------------------------------------------------------------------
 
@@ -1075,6 +1115,67 @@ impl CodebookAnalyzer {
                                         morphemes: combined,
                                         cost: word_cost + suf_cost,
                                     });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy A3: Jongseong split — content word with merged jongseong
+            // e.g. "고친다" → split last char of prefix: "고친" → "고치" + ㄴ
+            //       then lookup "고치" in dict (VV), "ㄴ다" in suffix codebook (EF)
+            // This handles conjugated forms where the verb stem's final syllable
+            // merges with a consonant-initial suffix (ㄴ, ㄹ, ㅂ, etc.)
+            {
+                // Try each possible prefix length ending at position j (j > i)
+                let max_prefix = (n - i).min(8); // content words rarely exceed 8 chars
+                for prefix_len in 2..=max_prefix {
+                    let j = i + prefix_len; // one past the last char of prefix
+                    if j > n { break; }
+                    let last_char = chars[j - 1];
+                    if let Some((base_char, jamo)) = split_jongseong(last_char) {
+                        // Build the dictionary lookup key with jongseong removed
+                        let mut lookup: String = chars[i..j - 1].iter().collect();
+                        lookup.push(base_char);
+
+                        // Check if this exists as a content word in the FST
+                        let lookup_matches = self.content_dict.lookup(&lookup);
+                        for entry in &lookup_matches {
+                            if entry.morphemes.is_empty() { continue; }
+                            let first_pos = entry.morphemes[0].pos;
+                            if !is_content_pos(first_pos) { continue; }
+
+                            let freq = self.freq_from_score(entry.score);
+                            let word_cost = self.get_word_cost(&lookup, first_pos, freq);
+                            let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
+                                .map(|m| (m.text.clone(), m.pos))
+                                .collect();
+
+                            // Build suffix starting with the split jamo + remaining chars
+                            let remaining_after = n - j;
+                            let max_suf_tail = self.max_suffix_len.saturating_sub(1).min(remaining_after);
+                            for tail_len in 0..=max_suf_tail {
+                                let mut suf_key = String::new();
+                                suf_key.push(jamo);
+                                for k in 0..tail_len {
+                                    suf_key.push(chars[j + k]);
+                                }
+                                if let Some(&suf_idx) = self.suffix_map.get(&suf_key) {
+                                    let suf_entry = &self.suffix_entries[suf_idx];
+                                    for analysis in &suf_entry.analyses {
+                                        let suf_cost = self.get_suffix_cost(&suf_key, analysis);
+                                        let mut combined = morphemes.clone();
+                                        for m in &analysis.morphemes {
+                                            combined.push((m.form.clone(), m.pos));
+                                        }
+                                        arcs.push(LatticeArc {
+                                            start: i,
+                                            end: j + tail_len,
+                                            morphemes: combined,
+                                            cost: word_cost + suf_cost,
+                                        });
+                                    }
                                 }
                             }
                         }
