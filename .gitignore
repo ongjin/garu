@@ -2,6 +2,7 @@ target/
 node_modules/
 dist/
 pkg/
+!js/pkg/
 *.pyc
 __pycache__/
 .DS_Store

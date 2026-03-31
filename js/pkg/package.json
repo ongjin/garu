@@ -1,0 +1,15 @@
+{
+  "name": "garu-wasm",
+  "type": "module",
+  "version": "0.2.10",
+  "files": [
+    "garu_wasm_bg.wasm",
+    "garu_wasm.js",
+    "garu_wasm.d.ts"
+  ],
+  "main": "garu_wasm.js",
+  "types": "garu_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
