@@ -1154,6 +1154,36 @@ impl CodebookAnalyzer {
             }
         }
 
+        // SF-aware EF injection: for arcs ending just before a SF character,
+        // if the last morpheme is EC, add a sibling arc with EF instead.
+        // This lets Viterbi choose EF when trigram context supports it,
+        // compensating for EC's structural frequency advantage in the codebook.
+        {
+            let sf_positions: Vec<usize> = chars.iter().enumerate()
+                .filter(|(_, &c)| matches!(c, '.' | '!' | '?' | '…'))
+                .map(|(i, _)| i)
+                .collect();
+
+            if !sf_positions.is_empty() {
+                let mut ef_arcs: Vec<LatticeArc> = Vec::new();
+                for arc in arcs.iter() {
+                    if let Some(last) = arc.morphemes.last() {
+                        if last.1 == Pos::EC && sf_positions.contains(&arc.end) {
+                            let mut new_morphemes = arc.morphemes.clone();
+                            new_morphemes.last_mut().unwrap().1 = Pos::EF;
+                            ef_arcs.push(LatticeArc {
+                                start: arc.start,
+                                end: arc.end,
+                                morphemes: new_morphemes,
+                                cost: arc.cost - 0.5,
+                            });
+                        }
+                    }
+                }
+                arcs.extend(ef_arcs);
+            }
+        }
+
         // OOV fallback: single-character arcs for uncovered positions
         // Check which positions have at least one arc starting there
         let mut has_arc = vec![false; n];
@@ -1795,7 +1825,13 @@ impl CodebookAnalyzer {
 
                     // Give cache entries a strong bonus (low cost) but not absolute
                     // -2.0 bonus: very strong prior, but cross-eojeol trigram can still override
-                    let cache_cost = -2.0;
+                    // For the last eojeol ending with EC, weaken the bonus so Viterbi
+                    // can choose EF if the SF-aware arc (above) provides a better path.
+                    let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
+                        .any(|c| !c.is_whitespace() && !matches!(c, '.' | '!' | '?' | '…'));
+                    let last_is_ec = cached_morphs.last()
+                        .map_or(false, |(_, p)| *p == Pos::EC);
+                    let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
 
                     arcs.push(LatticeArc {
                         start: eojeol_char_start,

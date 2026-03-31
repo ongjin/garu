@@ -488,6 +488,74 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
 
     print(f"  Irregular conjugation augmentation: {added} new entries added")
+
+    # === 모음 축약 규칙 (VV/VA, open syllable stems) ===
+    # ㅣ+어→여(셔/져/쳐/여...), ㅜ+어→워(줘/둬...), ㅗ+아→와(봐/와...)
+    V_YEO = 6   # ㅕ
+    contraction_added = 0
+
+    for stem, (pos, freq) in stems.items():
+        if len(stem) < 2 or freq < 30:
+            continue
+        last_ch = stem[-1]
+        dec = decompose_hangul(last_ch)
+        if dec is None:
+            continue
+        lead, vowel, tail = dec
+        if tail != TAIL_NONE:
+            continue  # 받침 있는 어간은 축약 없음
+
+        for suffix_str, suffix_tags in SUFFIX_COMBOS:
+            first_ch = suffix_str[0]
+            if first_ch not in ("어", "아", "었"):
+                continue
+
+            # ㅣ-contraction: 시+어→셔, 기+어→겨, 리+어→려, 지+어→져
+            if vowel == V_I:
+                new_ch = compose_hangul(lead, V_YEO, TAIL_NONE)  # ㅕ
+                if first_ch in ("어", "아"):
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+                elif first_ch == "었":
+                    new_ch_t = compose_hangul(lead, V_YEO, 20)  # ㅕ+ㅆ
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch_t + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+
+            # ㅜ-contraction: 주+어→줘, 두+어→둬, 추+어→춰
+            elif vowel == V_U:
+                new_ch = compose_hangul(lead, V_WEO, TAIL_NONE)  # ㅝ
+                if first_ch in ("어", "아"):
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+                elif first_ch == "었":
+                    new_ch_t = compose_hangul(lead, V_WEO, 20)  # ㅝ+ㅆ
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch_t + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+
+            # ㅗ-contraction: 보+아→봐, 오+아→와
+            elif vowel == V_O:
+                new_ch = compose_hangul(lead, V_WA, TAIL_NONE)  # ㅘ
+                if first_ch in ("어", "아"):
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+                elif first_ch == "었":
+                    new_ch_t = compose_hangul(lead, V_WA, 20)  # ㅘ+ㅆ
+                    rest = suffix_str[1:]
+                    surface = stem[:-1] + new_ch_t + rest
+                    add_entry(surface, stem, pos, suffix_str, suffix_tags, freq)
+                    contraction_added += 1
+
+    print(f"  Vowel contraction augmentation: {contraction_added} new entries added")
     return codebook
 
 
