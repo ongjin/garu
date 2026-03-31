@@ -40,18 +40,18 @@ fn test_codebook_analyzer_v3() {
     println!("\nTokenize: {:?}", tokens);
     assert!(!tokens.is_empty());
 
-    // Jongseong split tests
-    let jongseong_cases = [
-        ("고친다", vec![("고치", "VV"), ("ㄴ다", "EF")]),
-        ("소 잃고 외양간 고친다", vec![("소", "NNG"), ("잃", "VV"), ("고", "EC"), ("외양간", "NNG"), ("고치", "VV"), ("ㄴ다", "EF")]),
+    // Conjugation tests: jongseong split + vowel contraction
+    let conjugation_cases: Vec<(&str, Vec<&str>)> = vec![
+        ("고친다", vec!["고치", "ㄴ다"]),
+        ("소 잃고 외양간 고친다", vec!["소", "잃", "고", "외양간", "고치", "ㄴ다"]),
+        ("건너라", vec!["건너", "어라"]),
+        ("가라", vec!["가", "아라"]),
     ];
-    for (input, expected) in &jongseong_cases {
+    for (input, expected) in &conjugation_cases {
         let r = analyzer.analyze(input);
         println!("\n{input}:");
         for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
-        assert_eq!(r.tokens.len(), expected.len(), "Token count mismatch for '{input}'");
-        for (t, (exp_text, _)) in r.tokens.iter().zip(expected.iter()) {
-            assert_eq!(&t.text, exp_text, "Mismatch in '{input}': got '{}', expected '{}'", t.text, exp_text);
-        }
+        let got: Vec<&str> = r.tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(got, *expected, "Mismatch for '{input}'");
     }
 }

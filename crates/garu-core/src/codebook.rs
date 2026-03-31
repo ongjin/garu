@@ -1099,6 +1099,29 @@ impl CodebookAnalyzer {
                     // A2: Content word + suffix
                     if content_end < n {
                         let max_suf = self.max_suffix_len.min(n - content_end);
+                        // Determine vowel contraction prefix for A2b
+                        // When stem ends in open syllable (no jongseong), the suffix's
+                        // initial vowel may have contracted: 건너+어라→건너라, 가+아라→가라
+                        let vowel_prefix: Option<char> = {
+                            let last_ch = chars[content_end - 1];
+                            let code = last_ch as u32;
+                            if code >= 0xAC00 && code <= 0xD7A3 {
+                                let offset = code - 0xAC00;
+                                let jong = offset % 28;
+                                if jong == 0 { // open syllable (no jongseong)
+                                    let vowel = (offset % (21 * 28)) / 28;
+                                    match vowel {
+                                        0 | 8 => Some('아'), // ㅏ, ㅗ → 양성모음
+                                        _ => Some('어'),     // others → 음성모음
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        };
+
                         for suf_len in 1..=max_suf {
                             let suf_surface: String = chars[content_end..content_end + suf_len].iter().collect();
                             if let Some(&suf_idx) = self.suffix_map.get(&suf_surface) {
@@ -1115,6 +1138,30 @@ impl CodebookAnalyzer {
                                         morphemes: combined,
                                         cost: word_cost + suf_cost,
                                     });
+                                }
+                            }
+
+                            // A2b: Vowel contraction recovery
+                            // e.g. "건너라" → "건너" + "라" → try "어라" in codebook
+                            if let Some(v) = vowel_prefix {
+                                let mut expanded = String::new();
+                                expanded.push(v);
+                                expanded.push_str(&suf_surface);
+                                if let Some(&suf_idx) = self.suffix_map.get(&expanded) {
+                                    let suf_entry = &self.suffix_entries[suf_idx];
+                                    for analysis in &suf_entry.analyses {
+                                        let suf_cost = self.get_suffix_cost(&expanded, analysis);
+                                        let mut combined = morphemes.clone();
+                                        for m in &analysis.morphemes {
+                                            combined.push((m.form.clone(), m.pos));
+                                        }
+                                        arcs.push(LatticeArc {
+                                            start: i,
+                                            end: content_end + suf_len,
+                                            morphemes: combined,
+                                            cost: word_cost + suf_cost,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -1561,8 +1608,30 @@ impl CodebookAnalyzer {
 
         // Post-process: minimal — NIKL trigram handles most disambiguation
         Self::fix_xsv_xsa(&mut tokens);
+        Self::merge_ec_ef_vowel(&mut tokens);
 
         (tokens, best_cost)
+    }
+
+    /// Merge vowel EC + EF into a single EF when the EC is 어/아 and the
+    /// following morpheme is EF. e.g. 어/EC + 라/EF → 어라/EF.
+    /// This corrects Viterbi paths that split contracted vowel endings.
+    fn merge_ec_ef_vowel(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            if tokens[i].pos == Pos::EC
+                && (tokens[i].text == "어" || tokens[i].text == "아")
+                && tokens[i].start == tokens[i + 1].start
+                && tokens[i + 1].pos == Pos::EF
+            {
+                // Merge: 어/EC + 라/EF → 어라/EF
+                let merged_text = format!("{}{}", tokens[i].text, tokens[i + 1].text);
+                tokens[i + 1].text = merged_text;
+                tokens.remove(i);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Fix JKB → JC for 과/와/이랑/랑/하고 connecting nouns.
@@ -1860,7 +1929,7 @@ impl CodebookAnalyzer {
     }
 
     /// Fix EC → EF at end-of-sentence for endings that can be terminal.
-    fn fix_ec_eos(tokens: &mut [Token]) {
+    fn fix_ec_eos(tokens: &mut Vec<Token>) {
         if tokens.is_empty() {
             return;
         }
@@ -1876,8 +1945,58 @@ impl CodebookAnalyzer {
         }
         // Only convert specific endings that can be EF
         let form = last.text.as_str();
-        if matches!(form, "다" | "니" | "자" | "으니" | "라" | "지") {
+        if matches!(form, "다" | "니" | "자" | "으니" | "지") {
             tokens[last_idx].pos = Pos::EF;
+        } else if form == "라" && last_idx >= 1 {
+            // "라/EC" at EOS after VV/VA: restore vowel-contracted imperative ending
+            // 건너+어라→건너라 → should be 어라/EF (not 라/EF)
+            let prev = &tokens[last_idx - 1];
+            if matches!(prev.pos, Pos::VV | Pos::VA | Pos::VX) {
+                // Determine vowel harmony from verb stem's last vowel
+                let vowel_char = if let Some(last_ch) = prev.text.chars().last() {
+                    let code = last_ch as u32;
+                    if code >= 0xAC00 && code <= 0xD7A3 {
+                        let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                        if vowel == 0 || vowel == 8 { '아' } else { '어' }
+                    } else {
+                        '어'
+                    }
+                } else {
+                    '어'
+                };
+                tokens[last_idx].text = format!("{}라", vowel_char);
+                tokens[last_idx].pos = Pos::EF;
+            } else {
+                tokens[last_idx].pos = Pos::EF;
+            }
+        }
+    }
+
+    /// Fix "라/EF" after VV/VA/VX: restore vowel-contracted imperative ending.
+    /// e.g. 건너+라/EF → 건너+어라/EF, 가+라/EF → 가+아라/EF.
+    /// "하+라/EF" is standard (하라체) and should not be changed.
+    fn fix_imperative_ra(tokens: &mut [Token]) {
+        for i in 1..tokens.len() {
+            if tokens[i].pos != Pos::EF || tokens[i].text != "라" {
+                continue;
+            }
+            let prev = &tokens[i - 1];
+            if !matches!(prev.pos, Pos::VV | Pos::VA | Pos::VX) {
+                continue;
+            }
+            // "하" + "라" is the 하라체 imperative — keep as-is
+            if prev.text == "하" {
+                continue;
+            }
+            // Determine vowel harmony from verb stem's last vowel
+            if let Some(last_ch) = prev.text.chars().last() {
+                let code = last_ch as u32;
+                if code >= 0xAC00 && code <= 0xD7A3 {
+                    let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                    let prefix = if vowel == 0 || vowel == 8 { "아" } else { "어" };
+                    tokens[i].text = format!("{}라", prefix);
+                }
+            }
         }
     }
 
@@ -2026,6 +2145,7 @@ impl CodebookAnalyzer {
         Self::fix_nnb_no_etm(&mut tokens);
         Self::fix_xpn_standalone(&mut tokens);
         Self::fix_ec_eos(&mut tokens);
+        Self::fix_imperative_ra(&mut tokens);
 
         AnalyzeResult {
             tokens,
