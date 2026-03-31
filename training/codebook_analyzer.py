@@ -23,19 +23,6 @@ POS_TAGS = [
     "SF", "SP", "SS", "SE", "SO", "SW", "SH", "SL", "SN",
 ]
 
-# Jongseong → compatibility jamo mapping
-_JONGSEONG_TO_COMPAT = {
-    '\u11A8': '\u3131', '\u11A9': '\u3132', '\u11AB': '\u3134',
-    '\u11AE': '\u3137', '\u11AF': '\u3139', '\u11B7': '\u3141',
-    '\u11B8': '\u3142', '\u11BA': '\u3145', '\u11BB': '\u3146',
-    '\u11BC': '\u3147', '\u11BD': '\u3148', '\u11BE': '\u314A',
-    '\u11BF': '\u314B', '\u11C0': '\u314C', '\u11C1': '\u314D',
-    '\u11C2': '\u314E',
-}
-
-def normalize_jamo(s):
-    """Normalize Hangul jongseong to compatibility jamo."""
-    return ''.join(_JONGSEONG_TO_COMPAT.get(c, c) for c in s)
 POS_TO_IDX = {p: i for i, p in enumerate(POS_TAGS)}
 
 CONTENT_POS = {"NNG", "NNP", "NNB", "NR", "NP", "VV", "VA", "VX", "VCP", "VCN",
