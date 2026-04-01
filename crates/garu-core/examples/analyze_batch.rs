@@ -6,8 +6,14 @@ use std::io::{self, BufRead, Write};
 fn main() {
     let model_path = std::env::var("GARU_MODEL").unwrap_or_else(|_| "models/codebook.gmdl".to_string());
     let model_data = fs::read(&model_path).expect("Failed to read model");
-    let analyzer = Analyzer::from_bytes(&model_data)
+    let mut analyzer = Analyzer::from_bytes(&model_data)
         .expect("Failed to load model");
+
+    // Load CNN reranker if available
+    let cnn_path = std::env::var("GARU_CNN").unwrap_or_else(|_| "models/cnn2.bin".to_string());
+    if let Ok(cnn_data) = fs::read(&cnn_path) {
+        analyzer.load_cnn(&cnn_data).ok();
+    }
 
     let input_path = std::env::args().nth(1).expect("Need input file path");
     let output_format = std::env::args().nth(2).unwrap_or_default();
