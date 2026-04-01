@@ -103,6 +103,44 @@ fn split_jongseong(ch: char) -> Option<(char, char)> {
     Some((char::from_u32(base).unwrap(), jamo))
 }
 
+/// Decompose a Hangul syllable into (chosung, jungsung, jongseong) indices.
+fn decompose_hangul(ch: char) -> Option<(u32, u32, u32)> {
+    let code = ch as u32;
+    if code < 0xAC00 || code > 0xD7A3 { return None; }
+    let offset = code - 0xAC00;
+    Some((offset / (21 * 28), (offset % (21 * 28)) / 28, offset % 28))
+}
+
+/// Compose a Hangul syllable from (chosung, jungsung, jongseong) indices.
+fn compose_hangul(cho: u32, jung: u32, jong: u32) -> Option<char> {
+    if cho >= 19 || jung >= 21 || jong >= 28 { return None; }
+    char::from_u32((cho * 21 + jung) * 28 + jong + 0xAC00)
+}
+
+// Common Korean typo rules: (index_a, index_b) pairs for bidirectional substitution.
+// Chosung: plain ↔ tense consonant
+const TYPO_CHO: &[(u32, u32)] = &[
+    (0, 1),   // ㄱ ↔ ㄲ
+    (3, 4),   // ㄷ ↔ ㄸ
+    (7, 8),   // ㅂ ↔ ㅃ
+    (9, 10),  // ㅅ ↔ ㅆ
+    (12, 13), // ㅈ ↔ ㅉ
+];
+// Jungsung: commonly confused vowels
+const TYPO_JUNG: &[(u32, u32)] = &[
+    (1, 5),   // ㅐ ↔ ㅔ
+    (3, 7),   // ㅒ ↔ ㅖ
+    (10, 15), // ㅙ ↔ ㅞ
+    (10, 11), // ㅙ ↔ ㅚ
+];
+// Jongseong: plain ↔ tense (most impactful: 했→햇)
+const TYPO_JONG: &[(u32, u32)] = &[
+    (1, 2),   // ㄱ ↔ ㄲ
+    (19, 20), // ㅅ ↔ ㅆ
+];
+/// Additional cost for typo-corrected arcs (must beat OOV but lose to exact match).
+const TYPO_PENALTY: f32 = 3.0;
+
 // ---------------------------------------------------------------------------
 // Jamo normalization
 // ---------------------------------------------------------------------------
@@ -176,6 +214,7 @@ struct Backpointer {
     prev_pos: usize,        // position in text
     prev_state: (u8, u8),   // (prev_pos_tag, prev_prev_pos_tag)
     arc_idx: Option<usize>, // index into arcs list, None for space pass-through
+    prev_rank: usize,       // rank at prev state (for N-best Viterbi)
 }
 
 // ---------------------------------------------------------------------------
@@ -1243,6 +1282,95 @@ impl CodebookAnalyzer {
                 }
             }
 
+            // Strategy D: Typo correction via syllable substitution.
+            // Only at positions where no content word arc starts (OOV recovery).
+            // For each word span, substitute one syllable using typo rules,
+            // then look up the corrected form in content dict and suffix codebook.
+            {
+                let has_content_arc = arcs.iter().any(|a| a.start == i
+                    && a.morphemes.first().map_or(false, |(_, p)| is_content_pos(*p)));
+                if !has_content_arc {
+                    let max_typo = (n - i).min(6);
+                    for word_len in 1..=max_typo {
+                        let j = i + word_len;
+                        if j > n { break; }
+                        for syl_pos in 0..word_len {
+                            let ch = chars[i + syl_pos];
+                            let Some((cho, jung, jong)) = decompose_hangul(ch) else { continue };
+                            // Collect typo variants for this syllable
+                            let mut variants: Vec<char> = Vec::new();
+                            for &(a, b) in TYPO_CHO {
+                                if cho == a { if let Some(c) = compose_hangul(b, jung, jong) { variants.push(c); } }
+                                else if cho == b { if let Some(c) = compose_hangul(a, jung, jong) { variants.push(c); } }
+                            }
+                            for &(a, b) in TYPO_JUNG {
+                                if jung == a { if let Some(c) = compose_hangul(cho, b, jong) { variants.push(c); } }
+                                else if jung == b { if let Some(c) = compose_hangul(cho, a, jong) { variants.push(c); } }
+                            }
+                            for &(a, b) in TYPO_JONG {
+                                if jong == a { if let Some(c) = compose_hangul(cho, jung, b) { variants.push(c); } }
+                                else if jong == b { if let Some(c) = compose_hangul(cho, jung, a) { variants.push(c); } }
+                            }
+                            for var_ch in variants {
+                                let mut corrected = String::with_capacity(word_len * 3);
+                                for k in 0..word_len {
+                                    corrected.push(if k == syl_pos { var_ch } else { chars[i + k] });
+                                }
+                                // Try as content word via prefix search
+                                let prefix_matches = self.content_dict.common_prefix_search(&corrected);
+                                for (byte_len, entries) in &prefix_matches {
+                                    let prefix_char_len = corrected[..*byte_len].chars().count();
+                                    for entry in entries {
+                                        if entry.morphemes.is_empty() { continue; }
+                                        let first_pos = entry.morphemes[0].pos;
+                                        if !is_content_pos(first_pos) { continue; }
+                                        let freq = self.freq_from_score(entry.score);
+                                        let prefix_str = &corrected[..*byte_len];
+                                        let word_cost = self.get_word_cost(prefix_str, first_pos, freq);
+                                        let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
+                                            .map(|m| (m.text.clone(), m.pos)).collect();
+                                        if prefix_char_len == word_len {
+                                            // Full match: inject content word arc
+                                            arcs.push(LatticeArc {
+                                                start: i, end: j, morphemes, cost: word_cost + TYPO_PENALTY,
+                                            });
+                                        } else {
+                                            // Partial match: try suffix for remainder
+                                            let suf_key = &corrected[*byte_len..];
+                                            if let Some(&si) = self.suffix_map.get(suf_key) {
+                                                for analysis in &self.suffix_entries[si].analyses {
+                                                    let sc = self.get_suffix_cost(suf_key, analysis);
+                                                    let mut combined = morphemes.clone();
+                                                    for m in &analysis.morphemes {
+                                                        combined.push((m.form.clone(), m.pos));
+                                                    }
+                                                    arcs.push(LatticeArc {
+                                                        start: i, end: j, morphemes: combined,
+                                                        cost: word_cost + sc + TYPO_PENALTY,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // Try as suffix (handles "햇다"→"했다" in suffix codebook)
+                                if let Some(&si) = self.suffix_map.get(&corrected) {
+                                    let suf_entry = &self.suffix_entries[si];
+                                    for analysis in &suf_entry.analyses {
+                                        let sc = self.get_suffix_cost(&corrected, analysis);
+                                        let morphemes: Vec<(String, Pos)> = analysis.morphemes.iter()
+                                            .map(|m| (m.form.clone(), m.pos)).collect();
+                                        arcs.push(LatticeArc {
+                                            start: i, end: j, morphemes, cost: sc + TYPO_PENALTY,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Strategy B: Pure functional suffix standalone
             let max_suf = self.max_suffix_len.min(n - i);
             for suf_len in 1..=max_suf {
@@ -1492,6 +1620,7 @@ impl CodebookAnalyzer {
                             prev_pos: arc.start,
                             prev_state: (prev_pos, prev_prev_pos),
                             arc_idx: Some(arc_idx),
+                            prev_rank: 0,
                         }));
                     }
                 }
@@ -1509,6 +1638,7 @@ impl CodebookAnalyzer {
                             prev_pos: pos,
                             prev_state: state,
                             arc_idx: None,
+                            prev_rank: 0,
                         }));
                     }
                 }
@@ -1624,6 +1754,217 @@ impl CodebookAnalyzer {
         Self::merge_ec_ef_vowel(&mut tokens);
 
         (tokens, best_cost)
+    }
+
+    /// N-best Viterbi decoding. Returns top `top_k` distinct paths sorted by cost.
+    fn viterbi_nbest(&self, text: &str, arcs: &[LatticeArc], top_k: usize) -> Vec<(Vec<Token>, f32)> {
+        let chars: Vec<char> = text.chars().collect();
+        let n = chars.len();
+        if n == 0 {
+            return vec![(Vec::new(), 0.0)];
+        }
+
+        let mut arcs_ending_at: Vec<Vec<usize>> = vec![Vec::new(); n + 1];
+        for (idx, arc) in arcs.iter().enumerate() {
+            arcs_ending_at[arc.end].push(idx);
+        }
+
+        // DP: each state → Vec<(cost, backpointer)>, sorted ascending, max top_k
+        let mut dp: Vec<HashMap<(u8, u8), Vec<(f32, Backpointer)>>> = Vec::with_capacity(n + 1);
+        for _ in 0..=n {
+            dp.push(HashMap::new());
+        }
+        dp[0].entry((BOS, BOS)).or_default().push((0.0, Backpointer {
+            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
+        }));
+
+        for pos in 0..=n {
+            for &arc_idx in &arcs_ending_at[pos] {
+                let arc = &arcs[arc_idx];
+                let last_pos = arc.morphemes.last().map(|(_, p)| *p as u8).unwrap_or(BOS);
+
+                let start_entries: Vec<((u8, u8), usize, f32)> = dp[arc.start].iter()
+                    .flat_map(|(&state, entries)| {
+                        entries.iter().enumerate().map(move |(rank, &(cost, _))| (state, rank, cost))
+                    })
+                    .collect();
+
+                for ((prev_pos_tag, prev_prev_pos), rank, prev_cost) in start_entries {
+                    let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
+                    let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos_tag, first_pos);
+                    let first_form = &arc.morphemes[0].0;
+                    let wb_bonus = self.get_word_bigram_bonus(first_form, prev_pos_tag, first_pos);
+
+                    let mut internal_cost = 0.0;
+                    if arc.morphemes.len() > 1 {
+                        let mut pp = prev_prev_pos;
+                        let mut p = prev_pos_tag;
+                        for (mi, (_, mpos)) in arc.morphemes.iter().enumerate() {
+                            if mi == 0 {
+                                pp = prev_pos_tag;
+                                p = *mpos as u8;
+                            } else {
+                                internal_cost += self.get_trigram_cost(pp, p, *mpos as u8);
+                                pp = p;
+                                p = *mpos as u8;
+                            }
+                        }
+                    }
+
+                    let total_cost = prev_cost + arc.cost + transition_cost + internal_cost + wb_bonus;
+
+                    let new_prev_prev = if arc.morphemes.len() >= 2 {
+                        arc.morphemes[arc.morphemes.len() - 2].1 as u8
+                    } else {
+                        prev_pos_tag
+                    };
+                    let new_state = (last_pos, new_prev_prev);
+
+                    let entries = dp[pos].entry(new_state).or_default();
+                    if entries.len() >= top_k && total_cost >= entries.last().unwrap().0 {
+                        continue;
+                    }
+                    let ins = entries.partition_point(|&(c, _)| c < total_cost);
+                    entries.insert(ins, (total_cost, Backpointer {
+                        prev_pos: arc.start,
+                        prev_state: (prev_pos_tag, prev_prev_pos),
+                        arc_idx: Some(arc_idx),
+                        prev_rank: rank,
+                    }));
+                    if entries.len() > top_k {
+                        entries.pop();
+                    }
+                }
+            }
+
+            // Space pass-through
+            if pos < n && chars[pos].is_whitespace() {
+                let states: Vec<((u8, u8), usize, f32)> = dp[pos].iter()
+                    .flat_map(|(&state, entries)| {
+                        entries.iter().enumerate().map(move |(rank, &(cost, _))| (state, rank, cost))
+                    })
+                    .collect();
+                for (state, rank, cost) in states {
+                    let entries = dp[pos + 1].entry(state).or_default();
+                    if entries.len() >= top_k && cost >= entries.last().unwrap().0 {
+                        continue;
+                    }
+                    let ins = entries.partition_point(|&(c, _)| c < cost);
+                    entries.insert(ins, (cost, Backpointer {
+                        prev_pos: pos, prev_state: state, arc_idx: None, prev_rank: rank,
+                    }));
+                    if entries.len() > top_k {
+                        entries.pop();
+                    }
+                }
+            }
+        }
+
+        // Collect global top-N from final states
+        let final_states = &dp[n];
+        if final_states.is_empty() {
+            return vec![self.fallback_tokenize(text)];
+        }
+
+        let mut candidates: Vec<(f32, (u8, u8), usize)> = Vec::new();
+        for (&state, entries) in final_states {
+            let eos_cost = self.get_trigram_cost(state.1, state.0, BOS);
+            for (rank, &(cost, _)) in entries.iter().enumerate() {
+                candidates.push((cost + eos_cost, state, rank));
+            }
+        }
+        candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        candidates.truncate(top_k * 2); // collect extra for dedup
+
+        // Build char-to-byte map
+        let mut char_to_byte = Vec::with_capacity(n + 1);
+        let mut byte_off = 0usize;
+        for ch in &chars {
+            char_to_byte.push(byte_off);
+            byte_off += ch.len_utf8();
+        }
+        char_to_byte.push(byte_off);
+
+        let mut results = Vec::new();
+        for &(total_cost, start_state, start_rank) in &candidates {
+            if results.len() >= top_k { break; }
+
+            let mut path_arcs: Vec<usize> = Vec::new();
+            let mut cur_pos = n;
+            let mut cur_state = start_state;
+            let mut cur_rank = start_rank;
+
+            loop {
+                if cur_pos == 0 && cur_state == (BOS, BOS) { break; }
+                let entries = match dp[cur_pos].get(&cur_state) {
+                    Some(e) if cur_rank < e.len() => e,
+                    _ => break,
+                };
+                let bp = &entries[cur_rank].1;
+                if let Some(ai) = bp.arc_idx {
+                    path_arcs.push(ai);
+                }
+                cur_pos = bp.prev_pos;
+                cur_state = bp.prev_state;
+                cur_rank = bp.prev_rank;
+            }
+            path_arcs.reverse();
+
+            // Build tokens
+            let mut tokens = Vec::new();
+            for &ai in &path_arcs {
+                let arc = &arcs[ai];
+                for (form, pos) in &arc.morphemes {
+                    tokens.push(Token {
+                        text: normalize_jamo(form), pos: *pos,
+                        start: arc.start, end: arc.end, score: None,
+                    });
+                }
+            }
+
+            // Inline post-processing (same as viterbi)
+            let mut tokens = Self::merge_sl_sn_tokens(tokens);
+            for i in 1..tokens.len() {
+                if tokens[i].pos == Pos::EP && (tokens[i].text == "었" || tokens[i].text == "었었") {
+                    if let Some(last_char) = tokens[i - 1].text.chars().last() {
+                        let code = last_char as u32;
+                        if code >= 0xAC00 && code <= 0xD7A3 {
+                            let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                            if vowel == 0 || vowel == 8 {
+                                tokens[i].text = if tokens[i].text == "었" { "았".to_string() } else { "았었".to_string() };
+                            }
+                        }
+                    }
+                }
+                if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF) && tokens[i].text.starts_with("어") {
+                    if let Some(last_char) = tokens[i - 1].text.chars().last() {
+                        let code = last_char as u32;
+                        if code >= 0xAC00 && code <= 0xD7A3 {
+                            let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                            if vowel == 0 || vowel == 8 {
+                                tokens[i].text = tokens[i].text.replacen("어", "아", 1);
+                            }
+                        }
+                    }
+                }
+            }
+            Self::fix_xsv_xsa(&mut tokens);
+            Self::merge_ec_ef_vowel(&mut tokens);
+
+            // Dedup: skip if identical to a previous result
+            let dominated = results.iter().any(|(prev_tokens, _): &(Vec<Token>, f32)| {
+                prev_tokens.len() == tokens.len()
+                    && prev_tokens.iter().zip(tokens.iter()).all(|(a, b)| a.text == b.text && a.pos == b.pos)
+            });
+            if !dominated {
+                results.push((tokens, total_cost));
+            }
+        }
+
+        if results.is_empty() {
+            results.push(self.fallback_tokenize(text));
+        }
+        results
     }
 
     /// Merge vowel EC + EF into a single EF when the EC is 어/아 and the
@@ -2016,6 +2357,73 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Fix VCP copula: split EF/EC/ETM tokens starting with "이" into VCP + remainder.
+    /// e.g. "학생이다" → 학생/NNG + 이다/EF → 학생/NNG + 이/VCP + 다/EF
+    fn fix_vcp(tokens: &mut Vec<Token>) {
+        // VCP endings: 이+EF/EC/ETM suffix patterns
+        const VCP_SUFFIXES: &[(&str, &str)] = &[
+            // (이+suffix, remaining_suffix) — EF patterns
+            ("이다", "다"), ("이야", "야"), ("이에요", "에요"), ("이요", "요"),
+            ("이거든", "거든"), ("이거든요", "거든요"),
+            ("이랍니다", "랍니다"), ("이래요", "래요"),
+            // EC patterns
+            ("이고", "고"), ("이며", "며"), ("이라", "라"), ("이면", "면"),
+            ("이지만", "지만"), ("이니", "니"), ("이니까", "니까"),
+            ("이라서", "라서"), ("이라고", "라고"), ("이란", "란"),
+            ("이든", "든"), ("이든지", "든지"), ("이나", "나"),
+            // ETM patterns
+            ("이던", "던"), ("인", "ㄴ"), ("일", "ㄹ"),
+        ];
+        let mut i = 0;
+        while i < tokens.len() {
+            let pos = tokens[i].pos;
+            if !matches!(pos, Pos::EF | Pos::EC | Pos::ETM | Pos::ETN) {
+                i += 1;
+                continue;
+            }
+            // Must follow a noun
+            if i == 0 || !matches!(tokens[i - 1].pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::SN | Pos::SL | Pos::XSN)
+            {
+                i += 1;
+                continue;
+            }
+            let form = &tokens[i].text;
+            let mut matched = false;
+            for &(pattern, remainder) in VCP_SUFFIXES {
+                if form == pattern {
+                    let orig = tokens[i].clone();
+                    tokens[i] = Token {
+                        text: "이".to_string(), pos: Pos::VCP,
+                        start: orig.start, end: orig.end, score: None,
+                    };
+                    tokens.insert(i + 1, Token {
+                        text: remainder.to_string(), pos: orig.pos,
+                        start: orig.start, end: orig.end, score: None,
+                    });
+                    matched = true;
+                    break;
+                }
+            }
+            i += if matched { 2 } else { 1 };
+        }
+    }
+
+    /// Fix NNG → MM for common determiners: 전, 한, 그런, 이런, 저런, 어떤, 새, 헌, 옛
+    fn fix_mm_determiners(tokens: &mut [Token]) {
+        const MM_WORDS: &[&str] = &["전", "그런", "이런", "저런", "어떤", "새", "헌", "옛", "온"];
+        for i in 0..tokens.len().saturating_sub(1) {
+            if tokens[i].pos != Pos::NNG { continue; }
+            let form = tokens[i].text.as_str();
+            let next_pos = tokens[i + 1].pos;
+            let followed_by_noun = matches!(next_pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::XPN);
+            if followed_by_noun && MM_WORDS.contains(&form) {
+                tokens[i].pos = Pos::MM;
+            }
+        }
+    }
+
     /// Merge consecutive single-char SL or SN tokens that are adjacent.
     fn merge_sl_sn_tokens(tokens: Vec<Token>) -> Vec<Token> {
         if tokens.is_empty() {
@@ -2162,6 +2570,8 @@ impl CodebookAnalyzer {
         Self::fix_xpn_standalone(&mut tokens);
         Self::fix_ec_eos(&mut tokens);
         Self::fix_imperative_ra(&mut tokens);
+        Self::fix_vcp(&mut tokens);
+        Self::fix_mm_determiners(&mut tokens);
 
         AnalyzeResult {
             tokens,
@@ -2170,9 +2580,84 @@ impl CodebookAnalyzer {
         }
     }
 
-    /// Analyze returning top-N results (currently returns single best).
-    pub fn analyze_topn(&self, text: &str, _n: usize) -> Vec<AnalyzeResult> {
-        vec![self.analyze(text)]
+    /// Analyze returning top-N distinct results, sorted by Viterbi cost.
+    pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
+        if text.is_empty() || n == 0 {
+            return vec![AnalyzeResult { tokens: vec![], score: 0.0, elapsed_ms: 0.0 }];
+        }
+        if n == 1 {
+            return vec![self.analyze(text)];
+        }
+
+        let t0 = now_ms();
+
+        // Build lattice with cache injection (same as analyze)
+        let mut arcs = self.build_lattice(text);
+        if !self.eojeol_cache.is_empty() {
+            let mut char_offset = 0usize;
+            for eojeol in text.split_whitespace() {
+                let byte_start = text[char_offset..].find(eojeol)
+                    .map(|p| char_offset + p).unwrap_or(char_offset);
+                let eojeol_char_start = text[..byte_start].chars().count();
+                let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
+                if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
+                    let morphemes: Vec<(String, Pos)> = cached_morphs.iter()
+                        .map(|(f, p)| (f.clone(), *p)).collect();
+                    let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
+                        .any(|c| !c.is_whitespace()
+                            && !matches!(c, '.' | '!' | '?' | '…')
+                            && !(c >= '\u{3131}' && c <= '\u{3163}'));
+                    let last_is_ec = cached_morphs.last().map_or(false, |(_, p)| *p == Pos::EC);
+                    let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
+                    arcs.push(LatticeArc {
+                        start: eojeol_char_start, end: eojeol_char_end,
+                        morphemes, cost: cache_cost,
+                    });
+                }
+                char_offset = byte_start + eojeol.len();
+            }
+        }
+
+        // Run N-best Viterbi
+        let paths = self.viterbi_nbest(text, &arcs, n);
+
+        // Build eojeol boundaries for span assignment
+        let mut eojeol_boundaries: Vec<(usize, usize)> = Vec::new();
+        {
+            let mut char_offset = 0;
+            for eojeol in text.split_whitespace() {
+                let byte_start = text[char_offset..].find(eojeol)
+                    .map(|p| char_offset + p).unwrap_or(char_offset);
+                let cs = text[..byte_start].chars().count();
+                let ce = cs + eojeol.chars().count();
+                eojeol_boundaries.push((cs, ce));
+                char_offset = byte_start + eojeol.len();
+            }
+        }
+
+        // Post-process each path
+        paths.into_iter().map(|(raw_tokens, score)| {
+            let mut tokens: Vec<Token> = raw_tokens.into_iter().map(|token| {
+                let (es, ee) = eojeol_boundaries.iter()
+                    .find(|&&(s, e)| token.start >= s && token.start < e)
+                    .copied().unwrap_or((token.start, token.end));
+                Token { start: es, end: ee, ..token }
+            }).collect();
+
+            Self::fix_vx(&mut tokens);
+            Self::fix_jc_jkb(&mut tokens);
+            Self::fix_nnb(&mut tokens);
+            Self::fix_xsn_xpn(&mut tokens);
+            Self::fix_mm(&mut tokens);
+            Self::fix_jkc(&mut tokens);
+            Self::fix_jx_jc(&mut tokens);
+            Self::fix_nnb_no_etm(&mut tokens);
+            Self::fix_xpn_standalone(&mut tokens);
+            Self::fix_ec_eos(&mut tokens);
+            Self::fix_imperative_ra(&mut tokens);
+
+            AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
+        }).collect()
     }
 
     /// Extract surface forms from analysis.

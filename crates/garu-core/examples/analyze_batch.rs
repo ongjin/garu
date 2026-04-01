@@ -6,14 +6,12 @@ use std::io::{self, BufRead, Write};
 fn main() {
     let model_path = std::env::var("GARU_MODEL").unwrap_or_else(|_| "models/codebook.gmdl".to_string());
     let model_data = fs::read(&model_path).expect("Failed to read model");
-    let mut analyzer = Analyzer::from_bytes(&model_data)
-        .expect("Failed to load model");
 
-    // Load CNN reranker if available
     let cnn_path = std::env::var("GARU_CNN").unwrap_or_else(|_| "models/cnn2.bin".to_string());
-    if let Ok(cnn_data) = fs::read(&cnn_path) {
-        analyzer.load_cnn(&cnn_data).ok();
-    }
+    let cnn_data = fs::read(&cnn_path).expect("Failed to read CNN model");
+
+    let analyzer = Analyzer::from_bytes(&model_data, &cnn_data)
+        .expect("Failed to load model");
 
     let input_path = std::env::args().nth(1).expect("Need input file path");
     let output_format = std::env::args().nth(2).unwrap_or_default();
@@ -29,17 +27,12 @@ fn main() {
         let line = line.expect("Failed to read line");
         let line = line.trim();
         if line.is_empty() {
-            if json_mode {
-                writeln!(out, "[]").unwrap();
-            } else {
-                writeln!(out, "[]").unwrap();
-            }
+            writeln!(out, "[]").unwrap();
             continue;
         }
         let result = analyzer.analyze(line);
 
         if json_mode {
-            // JSON output: [["morpheme", "POS"], ...]
             let tokens: Vec<String> = result.tokens.iter()
                 .map(|t| format!("[\"{}\",\"{}\"]", t.text.replace('"', "\\\""), t.pos.as_str()))
                 .collect();

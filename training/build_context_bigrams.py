@@ -81,7 +81,7 @@ def main():
         if len(analyses) < 2: continue
         top2 = analyses.most_common(2)
         total = sum(analyses.values())
-        if total < 100: continue
+        if total < 50: continue
         # At least 10% for second analysis
         if top2[1][1] / total >= 0.10:
             ambig_eojeols[eojeol] = analyses
@@ -97,20 +97,20 @@ def main():
 
         for prev_pos, ctx_analyses in context_dist[eojeol].items():
             ctx_total = sum(ctx_analyses.values())
-            if ctx_total < 30: continue  # need sufficient evidence
+            if ctx_total < 15: continue  # need sufficient evidence
 
             ctx_best = ctx_analyses.most_common(1)[0]
             ctx_best_analysis, ctx_best_count = ctx_best
             ctx_pct = ctx_best_count / ctx_total
 
             # If context-preferred analysis differs from global default
-            if ctx_best_analysis != default_analysis and ctx_pct >= 0.50:
+            if ctx_best_analysis != default_analysis and ctx_pct >= 0.45:
                 # Generate a bonus rule
                 first_form, first_pos = ctx_best_analysis[0]
                 # Bonus proportional to how much context shifts preference
                 global_pct = analyses.get(ctx_best_analysis, 0) / total
                 shift = ctx_pct - global_pct
-                if shift > 0.15:  # meaningful shift
+                if shift > 0.10:  # meaningful shift
                     bonus = min(shift * 8.0, 5.0)  # scale to cost units
                     rules.append((eojeol, prev_pos, first_form, first_pos, bonus))
 

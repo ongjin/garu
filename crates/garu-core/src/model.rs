@@ -1,4 +1,7 @@
-//! Analyzer — thin wrapper around CodebookAnalyzer with optional CNN reranker.
+//! Analyzer — CodebookAnalyzer + CNN reranker.
+//!
+//! Always generates top-N Viterbi candidates and selects the best one
+//! based on combined Viterbi cost + CNN agreement score.
 
 use crate::codebook::CodebookAnalyzer;
 use crate::cnn::Cnn2;
@@ -6,163 +9,228 @@ use crate::types::{AnalyzeResult, Pos, Token};
 
 pub struct Analyzer {
     codebook: CodebookAnalyzer,
-    cnn: Option<Cnn2>,
+    cnn: Cnn2,
 }
 
-impl Analyzer {
-    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        let codebook = CodebookAnalyzer::from_bytes(data)?;
-        Ok(Self { codebook, cnn: None })
-    }
+/// CNN reranking weight: how much CNN agreement influences candidate selection.
+const CNN_WEIGHT: f32 = 5.0;
+/// Confidence threshold for fine-grained POS override on selected candidate.
+const POS_CONFIDENCE: f32 = 0.9;
+/// Number of Viterbi candidates to generate.
+const NBEST_K: usize = 5;
 
-    /// Load CNN reranker from separate binary data.
-    pub fn load_cnn(&mut self, data: &[u8]) -> Result<(), String> {
-        self.cnn = Some(Cnn2::from_bytes(data)?);
-        Ok(())
+impl Analyzer {
+    pub fn from_bytes(model_data: &[u8], cnn_data: &[u8]) -> Result<Self, String> {
+        let codebook = CodebookAnalyzer::from_bytes(model_data)?;
+        let cnn = Cnn2::from_bytes(cnn_data)?;
+        Ok(Self { codebook, cnn })
     }
 
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
-        let mut result = self.codebook.analyze(text);
+        let mut candidates = self.codebook.analyze_topn(text, NBEST_K);
 
-        // Apply CNN reranking if available
-        if let Some(cnn) = &self.cnn {
-            Self::apply_cnn_rerank(cnn, text, &mut result.tokens);
+        let cnn_result = self.cnn.predict(text);
+        let cnn_morphs = Self::build_cnn_morphs(&cnn_result);
+
+        if candidates.len() <= 1 {
+            if let Some(cand) = candidates.first_mut() {
+                Self::apply_pos_override(&cnn_morphs, text, &mut cand.tokens);
+            }
+            return candidates.into_iter().next().unwrap_or(AnalyzeResult {
+                tokens: vec![], score: 0.0, elapsed_ms: 0.0,
+            });
         }
 
+        // Score each candidate by combined Viterbi cost + CNN agreement
+        let mut best_idx = 0;
+        let mut best_combined = f32::INFINITY;
+        for (i, cand) in candidates.iter().enumerate() {
+            let agreement = Self::score_cnn_agreement(&cnn_morphs, text, &cand.tokens);
+            let combined = cand.score - CNN_WEIGHT * agreement;
+            if combined < best_combined {
+                best_combined = combined;
+                best_idx = i;
+            }
+        }
+
+        let mut result = candidates.swap_remove(best_idx);
+        Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
         result
     }
 
-    /// CNN reranking with confidence-based POS override and segmentation correction.
-    fn apply_cnn_rerank(cnn: &Cnn2, text: &str, tokens: &mut Vec<Token>) {
-        let cnn_result = cnn.predict(text);
-        if cnn_result.is_empty() {
-            return;
+    pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
+        let mut results = self.codebook.analyze_topn(text, n);
+        let cnn_result = self.cnn.predict(text);
+        let cnn_morphs = Self::build_cnn_morphs(&cnn_result);
+        for result in &mut results {
+            Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
         }
+        results
+    }
 
-        const CONFIDENCE_THRESHOLD: f32 = 0.9;
+    pub fn tokenize(&self, text: &str) -> Vec<String> {
+        self.analyze(text).tokens.into_iter().map(|t| t.text).collect()
+    }
 
-        // Build CNN morpheme sequence from BIO tags with per-morpheme confidence
-        let mut cnn_morphs: Vec<(String, Pos, f32)> = Vec::new(); // (form, pos, min_confidence)
+    // -----------------------------------------------------------------------
+    // CNN morpheme extraction from BIO tags
+    // -----------------------------------------------------------------------
+
+    fn build_cnn_morphs<'a>(cnn_result: &[(char, &'a str, f32)]) -> Vec<(String, Pos, f32)> {
+        let mut morphs: Vec<(String, Pos, f32)> = Vec::new();
         let mut cur_form = String::new();
         let mut cur_pos: Option<Pos> = None;
         let mut cur_conf: f32 = 1.0;
 
-        for &(ch, label, conf) in &cnn_result {
+        for &(ch, label, conf) in cnn_result {
             if ch == ' ' {
-                if !cur_form.is_empty() {
-                    if let Some(p) = cur_pos {
-                        cnn_morphs.push((cur_form.clone(), p, cur_conf));
-                    }
-                    cur_form.clear();
-                    cur_pos = None;
-                    cur_conf = 1.0;
+                if let Some(p) = cur_pos.take() {
+                    if !cur_form.is_empty() { morphs.push((cur_form.clone(), p, cur_conf)); }
                 }
+                cur_form.clear();
+                cur_conf = 1.0;
                 continue;
             }
             if label.starts_with("B-") {
-                if !cur_form.is_empty() {
-                    if let Some(p) = cur_pos {
-                        cnn_morphs.push((cur_form.clone(), p, cur_conf));
-                    }
+                if let Some(p) = cur_pos.take() {
+                    if !cur_form.is_empty() { morphs.push((cur_form.clone(), p, cur_conf)); }
                 }
                 cur_form = ch.to_string();
-                cur_pos = Self::parse_pos(&label[2..]);
+                cur_pos = Pos::from_str(&label[2..]);
                 cur_conf = conf;
             } else if label.starts_with("I-") {
                 cur_form.push(ch);
                 cur_conf = cur_conf.min(conf);
             } else {
-                if !cur_form.is_empty() {
-                    if let Some(p) = cur_pos {
-                        cnn_morphs.push((cur_form.clone(), p, cur_conf));
-                    }
+                if let Some(p) = cur_pos.take() {
+                    if !cur_form.is_empty() { morphs.push((cur_form.clone(), p, cur_conf)); }
                 }
                 cur_form = ch.to_string();
                 cur_pos = Some(Pos::SW);
                 cur_conf = conf;
             }
         }
-        if !cur_form.is_empty() {
-            if let Some(p) = cur_pos {
-                cnn_morphs.push((cur_form, p, cur_conf));
-            }
+        if let Some(p) = cur_pos {
+            if !cur_form.is_empty() { morphs.push((cur_form, p, cur_conf)); }
         }
+        morphs
+    }
 
-        // Split tokens into eojeol groups (by start/end offsets)
-        let mut eojeol_groups: Vec<(usize, usize)> = Vec::new(); // (token_start, token_end)
-        if !tokens.is_empty() {
-            let mut gs = 0;
-            for i in 1..tokens.len() {
-                if tokens[i].start != tokens[gs].start {
-                    eojeol_groups.push((gs, i));
-                    gs = i;
-                }
-            }
-            eojeol_groups.push((gs, tokens.len()));
-        }
+    // -----------------------------------------------------------------------
+    // CNN agreement scoring for N-best reranking
+    // -----------------------------------------------------------------------
 
-        // Split CNN morphs into eojeol groups (by space boundaries)
-        let mut cnn_eojeol_groups: Vec<(usize, usize)> = Vec::new();
-        {
-            let mut gs = 0;
-            let mut char_pos = 0;
-            for (ci, (form, _, _)) in cnn_morphs.iter().enumerate() {
-                let new_char_pos = char_pos + form.chars().count();
-                // Check if there's a space after this morpheme
-                if ci + 1 < cnn_morphs.len() {
-                    // Space detection: check if next morpheme starts after a gap
-                    let next_start = new_char_pos;
-                    let text_chars: Vec<char> = text.chars().collect();
-                    if next_start < text_chars.len() && text_chars[next_start] == ' ' {
-                        cnn_eojeol_groups.push((gs, ci + 1));
-                        gs = ci + 1;
-                    }
-                }
-                char_pos = new_char_pos;
-            }
-            if gs < cnn_morphs.len() {
-                cnn_eojeol_groups.push((gs, cnn_morphs.len()));
-            }
-        }
+    fn score_cnn_agreement(
+        cnn_morphs: &[(String, Pos, f32)],
+        text: &str,
+        tokens: &[Token],
+    ) -> f32 {
+        let vit_groups = Self::eojeol_groups(tokens);
+        let cnn_groups = Self::cnn_eojeol_groups(cnn_morphs, text);
 
-        // Process each eojeol: compare Viterbi vs CNN
-        let replacements: Vec<(usize, usize, Vec<Token>)> = Vec::new();
+        let mut score = 0.0;
+        for (eg_idx, &(vs, ve)) in vit_groups.iter().enumerate() {
+            if eg_idx >= cnn_groups.len() { break; }
+            let (cs, ce) = cnn_groups[eg_idx];
+            let vit = &tokens[vs..ve];
+            let cnn = &cnn_morphs[cs..ce];
 
-        for (eg_idx, &(vit_start, vit_end)) in eojeol_groups.iter().enumerate() {
-            if eg_idx >= cnn_eojeol_groups.len() {
-                break;
-            }
-            let (cnn_start, cnn_end) = cnn_eojeol_groups[eg_idx];
-
-            let vit_slice = &tokens[vit_start..vit_end];
-            let cnn_slice = &cnn_morphs[cnn_start..cnn_end];
-
-            // Check if same segmentation (same morpheme count and forms match)
-            let same_seg = vit_slice.len() == cnn_slice.len()
-                && vit_slice.iter().zip(cnn_slice.iter()).all(|(v, c)| v.text == c.0);
+            let same_seg = vit.len() == cnn.len()
+                && vit.iter().zip(cnn.iter()).all(|(v, c)| v.text == c.0);
 
             if same_seg {
-                // Same segmentation → confidence-based POS override
-                for (vi, ci) in (vit_start..vit_end).zip(cnn_start..cnn_end) {
-                    let (_, cnn_pos, conf) = &cnn_morphs[ci];
-                    if *cnn_pos == tokens[vi].pos || *conf < CONFIDENCE_THRESHOLD {
-                        continue;
-                    }
-                    if Self::is_ambiguous_pair(tokens[vi].pos, *cnn_pos) {
-                        tokens[vi].pos = *cnn_pos;
+                for (v, c) in vit.iter().zip(cnn.iter()) {
+                    if v.pos == c.1 {
+                        score += c.2;
                     }
                 }
             } else {
-                // Different segmentation → disabled for now (too aggressive)
-                // TODO: enable with higher threshold and validation
+                for cm in cnn {
+                    if cm.2 > 0.8 && vit.iter().any(|v| v.pos == cm.1) {
+                        score += cm.2 * 0.3;
+                    }
+                }
             }
         }
+        score
+    }
 
-        // Apply segmentation replacements in reverse order
-        for (start, end, new_tokens) in replacements.into_iter().rev() {
-            tokens.splice(start..end, new_tokens);
+    // -----------------------------------------------------------------------
+    // POS-level override (applied on final selected candidate)
+    // -----------------------------------------------------------------------
+
+    fn apply_pos_override(
+        cnn_morphs: &[(String, Pos, f32)],
+        text: &str,
+        tokens: &mut Vec<Token>,
+    ) {
+        let vit_groups = Self::eojeol_groups(tokens);
+        let cnn_groups = Self::cnn_eojeol_groups(cnn_morphs, text);
+
+        for (eg_idx, &(vs, ve)) in vit_groups.iter().enumerate() {
+            if eg_idx >= cnn_groups.len() { break; }
+            let (cs, ce) = cnn_groups[eg_idx];
+            let cnn_slice = &cnn_morphs[cs..ce];
+            let vit_len = ve - vs;
+
+            if vit_len != cnn_slice.len() { continue; }
+            let same_seg = (0..vit_len).all(|i| tokens[vs + i].text == cnn_slice[i].0);
+            if !same_seg { continue; }
+
+            for i in 0..vit_len {
+                let (_, cnn_pos, conf) = &cnn_slice[i];
+                if *cnn_pos == tokens[vs + i].pos || *conf < POS_CONFIDENCE {
+                    continue;
+                }
+                if Self::is_ambiguous_pair(tokens[vs + i].pos, *cnn_pos) {
+                    tokens[vs + i].pos = *cnn_pos;
+                }
+            }
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Eojeol grouping helpers
+    // -----------------------------------------------------------------------
+
+    fn eojeol_groups(tokens: &[Token]) -> Vec<(usize, usize)> {
+        let mut groups = Vec::new();
+        if tokens.is_empty() { return groups; }
+        let mut gs = 0;
+        for i in 1..tokens.len() {
+            if tokens[i].start != tokens[gs].start {
+                groups.push((gs, i));
+                gs = i;
+            }
+        }
+        groups.push((gs, tokens.len()));
+        groups
+    }
+
+    fn cnn_eojeol_groups(cnn_morphs: &[(String, Pos, f32)], text: &str) -> Vec<(usize, usize)> {
+        let mut groups = Vec::new();
+        let text_chars: Vec<char> = text.chars().collect();
+        let mut gs = 0;
+        let mut char_pos = 0;
+        for (ci, (form, _, _)) in cnn_morphs.iter().enumerate() {
+            let new_char_pos = char_pos + form.chars().count();
+            if ci + 1 < cnn_morphs.len() && new_char_pos < text_chars.len()
+                && text_chars[new_char_pos] == ' '
+            {
+                groups.push((gs, ci + 1));
+                gs = ci + 1;
+            }
+            char_pos = new_char_pos;
+        }
+        if gs < cnn_morphs.len() {
+            groups.push((gs, cnn_morphs.len()));
+        }
+        groups
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
 
     fn is_ambiguous_pair(a: Pos, b: Pos) -> bool {
         matches!(
@@ -185,43 +253,5 @@ impl Analyzer {
             (Pos::MAG, Pos::IC) | (Pos::IC, Pos::MAG) |
             (Pos::MM, Pos::IC) | (Pos::IC, Pos::MM)
         )
-    }
-
-    fn parse_pos(s: &str) -> Option<Pos> {
-        match s {
-            "NNG" => Some(Pos::NNG), "NNP" => Some(Pos::NNP), "NNB" => Some(Pos::NNB),
-            "NR" => Some(Pos::NR), "NP" => Some(Pos::NP),
-            "VV" => Some(Pos::VV), "VA" => Some(Pos::VA), "VX" => Some(Pos::VX),
-            "VCP" => Some(Pos::VCP), "VCN" => Some(Pos::VCN),
-            "MAG" => Some(Pos::MAG), "MAJ" => Some(Pos::MAJ), "MM" => Some(Pos::MM),
-            "IC" => Some(Pos::IC), "XR" => Some(Pos::XR),
-            "JKS" => Some(Pos::JKS), "JKC" => Some(Pos::JKC), "JKG" => Some(Pos::JKG),
-            "JKO" => Some(Pos::JKO), "JKB" => Some(Pos::JKB), "JKV" => Some(Pos::JKV),
-            "JKQ" => Some(Pos::JKQ), "JX" => Some(Pos::JX), "JC" => Some(Pos::JC),
-            "EP" => Some(Pos::EP), "EF" => Some(Pos::EF), "EC" => Some(Pos::EC),
-            "ETN" => Some(Pos::ETN), "ETM" => Some(Pos::ETM),
-            "XPN" => Some(Pos::XPN), "XSN" => Some(Pos::XSN), "XSV" => Some(Pos::XSV),
-            "XSA" => Some(Pos::XSA),
-            "SF" => Some(Pos::SF), "SP" => Some(Pos::SP), "SS" => Some(Pos::SS),
-            "SE" => Some(Pos::SE), "SO" => Some(Pos::SO), "SW" => Some(Pos::SW),
-            "SL" => Some(Pos::SL), "SH" => Some(Pos::SH), "SN" => Some(Pos::SN),
-            _ => None,
-        }
-    }
-
-    pub fn analyze_topn(&self, _text: &str, _n: usize) -> Vec<AnalyzeResult> {
-        vec![self.analyze(_text)]
-    }
-
-    pub fn tokenize(&self, text: &str) -> Vec<String> {
-        self.analyze(text)
-            .tokens
-            .into_iter()
-            .map(|t| t.text)
-            .collect()
-    }
-
-    pub fn has_cnn(&self) -> bool {
-        self.cnn.is_some()
     }
 }

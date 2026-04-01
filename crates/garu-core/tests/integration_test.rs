@@ -1,10 +1,16 @@
 use garu_core::model::Analyzer;
 
+fn load_analyzer() -> Analyzer {
+    let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
+    let cnn_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn2.bin");
+    let model_data = std::fs::read(model_path).expect("Failed to read model");
+    let cnn_data = std::fs::read(cnn_path).expect("Failed to read CNN model");
+    Analyzer::from_bytes(&model_data, &cnn_data).expect("Failed to load analyzer")
+}
+
 #[test]
 fn test_codebook_analyzer_v3() {
-    let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
-    let data = std::fs::read(model_path).expect("Failed to read codebook model");
-    let analyzer = Analyzer::from_bytes(&data).expect("Failed to load codebook model");
+    let analyzer = load_analyzer();
 
     // Basic analysis
     let result = analyzer.analyze("나는 학교에서 공부했다");
@@ -70,36 +76,22 @@ fn test_codebook_analyzer_v3() {
 
 #[test]
 fn test_cnn2_ensemble() {
-    let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
-    let cnn_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn2.bin");
-
-    let model_data = std::fs::read(model_path).expect("Failed to read model");
-    let mut analyzer = Analyzer::from_bytes(&model_data).expect("Failed to load model");
-
-    if let Ok(cnn_data) = std::fs::read(cnn_path) {
-        analyzer.load_cnn(&cnn_data).expect("Failed to load CNN2");
-        assert!(analyzer.has_cnn());
-        println!("CNN2 loaded");
-    } else {
-        println!("CNN2 model not found, skipping");
-        return;
-    }
+    let analyzer = load_analyzer();
 
     // Test: "나는 하늘을 나는 새를 보았다"
     let r = analyzer.analyze("나는 하늘을 나는 새를 보았다");
-    println!("\n나는 하늘을 나는 새를 보았다 (with CNN):");
+    println!("\n나는 하늘을 나는 새를 보았다:");
     for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
-    // First 나는 should be NP+JX
     assert_eq!(r.tokens[0].text, "나");
     assert_eq!(r.tokens[0].pos, garu_core::types::Pos::NP);
 
     // Test: 피곤하다
     let r2 = analyzer.analyze("피곤하다");
-    println!("\n피곤하다 (with CNN):");
+    println!("\n피곤하다:");
     for t in &r2.tokens { println!("  {}\t{:?}", t.text, t.pos); }
 
     // Test: 공부하는 학생
     let r3 = analyzer.analyze("공부하는 학생");
-    println!("\n공부하는 학생 (with CNN):");
+    println!("\n공부하는 학생:");
     for t in &r3.tokens { println!("  {}\t{:?}", t.text, t.pos); }
 }

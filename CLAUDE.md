@@ -2,17 +2,18 @@
 
 ## 프로젝트 개요
 
-브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + Viterbi + 어절 캐시 + 후처리 규칙 + CNN 재순위로 동작.
-- **F1 91.0%** (5,000문장 수동검증 골드 테스트셋) / NIKL MP 93.6%
+브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + CNN 재순위로 동작.
+- **F1 91.1%** (5,000문장 수동검증 골드 테스트셋) / NIKL MP 93.7%
 - **모델 1.2MB + CNN 526KB** (gzip 압축, npm 패키지에 포함, CDN 불필요)
-- **WASM 174KB** — 브라우저에서 실행
+- **WASM** — 브라우저에서 실행
 
 ## 아키텍처
 
 ```
-입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입)
-           → 문장 수준 Trigram Viterbi → 후처리
-           → [CNN 재순위] (신뢰도 기반 POS 보정, 526KB int8)
+입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
+           → 문장 수준 Trigram N-best Viterbi (top-5)
+           → 후처리 (VCP 분리, MM 관형사 교정 등)
+           → CNN 재순위 (agreement 스코어링으로 최적 후보 선택 + POS 보정)
            → 출력
 ```
 
@@ -41,7 +42,7 @@
 ### 핵심 Rust 코드
 - `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리
 - `crates/garu-core/src/cnn.rs` — 2-layer 1D CNN 추론 엔진 (int8, gzip 지원)
-- `crates/garu-core/src/model.rs` — Analyzer (Viterbi + CNN 앙상블, 신뢰도 기반 POS 교체)
+- `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + CNN agreement 스코어링 + POS override)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩
@@ -79,6 +80,10 @@
 14. **모델 gzip 압축** → 2.2MB→1.2MB (46% 절감, flate2 rust_backend)
 15. **2-layer 1D CNN 재순위** → int8 526KB, 신뢰도 기반 POS 보정 (NP↔VV, XSV↔XSA 등)
 16. **Word bigram 동형이의어 해소** → "나는" BOS→NP 보너스 강화
+17. **N-best Viterbi + CNN 재순위** → top-5 후보 생성, CNN agreement 스코어링으로 최적 선택 (분절 교체 가능, 0KB)
+18. **오타 강건성 (Strategy D)** → 경음화(ㅆ↔ㅅ), 모음혼동(ㅐ↔ㅔ) 등 11개 자모 규칙, OOV 위치에서 래티스 아크 주입 (0KB)
+19. **VCP 후처리 규칙** → 이다/이고/이며/이라 등 계사 분리 (0KB)
+20. **MM 관형사 후처리** → 전/그런/이런/저런/어떤/새/헌/옛/온 + 명사 → MM 교정 (0KB)
 
 ## 빌드
 
