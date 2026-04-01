@@ -1044,12 +1044,22 @@ def main():
     else:
         print(f"  Eojeol cache: none")
 
-    # Write output
+    # Write output with gzip compression
+    import gzip as _gzip
+    raw_bytes = bytes(buf)
+    compressed = _gzip.compress(raw_bytes, 9)
+
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_PATH, "wb") as f:
-        f.write(buf)
+        f.write(compressed)
 
-    total = len(buf)
+    # Copy to JS models
+    js_model = ROOT / "js" / "models" / "base.gmdl"
+    if js_model.parent.exists():
+        import shutil
+        shutil.copy2(OUT_PATH, js_model)
+
+    total = len(raw_bytes)
     print()
     print("=== Section Size Report ===")
     print(f"  Header:              8 bytes")
@@ -1060,9 +1070,12 @@ def main():
     print(f"  Section 10 (params): {len(params_data):>10,} bytes  ({len(params_data)/total*100:.1f}%)")
     print(f"  Section headers:     {5 * 5:>10,} bytes")
     print(f"  ---")
-    print(f"  Total:               {total:>10,} bytes  ({total/1024/1024:.2f} MB)")
+    print(f"  Total (raw):         {total:>10,} bytes  ({total/1024/1024:.2f} MB)")
+    print(f"  Total (gzip):        {len(compressed):>10,} bytes  ({len(compressed)/1024:.0f} KB, {len(compressed)/total*100:.0f}% of raw)")
     print()
     print(f"Output written to: {OUT_PATH}")
+    if js_model.parent.exists():
+        print(f"Copied to: {js_model}")
 
 
 if __name__ == "__main__":
