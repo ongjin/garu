@@ -2,17 +2,18 @@
 
 ## 프로젝트 개요
 
-브라우저에서 실행되는 초경량 한국어 형태소 분석기. 신경망 없이 코드북 + Viterbi + 어절 캐시 + 후처리 규칙으로 동작.
-- **F1 90.8%** (5,000문장 수동검증 골드 테스트셋, Kiwi 89.7% 대비 +1.1%p) / NIKL MP 93.5%
-- **모델 1.2MB** (gzip 압축, npm 패키지에 포함, CDN 불필요)
-- **WASM 119KB** — 브라우저에서 <1ms 추론
+브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + Viterbi + 어절 캐시 + 후처리 규칙 + CNN 재순위로 동작.
+- **F1 91.0%** (5,000문장 수동검증 골드 테스트셋) / NIKL MP 93.6%
+- **모델 1.2MB + CNN 526KB** (gzip 압축, npm 패키지에 포함, CDN 불필요)
+- **WASM 174KB** — 브라우저에서 실행
 
 ## 아키텍처
 
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입)
-           → 문장 수준 Trigram Viterbi → 후처리 → 출력
-           (동형이의어 "나는" 등을 어절 간 문맥으로 해소)
+           → 문장 수준 Trigram Viterbi → 후처리
+           → [CNN 재순위] (옵셔널, 신뢰도 기반 POS 보정)
+           → 출력
 ```
 
 ### 모델 구성 (codebook.gmdl, GMDL v3 포맷)
@@ -28,8 +29,19 @@
 | 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 230 KB |
 | — | **gzip 압축 후 전체** | **1,174 KB** |
 
+### CNN 재순위 모델 (cnn2.bin, int8 양자화)
+| 구성요소 | 파라미터 | int8 크기 |
+|----------|----------|-----------|
+| 임베딩 (3002×48) | 144K | 140 KB |
+| Conv Layer 1 (k=3,5,9, 96ch) | 79K | 77 KB |
+| Conv Layer 2 (k=3,7, 96ch) | 277K | 270 KB |
+| 출력 FC (192→81) | 16K | 15 KB |
+| **합계** | **516K** | **526 KB** |
+
 ### 핵심 Rust 코드
 - `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리
+- `crates/garu-core/src/cnn.rs` — 2-layer 1D CNN 추론 엔진 (int8, gzip 지원)
+- `crates/garu-core/src/model.rs` — Analyzer (Viterbi + CNN 앙상블, 신뢰도 기반 POS 교체)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩
@@ -38,8 +50,11 @@
 ### 학습 파이프라인 (Python)
 - `training/extract_codebook.py` — Kiwi + kowikitext에서 코드북 추출
 - `training/extract_nikl_codebook.py` — NIKL MP 골드 데이터에서 코드북 추출
-- `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합)
+- `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합, 자동 gzip 압축)
+- `training/neural/prepare_data.py` — NIKL MP에서 음절 수준 BIO 학습 데이터 생성
+- `training/neural/experiment_all.py` — CNN 학습 (CNN1/CNN2) 및 앙상블 실험
 - `training/eval_nikl_mp.py` — NIKL MP 벤치마크 (Garu vs Kiwi)
+- `training/gold_testset/eval_f1.py` — 골드 테스트셋 (5K 문장) F1 평가
 
 ### JS/TS (npm 패키지)
 - `js/src/index.ts` — Garu 클래스, load/analyze/tokenize API
@@ -62,6 +77,8 @@
 12. **종성 분리 전략 (A3)** → 코드북에 없는 활용형 처리 (고친다→고치+ㄴ다, 0KB)
 13. **모음 축약 복원 (A2b)** → 명령형 어미 교정 (건너라→건너+어라, 0KB)
 14. **모델 gzip 압축** → 2.2MB→1.2MB (46% 절감, flate2 rust_backend)
+15. **2-layer 1D CNN 재순위** → int8 526KB, 신뢰도 기반 POS 보정 (NP↔VV, XSV↔XSA 등)
+16. **Word bigram 동형이의어 해소** → "나는" BOS→NP 보너스 강화
 
 ## 빌드
 
