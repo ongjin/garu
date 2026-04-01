@@ -144,8 +144,8 @@ impl Cnn2 {
         })
     }
 
-    /// Run inference on a text string. Returns Vec<(char, label_str)>.
-    pub fn predict(&self, text: &str) -> Vec<(char, &str)> {
+    /// Run inference on a text string. Returns Vec<(char, label_str, confidence)>.
+    pub fn predict(&self, text: &str) -> Vec<(char, &str, f32)> {
         let chars: Vec<char> = text.chars().collect();
         let n = chars.len();
         if n == 0 {
@@ -193,10 +193,12 @@ impl Cnn2 {
         let mut logits = vec![0.0f32; n * self.num_labels];
         self.fc_forward(&l2_out, n, h * 2, &mut logits);
 
-        // 5. Argmax
+        // 5. Argmax + softmax confidence
         let mut result = Vec::with_capacity(n);
         for i in 0..n {
             let base = i * self.num_labels;
+
+            // Find argmax
             let mut best_j = 0;
             let mut best_v = logits[base];
             for j in 1..self.num_labels {
@@ -205,12 +207,21 @@ impl Cnn2 {
                     best_j = j;
                 }
             }
+
+            // Softmax confidence for best label
+            let max_logit = best_v;
+            let mut sum_exp = 0.0f32;
+            for j in 0..self.num_labels {
+                sum_exp += (logits[base + j] - max_logit).exp();
+            }
+            let confidence = 1.0 / sum_exp; // exp(0) / sum = 1/sum
+
             let label = if best_j < self.labels.len() {
                 &self.labels[best_j]
             } else {
                 "O"
             };
-            result.push((chars[i], label));
+            result.push((chars[i], label, confidence));
         }
 
         result
