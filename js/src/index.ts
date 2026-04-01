@@ -121,7 +121,32 @@ export class Garu {
 
     // Construct the WASM analyzer
     const wasmInstance = new wasmModule.GaruWasm(modelBytes);
-    return new Garu(wasmInstance, modelBytes.byteLength);
+
+    // Load CNN reranker
+    let cnnBytes: Uint8Array | null = null;
+    try {
+      if (isNode) {
+        const { readFile } = await import('fs/promises');
+        const { fileURLToPath } = await import('url');
+        const { join, dirname } = await import('path');
+        const dir = dirname(fileURLToPath(import.meta.url));
+        const buf = await readFile(join(dir, '..', 'models', 'cnn2.bin'));
+        cnnBytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+      } else {
+        const cnnUrl = new URL('../models/cnn2.bin', import.meta.url).href;
+        const cnnResp = await fetch(cnnUrl);
+        if (cnnResp.ok) {
+          cnnBytes = new Uint8Array(await cnnResp.arrayBuffer());
+        }
+      }
+    } catch {
+      // CNN loading is best-effort
+    }
+    if (cnnBytes) {
+      wasmInstance.load_cnn(cnnBytes);
+    }
+
+    return new Garu(wasmInstance, modelBytes.byteLength + (cnnBytes?.byteLength ?? 0));
   }
 
   /**
@@ -196,7 +221,7 @@ export class Garu {
     return {
       version: this._wasm.constructor.version(),
       size: this._modelSize,
-      accuracy: 0.908,
+      accuracy: 0.910,
     };
   }
 

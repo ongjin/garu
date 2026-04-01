@@ -6,6 +6,10 @@ export class GaruWasm {
     [Symbol.dispose](): void;
     analyze(text: string): any;
     analyze_topn(text: string, n: number): any;
+    /**
+     * Load CNN reranker model.
+     */
+    load_cnn(cnn_data: Uint8Array): void;
     constructor(model_data: Uint8Array);
     tokenize(text: string): any;
     static version(): string;
@@ -18,6 +22,7 @@ export interface InitOutput {
     readonly __wbg_garuwasm_free: (a: number, b: number) => void;
     readonly garuwasm_analyze: (a: number, b: number, c: number) => [number, number, number];
     readonly garuwasm_analyze_topn: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly garuwasm_load_cnn: (a: number, b: number, c: number) => [number, number];
     readonly garuwasm_new: (a: number, b: number) => [number, number, number];
     readonly garuwasm_tokenize: (a: number, b: number, c: number) => [number, number, number];
     readonly garuwasm_version: () => [number, number];

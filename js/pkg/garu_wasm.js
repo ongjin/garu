@@ -39,6 +39,18 @@ export class GaruWasm {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Load CNN reranker model.
+     * @param {Uint8Array} cnn_data
+     */
+    load_cnn(cnn_data) {
+        const ptr0 = passArray8ToWasm0(cnn_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.garuwasm_load_cnn(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {Uint8Array} model_data
      */
     constructor(model_data) {

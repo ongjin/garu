@@ -46,9 +46,15 @@ pub struct GaruWasm {
 impl GaruWasm {
     #[wasm_bindgen(constructor)]
     pub fn new(model_data: &[u8]) -> Result<GaruWasm, JsError> {
-        let analyzer = Analyzer::from_bytes(model_data)
+        let mut analyzer = Analyzer::from_bytes(model_data)
             .map_err(|e| JsError::new(&e))?;
         Ok(GaruWasm { analyzer })
+    }
+
+    /// Load CNN reranker model.
+    pub fn load_cnn(&mut self, cnn_data: &[u8]) -> Result<(), JsError> {
+        self.analyzer.load_cnn(cnn_data)
+            .map_err(|e| JsError::new(&e))
     }
 
     pub fn analyze(&self, text: &str) -> Result<JsValue, JsError> {
