@@ -1,5 +1,4 @@
 use garu_core::model::Analyzer;
-use garu_core::cnn::Cnn2;
 
 #[test]
 fn test_codebook_analyzer_v3() {
@@ -70,25 +69,37 @@ fn test_codebook_analyzer_v3() {
 }
 
 #[test]
-fn test_cnn2_inference() {
+fn test_cnn2_ensemble() {
+    let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
     let cnn_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn2.bin");
-    let data = match std::fs::read(cnn_path) {
-        Ok(d) => d,
-        Err(_) => { println!("CNN2 model not found, skipping"); return; }
-    };
-    let cnn = Cnn2::from_bytes(&data).expect("Failed to load CNN2");
 
-    let tests = [
-        "나는 하늘을 나는 새를 보았다",
-        "피곤하다",
-        "공부하는 학생",
-    ];
-    for text in &tests {
-        let result = cnn.predict(text);
-        println!("\nCNN2 '{text}':");
-        for (ch, label) in &result {
-            print!("{ch}/{label} ");
-        }
-        println!();
+    let model_data = std::fs::read(model_path).expect("Failed to read model");
+    let mut analyzer = Analyzer::from_bytes(&model_data).expect("Failed to load model");
+
+    if let Ok(cnn_data) = std::fs::read(cnn_path) {
+        analyzer.load_cnn(&cnn_data).expect("Failed to load CNN2");
+        assert!(analyzer.has_cnn());
+        println!("CNN2 loaded");
+    } else {
+        println!("CNN2 model not found, skipping");
+        return;
     }
+
+    // Test: "나는 하늘을 나는 새를 보았다"
+    let r = analyzer.analyze("나는 하늘을 나는 새를 보았다");
+    println!("\n나는 하늘을 나는 새를 보았다 (with CNN):");
+    for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+    // First 나는 should be NP+JX
+    assert_eq!(r.tokens[0].text, "나");
+    assert_eq!(r.tokens[0].pos, garu_core::types::Pos::NP);
+
+    // Test: 피곤하다
+    let r2 = analyzer.analyze("피곤하다");
+    println!("\n피곤하다 (with CNN):");
+    for t in &r2.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+
+    // Test: 공부하는 학생
+    let r3 = analyzer.analyze("공부하는 학생");
+    println!("\n공부하는 학생 (with CNN):");
+    for t in &r3.tokens { println!("  {}\t{:?}", t.text, t.pos); }
 }

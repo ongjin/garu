@@ -10,7 +10,6 @@ use std::collections::HashMap;
 struct QTensor {
     data: Vec<i8>,
     scale: f32,
-    shape: Vec<usize>, // [out_ch, in_ch, kernel_size] for conv, [rows, cols] for fc
 }
 
 /// CNN2 model for syllable-level BIO+POS tagging.
@@ -80,7 +79,7 @@ impl Cnn2 {
             let raw = &data[*p..*p + n];
             let int8_data: Vec<i8> = raw.iter().map(|&b| b as i8).collect();
             *p += n;
-            QTensor { data: int8_data, scale, shape }
+            QTensor { data: int8_data, scale }
         };
 
         // Helper to read f32 bias
