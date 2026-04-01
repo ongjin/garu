@@ -1,4 +1,5 @@
 use garu_core::model::Analyzer;
+use garu_core::cnn::Cnn2;
 
 #[test]
 fn test_codebook_analyzer_v3() {
@@ -65,5 +66,29 @@ fn test_codebook_analyzer_v3() {
         let r = analyzer.analyze(input);
         println!("\n{input}:");
         for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+    }
+}
+
+#[test]
+fn test_cnn2_inference() {
+    let cnn_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn2.bin");
+    let data = match std::fs::read(cnn_path) {
+        Ok(d) => d,
+        Err(_) => { println!("CNN2 model not found, skipping"); return; }
+    };
+    let cnn = Cnn2::from_bytes(&data).expect("Failed to load CNN2");
+
+    let tests = [
+        "나는 하늘을 나는 새를 보았다",
+        "피곤하다",
+        "공부하는 학생",
+    ];
+    for text in &tests {
+        let result = cnn.predict(text);
+        println!("\nCNN2 '{text}':");
+        for (ch, label) in &result {
+            print!("{ch}/{label} ");
+        }
+        println!();
     }
 }
