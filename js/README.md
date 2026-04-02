@@ -2,9 +2,9 @@
 
 **Browser-native Korean morphological analyzer.** No server required.
 
-- **2.1MB model** bundled in npm package (no CDN needed)
+- **1.6MB model** bundled in npm package (no CDN needed)
 - **93KB WASM** engine -- runs in any modern browser
-- **F1 90.8%** on human-verified gold testset (vs. Kiwi 89.7%)
+- **F1 91.1%** on human-verified gold testset (vs. Kiwi 89.7%)
 - **< 1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -13,10 +13,10 @@
 
 |  | Kiwi | MeCab-ko | garu-ko |
 |---|---|---|---|
-| Model size | ~40MB | ~50MB | **2.1MB** |
+| Model size | ~40MB | ~50MB | **1.6MB** |
 | npm package | No | No | **Yes** |
-| F1 (gold testset) | 89.7% | — | **90.8%** |
-| F1 (NIKL MP) | 87.9% | ~85% | 93.5% |
+| F1 (gold testset) | 89.7% | — | **91.1%** |
+| F1 (NIKL MP) | 87.9% | ~85% | **93.7%** |
 | Browser support | Impractical | No | **Yes** |
 
 ## Quick Start

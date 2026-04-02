@@ -1,7 +1,7 @@
 {
   "name": "garu-wasm",
   "type": "module",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "files": [
     "garu_wasm_bg.wasm",
     "garu_wasm.js",
