@@ -1,6 +1,6 @@
 {
   "name": "garu-ko",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Ultra-lightweight Korean morphological analyzer for the web (1.7MB model, WASM, F1 93.7%)",
   "type": "module",
   "main": "dist/index.js",
