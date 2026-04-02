@@ -146,7 +146,7 @@ const TYPO_PENALTY: f32 = 3.0;
 // ---------------------------------------------------------------------------
 
 /// Normalize Hangul jongseong (U+11A8-U+11C2) to compatibility jamo (U+3131-U+314E).
-/// This ensures output matches the convention used by standard Korean morpheme benchmarks.
+/// Used internally for consistent representation during codebook loading.
 fn normalize_jamo(s: &str) -> String {
     s.chars().map(|c| match c {
         '\u{11A8}' => '\u{3131}', // ᄀ → ㄱ
@@ -168,6 +168,7 @@ fn normalize_jamo(s: &str) -> String {
         other => other,
     }).collect()
 }
+
 
 // ---------------------------------------------------------------------------
 // Suffix codebook types

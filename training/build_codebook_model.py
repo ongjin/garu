@@ -232,6 +232,7 @@ IRREG_HIEUT_STEMS = {"빨갛", "파랗", "노랗", "하얗", "까맣", "그렇",
 SUFFIX_COMBOS = [
     ("어", ["EC"]),
     ("어서", ["EC"]),
+    ("어야", ["EC"]),
     ("었", ["EP"]),
     ("었다", ["EP", "EF"]),
     ("은", ["ETM"]),
@@ -333,8 +334,8 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
                 first_suffix_ch = suffix_str[0]
                 if first_suffix_ch in ("어", "아"):
                     # ㅂ -> 우 + 어/아 -> 워/와
-                    # Most ㅂ-irregular use 워 (ㅂ+어→워)
-                    conj_char = "워"
+                    # Only 곱다/돕다 use 와; all other ㅂ-irregular use 워
+                    conj_char = "와" if stem in ("곱", "돕") else "워"
                     rest = suffix_str[1:]
                     surface = stem_base + conj_char + rest
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
