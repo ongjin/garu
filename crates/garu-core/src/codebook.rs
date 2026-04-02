@@ -1014,11 +1014,22 @@ impl CodebookAnalyzer {
                 }
                 runs.push((start, i, Pos::SL));
             } else if chars[i].is_ascii_digit() {
-                // SN run: digits only
+                // SN run: digits, including decimal points and thousand separators
+                // e.g. "3.14", "1,900", "12,345,678"
                 let start = i;
                 i += 1;
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    i += 1;
+                while i < chars.len() {
+                    if chars[i].is_ascii_digit() {
+                        i += 1;
+                    } else if (chars[i] == '.' || chars[i] == ',')
+                        && i + 1 < chars.len()
+                        && chars[i + 1].is_ascii_digit()
+                    {
+                        // Include separator only if followed by digit
+                        i += 1;
+                    } else {
+                        break;
+                    }
                 }
                 runs.push((start, i, Pos::SN));
             } else {
