@@ -2110,6 +2110,7 @@ impl CodebookAnalyzer {
         const NNB_AFTER_ETM: &[&str] = &[
             "수", "것", "데", "바", "번", "개", "군", "줄",
             "뿐", "채", "척", "듯", "리", "셈", "나름", "탓", "만큼",
+            "법", "대로", "따름",
         ];
         for i in 1..tokens.len() {
             if tokens[i].pos != Pos::NNG && tokens[i].pos != Pos::VV {
@@ -2260,10 +2261,10 @@ impl CodebookAnalyzer {
                 continue; // correct NNB usage
             }
             let form = tokens[i].text.as_str();
-            // Only convert specific single-char NNB that are commonly NNG
+            // Only convert specific NNB that are commonly NNG without ETM
             // Skip: 것/수/바/데/줄 — these are legitimate NNB even without ETM in colloquial speech
-            // Target: 이(tooth), 초(seconds) — almost always NNG when standalone
-            if form == "이" {
+            // Target: 이(tooth), 말(speech/horse) — almost always NNG when standalone
+            if form == "이" || form == "말" {
                 tokens[i].pos = Pos::NNG;
             }
         }

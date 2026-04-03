@@ -966,7 +966,7 @@ def build_analyzer_params() -> bytes:
     """Build Section 10: Analyzer parameters."""
     buf = bytearray()
     buf.extend(struct.pack("<f", 0.25))  # morpheme_penalty (tuned)
-    buf.extend(struct.pack("<f", 4.0))   # oov_penalty (tuned)
+    buf.extend(struct.pack("<f", 4.75))  # oov_penalty (grid search optimized)
     buf.extend(struct.pack("<f", 1.5))   # length_bonus (tuned)
     buf.extend(struct.pack("<f", 3.5))   # single_char_content_penalty
     return bytes(buf)
