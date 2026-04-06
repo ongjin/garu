@@ -86,41 +86,11 @@ const garu = await Garu.load({ modelData });
 
 ## 아키텍처
 
-```
-┌─────────────────────────────────────────┐
-│              입력 텍스트                   │
-└──────────────────┬──────────────────────┘
-                   ↓
-         ┌─────────┴──────────┐
-         │  어절 캐시 조회     │  Hit → 즉시 반환 (10K entries, ~235KB)
-         └─────────┬──────────┘
-                   ↓ Miss
-         ┌─────────┴──────────┐
-         │  ASCII Run 감지     │  (영문 SL, 숫자 SN)
-         └─────────┬──────────┘
-                   ↓
-┌──────────────────┴──────────────────────┐
-│      래티스 구축 (Multi-POS FST)          │
-│  ┌─ A: Content Word + Suffix           │
-│  │   (다중 POS: 있→VA/VX, 하→VV/XSV)    │
-│  ├─ B: Standalone Suffix               │
-│  └─ C: Contracted Forms (했다→하+었+다)  │
-└──────────────────┬──────────────────────┘
-                   ↓
-         ┌─────────┴──────────┐
-         │  Trigram Viterbi    │  Sparse u8 (34KB)
-         │  + Word Bigrams     │  Context bonus (8KB)
-         └─────────┬──────────┘
-                   ↓
-         ┌─────────┴──────────┐
-         │  CNN 재순위          │  2-layer 1D CNN (408KB int8)
-         │  신뢰도 기반 POS 보정│  NP↔VV, XSV↔XSA 등 모호성 해소
-         └─────────┬──────────┘
-                   ↓
-┌──────────────────┴──────────────────────┐
-│     형태소 시퀀스 + POS 태그 출력          │
-└─────────────────────────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/light.png">
+  <img alt="Garu 아키텍처 다이어그램" src="docs/light.png">
+</picture>
 
 코드북 + Viterbi 기반 아키텍처에 경량 CNN 재순위를 결합한 하이브리드 구조입니다. CNN은 Viterbi 결과의 POS 태그만 보정하며, 분절은 Viterbi가 담당합니다.
 
