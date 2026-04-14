@@ -1494,10 +1494,18 @@ impl CodebookAnalyzer {
         // Cost formula: oov_penalty * 1.2 * sqrt(n)
         // This ensures well-analyzed eojeols (됐다=8.11, 봤다=7.42) retain their
         // decomposition while truly OOV eojeols (탕후루~35) use the span arc.
+        //
+        // Guard: skip span arc when the eojeol contains ETM+의존명사 substrings
+        // (만한/만하/는데/한데/을만/뿐이/수있/것같/것이). These patterns signal a
+        // well-defined decomposition (e.g. 갈만한데 = 가+ㄹ+만+하+ㄴ+데) that would
+        // otherwise lose to the single-NNG span due to 종성분리 cost accumulation.
         {
             const SPAN_FACTOR: f32 = 2.8;
             const SPAN_MIN_LEN: usize = 3;
             const SPAN_MAX_LEN: usize = 7;
+            const GUARD_SUBS: [&str; 10] = [
+                "만한", "만하", "만해", "는데", "한데", "을만", "뿐이", "수있", "것같", "것이",
+            ];
             let mut ej_start = 0;
             while ej_start < n {
                 if chars[ej_start].is_whitespace() {
@@ -1515,6 +1523,10 @@ impl CodebookAnalyzer {
                         .all(|&c| ('\u{AC00}'..='\u{D7A3}').contains(&c));
                     if all_hangul {
                         let surface: String = chars[ej_start..ej_end].iter().collect();
+                        if GUARD_SUBS.iter().any(|g| surface.contains(g)) {
+                            ej_start = ej_end;
+                            continue;
+                        }
                         let span_cost = self.oov_penalty * SPAN_FACTOR * (ej_len as f32).sqrt();
                         arcs.push(LatticeArc {
                             start: ej_start,
