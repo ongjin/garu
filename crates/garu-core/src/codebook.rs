@@ -1267,34 +1267,63 @@ impl CodebookAnalyzer {
                             // Build suffix starting with the split jamo + remaining chars
                             let remaining_after = n - j;
                             let max_suf_tail = self.max_suffix_len.saturating_sub(1).min(remaining_after);
-                            for tail_len in 0..=max_suf_tail {
-                                let mut suf_key = String::new();
-                                suf_key.push(jamo);
-                                for k in 0..tail_len {
-                                    suf_key.push(chars[j + k]);
+                            // Fallback prefix syllable for ㅆ jongseong:
+                            // suffix_codebook stores no `ㅆ`-prefixed entries, but
+                            // it has `었X`/`았X` rich combinations (었거든/었으며…).
+                            // Treat 갔/했/봤 etc. as `<base> + 었/았 + …` so EP+ending
+                            // compounds beyond the per-eojeol cache are reachable.
+                            let ss_fallback: Option<char> = if jamo == 'ㅆ' {
+                                let code = base_char as u32;
+                                if (0xAC00..=0xD7A3).contains(&code) {
+                                    let vowel_idx = ((code - 0xAC00) % (21 * 28)) / 28;
+                                    Some(if vowel_idx == 0 || vowel_idx == 8 { '았' } else { '었' })
+                                } else {
+                                    None
                                 }
-                                if let Some(&suf_idx) = self.suffix_map.get(&suf_key) {
-                                    let suf_entry = &self.suffix_entries[suf_idx];
-                                    for analysis in &suf_entry.analyses {
-                                        let suf_cost = self.get_suffix_cost(&suf_key, analysis);
-                                        let mut arc_cost = word_cost + suf_cost;
-                                        if prefix_len == 1
-                                            && jamo == 'ㄹ'
-                                            && j < n
-                                            && chars[j] == '만'
-                                        {
-                                            arc_cost -= 5.0;
+                            } else {
+                                None
+                            };
+                            for tail_len in 0..=max_suf_tail {
+                                let mut variants: Vec<String> = Vec::with_capacity(2);
+                                {
+                                    let mut s = String::new();
+                                    s.push(jamo);
+                                    for k in 0..tail_len {
+                                        s.push(chars[j + k]);
+                                    }
+                                    variants.push(s);
+                                }
+                                if let Some(syl) = ss_fallback {
+                                    let mut s = syl.to_string();
+                                    for k in 0..tail_len {
+                                        s.push(chars[j + k]);
+                                    }
+                                    variants.push(s);
+                                }
+                                for suf_key in &variants {
+                                    if let Some(&suf_idx) = self.suffix_map.get(suf_key) {
+                                        let suf_entry = &self.suffix_entries[suf_idx];
+                                        for analysis in &suf_entry.analyses {
+                                            let suf_cost = self.get_suffix_cost(suf_key, analysis);
+                                            let mut arc_cost = word_cost + suf_cost;
+                                            if prefix_len == 1
+                                                && jamo == 'ㄹ'
+                                                && j < n
+                                                && chars[j] == '만'
+                                            {
+                                                arc_cost -= 5.0;
+                                            }
+                                            let mut combined = morphemes.clone();
+                                            for m in &analysis.morphemes {
+                                                combined.push((m.form.clone(), m.pos));
+                                            }
+                                            arcs.push(LatticeArc {
+                                                start: i,
+                                                end: j + tail_len,
+                                                morphemes: combined,
+                                                cost: arc_cost,
+                                            });
                                         }
-                                        let mut combined = morphemes.clone();
-                                        for m in &analysis.morphemes {
-                                            combined.push((m.form.clone(), m.pos));
-                                        }
-                                        arcs.push(LatticeArc {
-                                            start: i,
-                                            end: j + tail_len,
-                                            morphemes: combined,
-                                            cost: arc_cost,
-                                        });
                                     }
                                 }
                             }
@@ -1468,20 +1497,41 @@ impl CodebookAnalyzer {
         // if the last morpheme is EC, add a sibling arc with EF instead.
         // This lets Viterbi choose EF when trigram context supports it,
         // compensating for EC's structural frequency advantage in the codebook.
+        // Also treat the position right after the last non-whitespace character
+        // as a sentence-end so colloquial inputs without final punctuation
+        // (배고파 / 졸려 / 다 끝났어) still get an EF candidate.
         {
             // Include SF punctuation and compatibility jamo (ㄱ-ㅣ, U+3131-U+3163)
             // Trailing jamo like ㅋ/ㅠ/ㅜ signal sentence-end in informal text.
-            let sf_positions: Vec<usize> = chars.iter().enumerate()
+            let mut sf_positions: Vec<usize> = chars.iter().enumerate()
                 .filter(|(_, &c)| matches!(c, '.' | '!' | '?' | '…')
                     || (c >= '\u{3131}' && c <= '\u{3163}'))
                 .map(|(i, _)| i)
                 .collect();
+            if let Some(last_non_ws) = chars.iter().rposition(|&c| !c.is_whitespace()) {
+                let eos_pos = last_non_ws + 1;
+                if !sf_positions.contains(&eos_pos) {
+                    sf_positions.push(eos_pos);
+                }
+            }
 
             if !sf_positions.is_empty() {
+                let last_non_ws = chars.iter().rposition(|&c| !c.is_whitespace());
                 let mut ef_arcs: Vec<LatticeArc> = Vec::new();
                 for arc in arcs.iter() {
                     if let Some(last) = arc.morphemes.last() {
                         if last.1 == Pos::EC && sf_positions.contains(&arc.end) {
+                            // The implicit EOS sentinel (last_non_ws + 1) is added
+                            // for inputs without final punctuation. Restrict that
+                            // promotion to single-vowel endings (어/아) to avoid
+                            // turning connective endings like 는데/지만/면 into EF.
+                            let is_implicit_eos = last_non_ws.map_or(false, |p| arc.end == p + 1)
+                                && !chars.get(arc.end).map_or(false, |&c|
+                                    matches!(c, '.' | '!' | '?' | '…')
+                                        || (c >= '\u{3131}' && c <= '\u{3163}'));
+                            if is_implicit_eos && !matches!(last.0.as_str(), "어" | "아") {
+                                continue;
+                            }
                             let mut new_morphemes = arc.morphemes.clone();
                             new_morphemes.last_mut().unwrap().1 = Pos::EF;
                             ef_arcs.push(LatticeArc {
@@ -1508,12 +1558,14 @@ impl CodebookAnalyzer {
         // (만한/만하/는데/한데/을만/뿐이/수있/것같/것이). These patterns signal a
         // well-defined decomposition (e.g. 갈만한데 = 가+ㄹ+만+하+ㄴ+데) that would
         // otherwise lose to the single-NNG span due to 종성분리 cost accumulation.
+        // 어줘 covers VV+어/EC+주/VX+어/EF (틀어줘/보여줘/맡겨줘 …).
         {
             const SPAN_FACTOR: f32 = 2.8;
             const SPAN_MIN_LEN: usize = 3;
             const SPAN_MAX_LEN: usize = 7;
-            const GUARD_SUBS: [&str; 10] = [
+            const GUARD_SUBS: [&str; 11] = [
                 "만한", "만하", "만해", "는데", "한데", "을만", "뿐이", "수있", "것같", "것이",
+                "어줘",
             ];
             let mut ej_start = 0;
             while ej_start < n {
@@ -2351,6 +2403,13 @@ impl CodebookAnalyzer {
         let form = last.text.as_str();
         if matches!(form, "다" | "니" | "자" | "으니" | "지") {
             tokens[last_idx].pos = Pos::EF;
+        } else if matches!(form, "어" | "아") && last_idx >= 1 {
+            // 어/아 EC at EOS is almost always a sentence-final ending in colloquial
+            // speech (배고파, 졸려, 다 끝났어). Only trigger after a verb-like token.
+            let prev_pos = tokens[last_idx - 1].pos;
+            if matches!(prev_pos, Pos::VV | Pos::VA | Pos::VX | Pos::EP) {
+                tokens[last_idx].pos = Pos::EF;
+            }
         } else if form == "라" && last_idx >= 1 {
             // "라/EC" at EOS after VV/VA: restore vowel-contracted imperative ending
             // 건너+어라→건너라 → should be 어라/EF (not 라/EF)
@@ -2453,6 +2512,306 @@ impl CodebookAnalyzer {
                 }
             }
             i += if matched { 2 } else { 1 };
+        }
+    }
+
+    /// Promote a stand-alone `한` eojeol that was decomposed as `하/(VV|VX|XSV)`
+    /// + `ㄴ/ETM` to the determiner `한/MM` when followed by a noun. Reaches
+    /// cases like `노래 한 곡`, `한 명`, `한 대` without disturbing legitimate
+    /// VV+ETM decompositions inside multi-syllable eojeols (공부한 사람, …).
+    fn fix_han_standalone_mm(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let ha_ok = tokens[i].text == "하"
+                && matches!(tokens[i].pos, Pos::VV | Pos::VX | Pos::XSV);
+            let nn_ok = tokens[i + 1].text == "ㄴ" && tokens[i + 1].pos == Pos::ETM;
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != tokens[i].start;
+            let eojeol_end = i + 2 == tokens.len()
+                || tokens[i + 2].start != tokens[i + 1].start;
+            let eojeol_len = tokens[i + 1].end - tokens[i].start;
+            let followed_by_noun = i + 2 < tokens.len()
+                && matches!(tokens[i + 2].pos,
+                    Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR);
+            if ha_ok && nn_ok && same_eojeol && eojeol_start && eojeol_end
+                && eojeol_len == 1 && followed_by_noun
+            {
+                let span_start = tokens[i].start;
+                let span_end = tokens[i + 1].end;
+                tokens[i] = Token {
+                    text: "한".to_string(), pos: Pos::MM,
+                    start: span_start, end: span_end, score: None,
+                };
+                tokens.remove(i + 1);
+                i += 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    /// Promote `몇 + 시야/NNG` (sentence-final) → `몇 + 시/NNB + 이/VCP + 야/EF`.
+    /// 시야 is a dictionary noun (sight), so the rewrite is gated on the prior
+    /// eojeol being `몇` (時 questions). Preserves `내 시야가 좁다`, `두 시야` etc.
+    fn fix_myeoch_si_ya(tokens: &mut Vec<Token>) {
+        let mut i = 1;
+        while i < tokens.len() {
+            if tokens[i].text != "시야" || tokens[i].pos != Pos::NNG {
+                i += 1;
+                continue;
+            }
+            let next_in_same_eojeol = i + 1 < tokens.len()
+                && tokens[i + 1].start == tokens[i].start;
+            let eojeol_only = (!next_in_same_eojeol || tokens[i + 1].pos == Pos::SF)
+                && tokens[i - 1].start != tokens[i].start;
+            let sentence_end = i + 1 == tokens.len() || tokens[i + 1].pos == Pos::SF;
+            let prev_is_myeoch = tokens[i - 1].text == "몇"
+                && matches!(tokens[i - 1].pos, Pos::MM | Pos::NR);
+            if eojeol_only && sentence_end && prev_is_myeoch {
+                let span_start = tokens[i].start;
+                let span_end = tokens[i].end;
+                let new_tokens = vec![
+                    Token { text: "시".to_string(), pos: Pos::NNB,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "이".to_string(), pos: Pos::VCP,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "야".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None },
+                ];
+                tokens.splice(i..=i, new_tokens);
+                i += 3;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    /// Force the unit-counter analysis after a SN number when the eojeol uses
+    /// 도/예/야 endings.
+    ///
+    /// Patterns rewritten (SN immediately precedes the targeted run):
+    /// - `SN + 도예/NNG + 요/JX` → `SN + 도/NNB + 이/VCP + 예요/EF`
+    /// - `SN + 도예/NNG + 어요/EF` → same (handles 24.7도예요 → … 예요/EF)
+    /// - `SN + 도야/NNG` → `SN + 도/NNB + 이/VCP + 야/EF`
+    /// - `SN + 도/JX + 이/VCP + …` → upgrade `도/JX` to `도/NNB` (counter)
+    ///
+    /// The 도예 sense (pottery) is much rarer right after a number than the
+    /// counter+copula reading, so the rewrite is safe for the SN context.
+    fn fix_sn_counter_copula(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i < tokens.len() {
+            if tokens[i].pos != Pos::SN {
+                i += 1;
+                continue;
+            }
+            // 도예/NNG + 요/JX | 어요/EF
+            if i + 2 < tokens.len()
+                && tokens[i + 1].pos == Pos::NNG && tokens[i + 1].text == "도예"
+                && (
+                    (tokens[i + 2].pos == Pos::JX && tokens[i + 2].text == "요")
+                        || (tokens[i + 2].pos == Pos::EF
+                            && (tokens[i + 2].text == "어요" || tokens[i + 2].text == "아요"))
+                )
+            {
+                let span_start = tokens[i + 1].start;
+                let span_end = tokens[i + 2].end;
+                let new_tokens = vec![
+                    Token { text: "도".to_string(), pos: Pos::NNB,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "이".to_string(), pos: Pos::VCP,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "예요".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None },
+                ];
+                tokens.splice((i + 1)..=(i + 2), new_tokens);
+                i += 4;
+                continue;
+            }
+            // 도야/NNG (eojeol-final, e.g. 25도야)
+            if i + 1 < tokens.len()
+                && tokens[i + 1].pos == Pos::NNG && tokens[i + 1].text == "도야"
+            {
+                let span_start = tokens[i + 1].start;
+                let span_end = tokens[i + 1].end;
+                let new_tokens = vec![
+                    Token { text: "도".to_string(), pos: Pos::NNB,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "이".to_string(), pos: Pos::VCP,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "야".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None },
+                ];
+                tokens.splice((i + 1)..=(i + 1), new_tokens);
+                i += 4;
+                continue;
+            }
+            // 도/JX + 이/VCP → upgrade 도/JX to 도/NNB
+            if i + 2 < tokens.len()
+                && tokens[i + 1].pos == Pos::JX && tokens[i + 1].text == "도"
+                && tokens[i + 2].pos == Pos::VCP
+            {
+                tokens[i + 1].pos = Pos::NNB;
+            }
+            i += 1;
+        }
+    }
+
+    /// Recover and merge 해요체 endings.
+    ///
+    /// Two passes (eojeol-final, same eojeol):
+    /// 1. **Recovery** — `NNG + 해/NNG + 요/JX` → `NNG + 하/XSV + 아요/EF`.
+    ///    The codebook stores high-frequency `X해요` words (감사해요, 공부해요,
+    ///    축하해요…) as a 3-morph fallback that the CNN reranker prefers because
+    ///    of its segmentation match. Restore the verbal stem.
+    /// 2. **Merge** — `(VV|VA|VX|EP|XSV|XSA) + 어/아/EC + 요/JX` →
+    ///    `… + 어요/아요/EF`. Combines the orphan 요 보조사 with the preceding
+    ///    어/아 EC into a single `어요/아요/EF` morpheme (어때요 → 어떻/VA + 어요/EF).
+    fn fix_haeyo_endings(tokens: &mut Vec<Token>) {
+        // Pass 1: NNG + 해/NNG + 요/JX recovery
+        let mut i = 0;
+        while i + 2 < tokens.len() {
+            let a_pos = tokens[i].pos;
+            let b_pos = tokens[i + 1].pos;
+            let c_pos = tokens[i + 2].pos;
+            let b_text = tokens[i + 1].text.clone();
+            let c_text = tokens[i + 2].text.clone();
+            let same_eojeol = tokens[i].start == tokens[i + 1].start
+                && tokens[i + 1].start == tokens[i + 2].start;
+            let eojeol_end = i + 3 == tokens.len()
+                || tokens[i + 3].start != tokens[i + 2].start
+                || tokens[i + 3].pos == Pos::SF;
+            if same_eojeol && eojeol_end
+                && a_pos == Pos::NNG
+                && b_pos == Pos::NNG && b_text == "해"
+                && c_pos == Pos::JX && c_text == "요"
+            {
+                let b_start = tokens[i + 1].start;
+                let b_end = tokens[i + 1].end;
+                let c_start = tokens[i + 2].start;
+                let c_end = tokens[i + 2].end;
+                tokens[i + 1] = Token {
+                    text: "하".to_string(), pos: Pos::XSV,
+                    start: b_start, end: b_end, score: None,
+                };
+                tokens[i + 2] = Token {
+                    text: "아요".to_string(), pos: Pos::EF,
+                    start: c_start, end: c_end, score: None,
+                };
+                i += 3;
+                continue;
+            }
+            i += 1;
+        }
+
+        // Pass 2: stem + 어/아/EC + 요/JX → stem + 어요/아요/EF
+        let mut i = 0;
+        while i + 2 < tokens.len() {
+            let stem_pos = tokens[i].pos;
+            let ec_pos = tokens[i + 1].pos;
+            let ec_text = tokens[i + 1].text.clone();
+            let jo_pos = tokens[i + 2].pos;
+            let jo_text = tokens[i + 2].text.clone();
+            let same_eojeol = tokens[i].start == tokens[i + 1].start
+                && tokens[i + 1].start == tokens[i + 2].start;
+            let eojeol_end = i + 3 == tokens.len()
+                || tokens[i + 3].start != tokens[i + 2].start
+                || tokens[i + 3].pos == Pos::SF;
+            let stem_ok = matches!(stem_pos,
+                Pos::VV | Pos::VA | Pos::VX | Pos::EP | Pos::XSV | Pos::XSA);
+            let ec_ok = ec_pos == Pos::EC && (ec_text == "어" || ec_text == "아");
+            let jo_ok = jo_pos == Pos::JX && jo_text == "요";
+            if same_eojeol && eojeol_end && stem_ok && ec_ok && jo_ok {
+                let merged = format!("{}요", ec_text);
+                let new_start = tokens[i + 1].start;
+                let new_end = tokens[i + 2].end;
+                tokens[i + 1] = Token {
+                    text: merged, pos: Pos::EF,
+                    start: new_start, end: new_end, score: None,
+                };
+                tokens.remove(i + 2);
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    /// Promote `<adverb>` + 야/JX (eojeol-final) → MAG + 이/VCP + 야/EF.
+    /// Handles colloquial copula-elided endings (별로야, 진짜야, 정말야)
+    /// that the lattice never proposes when no sentence-final punctuation
+    /// anchors the EF candidate.
+    ///
+    /// Two trigger paths:
+    /// 1. Tokens already shaped as MAG + 야/JX in the same eojeol.
+    /// 2. The eojeol surface is `<known adverb>야` (e.g. 별/XSN + 로/JKB + 야/JX
+    ///    or 별/NNG + 로/JKB + 야/JX), which the analyzer sometimes prefers
+    ///    over the cleaner MAG analysis. Recognised adverbs only.
+    fn fix_mag_copula_ya(tokens: &mut Vec<Token>) {
+        const KNOWN_ADVERBS: &[&str] = &["별로", "정말", "진짜", "당연", "확실", "분명"];
+
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            // Path 1: MAG + 야/JX (same eojeol, eojeol-final)
+            let prev_is_mag = tokens[i].pos == Pos::MAG;
+            let next = &tokens[i + 1];
+            let next_is_ya_jx = next.pos == Pos::JX && next.text == "야";
+            let same_eojeol = tokens[i].start == next.start;
+            let last_in_eojeol = i + 2 >= tokens.len()
+                || tokens[i + 2].start != next.start
+                || tokens[i + 2].pos == Pos::SF;
+            if prev_is_mag && next_is_ya_jx && same_eojeol && last_in_eojeol {
+                let orig = tokens[i + 1].clone();
+                tokens[i + 1] = Token {
+                    text: "이".to_string(), pos: Pos::VCP,
+                    start: orig.start, end: orig.end, score: None,
+                };
+                tokens.insert(i + 2, Token {
+                    text: "야".to_string(), pos: Pos::EF,
+                    start: orig.start, end: orig.end, score: None,
+                });
+                i += 3;
+                continue;
+            }
+            i += 1;
+        }
+
+        // Path 2: scan eojeols ending with 야/JX whose surface (minus 야) is a
+        // known adverb but was decomposed differently (별/XSN+로/JKB+야/JX,
+        // 별/NNG+로/JKB+야/JX, …). Replace the whole run with MAG+VCP+EF.
+        let mut start = 0;
+        while start < tokens.len() {
+            let eojeol_start = tokens[start].start;
+            let mut end = start;
+            while end + 1 < tokens.len() && tokens[end + 1].start == eojeol_start {
+                end += 1;
+            }
+            // tokens[start..=end] form one eojeol.
+            if end > start {
+                let last = &tokens[end];
+                let prev_to_last = &tokens[end - 1];
+                let last_is_ya_jx = last.pos == Pos::JX && last.text == "야";
+                let already_fixed = prev_to_last.pos == Pos::VCP;
+                if last_is_ya_jx && !already_fixed {
+                    let surface: String = tokens[start..end].iter()
+                        .map(|t| t.text.as_str()).collect();
+                    if KNOWN_ADVERBS.contains(&surface.as_str()) {
+                        let orig_start = tokens[start].start;
+                        let orig_end = tokens[end].end;
+                        let new_tokens = vec![
+                            Token { text: surface.clone(), pos: Pos::MAG,
+                                start: orig_start, end: orig_end, score: None },
+                            Token { text: "이".to_string(), pos: Pos::VCP,
+                                start: orig_start, end: orig_end, score: None },
+                            Token { text: "야".to_string(), pos: Pos::EF,
+                                start: orig_start, end: orig_end, score: None },
+                        ];
+                        tokens.splice(start..=end, new_tokens);
+                        start += 3;
+                        continue;
+                    }
+                }
+            }
+            start = end + 1;
         }
     }
 
@@ -2703,6 +3062,11 @@ impl CodebookAnalyzer {
             Self::fix_ec_eos(&mut tokens);
             Self::fix_imperative_ra(&mut tokens);
             Self::fix_vcp(&mut tokens);
+            Self::fix_haeyo_endings(&mut tokens);
+            Self::fix_mag_copula_ya(&mut tokens);
+            Self::fix_myeoch_si_ya(&mut tokens);
+            Self::fix_sn_counter_copula(&mut tokens);
+            Self::fix_han_standalone_mm(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }

@@ -199,3 +199,176 @@ fn test_nbest_path_applies_determiner_postprocess() {
 
     assert_eq!(window[1].pos, Pos::MM);
 }
+
+// ----- Issue #1 (sgbai78) regression suite -----
+
+#[test]
+fn test_issue1_sentence_final_ef_no_punctuation() {
+    let analyzer = load_analyzer();
+
+    // 어/아 EC at sentence end after VV/VA/EP should become EF.
+    // Surface form follows Garu's vowel-harmony rule: 어→아 only when the
+    // preceding syllable's vowel is ㅏ/ㅗ (배고프 ㅡ stays 어, 가 ㅏ becomes 아).
+    assert_analysis(
+        &analyzer,
+        "배고파",
+        &[("배고프", Pos::VA), ("어", Pos::EF)],
+    );
+    assert_analysis(
+        &analyzer,
+        "졸려",
+        &[("졸리", Pos::VV), ("어", Pos::EF)],
+    );
+
+    let result = analyzer.analyze("다 끝났어");
+    let last = result.tokens.last().expect("must have tokens");
+    assert_eq!(last.pos, Pos::EF, "last morpheme must be EF in '다 끝났어'");
+
+    let result = analyzer.analyze("나 이제 가");
+    let last = result.tokens.last().expect("must have tokens");
+    assert_eq!(last.pos, Pos::EF, "last morpheme must be EF in '나 이제 가'");
+}
+
+#[test]
+fn test_issue1_haeyo_endings() {
+    let analyzer = load_analyzer();
+
+    // 어때요 → 어떻/VA + 어요/EF
+    assert_analysis(
+        &analyzer,
+        "어때요",
+        &[("어떻", Pos::VA), ("어요", Pos::EF)],
+    );
+
+    // 감사해요 → 감사/NNG + 하/XSV + 아요/EF (어근 회복)
+    assert_analysis(
+        &analyzer,
+        "감사해요",
+        &[("감사", Pos::NNG), ("하", Pos::XSV), ("아요", Pos::EF)],
+    );
+}
+
+#[test]
+fn test_issue1_mag_copula_ya() {
+    let analyzer = load_analyzer();
+
+    // 별로야 → 별로/MAG + 이/VCP + 야/EF
+    assert_analysis(
+        &analyzer,
+        "별로야",
+        &[("별로", Pos::MAG), ("이", Pos::VCP), ("야", Pos::EF)],
+    );
+}
+
+#[test]
+fn test_issue1_span_arc_guard_eojweo() {
+    let analyzer = load_analyzer();
+
+    // 틀어줘 → 틀/VV + 어/EC + 주/VX + 어/EF (no NNG span)
+    let result = analyzer.analyze("틀어줘");
+    let pos_seq: Vec<Pos> = result.tokens.iter().map(|t| t.pos).collect();
+    assert!(
+        !pos_seq.contains(&Pos::NNG) || result.tokens.len() > 1,
+        "틀어줘 should not be a single NNG span: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "주" && t.pos == Pos::VX),
+        "틀어줘 must contain 주/VX"
+    );
+}
+
+#[test]
+fn test_issue1_jongseong_ss_fallback() {
+    let analyzer = load_analyzer();
+
+    // 갔거든 / 왔거든 / 봤거든: ㅆ jongseong split must reach EP+EF combinations
+    // such as 았거든/었거든 even though `ㅆ거든` is absent from the suffix codebook.
+    assert_analysis(
+        &analyzer,
+        "갔거든",
+        &[("가", Pos::VV), ("았", Pos::EP), ("거든", Pos::EF)],
+    );
+    let result = analyzer.analyze("왔거든");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "오" && matches!(t.pos, Pos::VV | Pos::VX)),
+        "왔거든 must contain 오 stem: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(result.tokens.iter().any(|t| t.text == "거든" && t.pos == Pos::EF));
+}
+
+#[test]
+fn test_issue1_han_standalone_mm() {
+    let analyzer = load_analyzer();
+
+    // 노래 한 곡 틀어줘 → 한/MM (not 하/XSV+ㄴ/ETM cross-eojeol)
+    let result = analyzer.analyze("노래 한 곡 틀어줘");
+    let han_token = result.tokens.iter().find(|t| t.text == "한")
+        .expect("expected 한 token");
+    assert_eq!(han_token.pos, Pos::MM);
+
+    // 한 명 / 한 대
+    let result = analyzer.analyze("한 명");
+    assert_eq!(result.tokens[0].text, "한");
+    assert_eq!(result.tokens[0].pos, Pos::MM);
+    let result = analyzer.analyze("한 대");
+    assert_eq!(result.tokens[0].text, "한");
+    assert_eq!(result.tokens[0].pos, Pos::MM);
+
+    // Regression: multi-syllable XX한 must keep XSV+ETM
+    let result = analyzer.analyze("공부한 사람");
+    assert!(result.tokens.iter().any(|t| t.text == "하" && t.pos == Pos::XSV));
+    assert!(result.tokens.iter().any(|t| t.text == "ㄴ" && t.pos == Pos::ETM));
+}
+
+#[test]
+fn test_issue1_myeoch_si_ya() {
+    let analyzer = load_analyzer();
+
+    // 몇 + 시야 (sentence-final) → 시/NNB + 이/VCP + 야/EF
+    let result = analyzer.analyze("지금 몇 시야");
+    let last3: Vec<(&str, Pos)> = result.tokens.iter().rev().take(3)
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert_eq!(last3[0], ("야", Pos::EF));
+    assert_eq!(last3[1], ("이", Pos::VCP));
+    assert_eq!(last3[2], ("시", Pos::NNB));
+
+    // With SF
+    let result = analyzer.analyze("몇 시야?");
+    assert!(result.tokens.iter().any(|t| t.text == "시" && t.pos == Pos::NNB));
+    assert!(result.tokens.iter().any(|t| t.pos == Pos::VCP));
+
+    // Regression: 시야 (sight) must be preserved when not after 몇
+    let result = analyzer.analyze("내 시야가 좁다");
+    assert!(result.tokens.iter().any(|t| t.text == "시야" && t.pos == Pos::NNG));
+}
+
+#[test]
+fn test_issue1_sn_unit_copula() {
+    let analyzer = load_analyzer();
+
+    // 24.7도예요 → 24.7/SN + 도/NNB + 이/VCP + 예요/EF (도예/NNG span 거부)
+    let result = analyzer.analyze("24.7도예요");
+    let texts: Vec<&str> = result.tokens.iter().map(|t| t.text.as_str()).collect();
+    assert!(
+        !texts.contains(&"도예"),
+        "24.7도예요 must not contain 도예/NNG span: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "도" && t.pos == Pos::NNB),
+        "24.7도예요 must contain 도/NNB"
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.pos == Pos::VCP),
+        "24.7도예요 must contain a VCP morpheme"
+    );
+
+    // 3개예요 (regression: must keep working)
+    assert_analysis(
+        &analyzer,
+        "3개예요",
+        &[("3", Pos::SN), ("개", Pos::NNB), ("이", Pos::VCP), ("예요", Pos::EF)],
+    );
+}
