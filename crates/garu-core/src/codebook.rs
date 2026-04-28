@@ -1239,9 +1239,10 @@ impl CodebookAnalyzer {
             // This handles conjugated forms where the verb stem's final syllable
             // merges with a consonant-initial suffix (ㄴ, ㄹ, ㅂ, etc.)
             {
-                // Try each possible prefix length ending at position j (j > i)
+                // Try each possible prefix length ending at position j (j > i).
+                // Include one-syllable stems such as 올→오+ㄹ and 볼→보+ㄹ.
                 let max_prefix = (n - i).min(8); // content words rarely exceed 8 chars
-                for prefix_len in 2..=max_prefix {
+                for prefix_len in 1..=max_prefix {
                     let j = i + prefix_len; // one past the last char of prefix
                     if j > n { break; }
                     let last_char = chars[j - 1];
@@ -1276,6 +1277,14 @@ impl CodebookAnalyzer {
                                     let suf_entry = &self.suffix_entries[suf_idx];
                                     for analysis in &suf_entry.analyses {
                                         let suf_cost = self.get_suffix_cost(&suf_key, analysis);
+                                        let mut arc_cost = word_cost + suf_cost;
+                                        if prefix_len == 1
+                                            && jamo == 'ㄹ'
+                                            && j < n
+                                            && chars[j] == '만'
+                                        {
+                                            arc_cost -= 5.0;
+                                        }
                                         let mut combined = morphemes.clone();
                                         for m in &analysis.morphemes {
                                             combined.push((m.form.clone(), m.pos));
@@ -1284,7 +1293,7 @@ impl CodebookAnalyzer {
                                             start: i,
                                             end: j + tail_len,
                                             morphemes: combined,
-                                            cost: word_cost + suf_cost,
+                                            cost: arc_cost,
                                         });
                                     }
                                 }
@@ -2083,6 +2092,19 @@ impl CodebookAnalyzer {
             let form = tokens[i].text.as_str();
             let prev_form = tokens[i - 1].text.as_str();
 
+            if form == "있"
+                && (cur_pos == Pos::VV || cur_pos == Pos::VA)
+                && matches!(tokens[i - 1].pos, Pos::NNB | Pos::NNG | Pos::VV)
+                && prev_form == "수"
+                && i >= 2
+                && tokens[i - 2].pos == Pos::ETM
+                && tokens[i].start == tokens[i - 1].start
+                && tokens[i - 1].start == tokens[i - 2].start
+            {
+                tokens[i].pos = Pos::VX;
+                continue;
+            }
+
             // VV or VA → VX patterns
             if cur_pos == Pos::VV || cur_pos == Pos::VA {
                 match form {
@@ -2680,6 +2702,8 @@ impl CodebookAnalyzer {
             Self::fix_xpn_standalone(&mut tokens);
             Self::fix_ec_eos(&mut tokens);
             Self::fix_imperative_ra(&mut tokens);
+            Self::fix_vcp(&mut tokens);
+            Self::fix_mm_determiners(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
         }).collect()

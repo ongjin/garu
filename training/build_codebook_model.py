@@ -741,6 +741,48 @@ def augment_jamo_suffixes(codebook: dict) -> dict:
     return codebook
 
 
+def augment_dependent_noun_patterns(codebook: dict) -> dict:
+    """Keep high-value ETM+NNB adjective patterns above the suffix filter.
+
+    NIKL data contains low-frequency entries such as 만해, but the global
+    suffix threshold can remove them. These patterns are productive and fix
+    common colloquial forms like 갈만해 and 올만한데.
+    """
+    patterns = {
+        "만한데": {
+            "morphemes": [["만", "NNB"], ["하", "XSA"], ["ㄴ", "ETM"], ["데", "NNB"]],
+            "freq": 5000,
+        },
+        "만해": {
+            "morphemes": [["만", "NNB"], ["하", "XSA"], ["어", "EF"]],
+            "freq": 5000,
+        },
+    }
+
+    added = 0
+    boosted = 0
+    for surface, analysis in patterns.items():
+        if surface not in codebook:
+            codebook[surface] = [analysis]
+            added += 1
+            continue
+
+        new_key = tuple(tuple(m) for m in analysis["morphemes"])
+        for existing in codebook[surface]:
+            existing_key = tuple(tuple(m) for m in existing["morphemes"])
+            if existing_key == new_key:
+                if existing["freq"] < analysis["freq"]:
+                    existing["freq"] = analysis["freq"]
+                    boosted += 1
+                break
+        else:
+            codebook[surface].append(analysis)
+            added += 1
+
+    print(f"  Dependent noun pattern augmentation: {added} added, {boosted} boosted")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -765,6 +807,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Augment with jamo-initial suffix patterns (ㄴ, ㄹ, ㅂ니다, etc.)
     codebook = augment_jamo_suffixes(codebook)
+
+    # Preserve productive ETM+NNB adjective patterns filtered out by raw freq.
+    codebook = augment_dependent_noun_patterns(codebook)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())

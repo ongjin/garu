@@ -35,10 +35,17 @@ impl Analyzer {
         if candidates.len() <= 1 {
             if let Some(cand) = candidates.first_mut() {
                 Self::apply_pos_override(&cnn_morphs, text, &mut cand.tokens);
+                Self::apply_protected_auxiliary_rules(&mut cand.tokens);
             }
             return candidates.into_iter().next().unwrap_or(AnalyzeResult {
                 tokens: vec![], score: 0.0, elapsed_ms: 0.0,
             });
+        }
+
+        if Self::has_dependent_noun_adjective_pattern(&candidates[0].tokens) {
+            let mut result = candidates.swap_remove(0);
+            Self::apply_protected_auxiliary_rules(&mut result.tokens);
+            return result;
         }
 
         // Score each candidate by combined Viterbi cost + CNN agreement
@@ -55,6 +62,7 @@ impl Analyzer {
 
         let mut result = candidates.swap_remove(best_idx);
         Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
+        Self::apply_protected_auxiliary_rules(&mut result.tokens);
         result
     }
 
@@ -64,6 +72,7 @@ impl Analyzer {
         let cnn_morphs = Self::build_cnn_morphs(&cnn_result);
         for result in &mut results {
             Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
+            Self::apply_protected_auxiliary_rules(&mut result.tokens);
         }
         results
     }
@@ -182,6 +191,9 @@ impl Analyzer {
                 if *cnn_pos == tokens[vs + i].pos || *conf < POS_CONFIDENCE {
                     continue;
                 }
+                if Self::is_protected_auxiliary(tokens, vs + i) {
+                    continue;
+                }
                 if Self::is_ambiguous_pair(tokens[vs + i].pos, *cnn_pos) {
                     tokens[vs + i].pos = *cnn_pos;
                 }
@@ -253,5 +265,39 @@ impl Analyzer {
             (Pos::MAG, Pos::IC) | (Pos::IC, Pos::MAG) |
             (Pos::MM, Pos::IC) | (Pos::IC, Pos::MM)
         )
+    }
+
+    fn is_protected_auxiliary(tokens: &[Token], idx: usize) -> bool {
+        if idx < 2 || tokens[idx].pos != Pos::VX || tokens[idx].text != "있" {
+            return false;
+        }
+        tokens[idx - 1].pos == Pos::NNB
+            && tokens[idx - 1].text == "수"
+            && tokens[idx - 2].pos == Pos::ETM
+    }
+
+    fn apply_protected_auxiliary_rules(tokens: &mut [Token]) {
+        for i in 2..tokens.len() {
+            if tokens[i].text == "있"
+                && matches!(tokens[i].pos, Pos::VV | Pos::VA)
+                && tokens[i - 1].pos == Pos::NNB
+                && tokens[i - 1].text == "수"
+                && tokens[i - 2].pos == Pos::ETM
+                && tokens[i].start == tokens[i - 1].start
+                && tokens[i - 1].start == tokens[i - 2].start
+            {
+                tokens[i].pos = Pos::VX;
+            }
+        }
+    }
+
+    fn has_dependent_noun_adjective_pattern(tokens: &[Token]) -> bool {
+        tokens.windows(3).any(|window| {
+            window[0].pos == Pos::ETM
+                && window[1].text == "만"
+                && window[1].pos == Pos::NNB
+                && window[2].text == "하"
+                && window[2].pos == Pos::XSA
+        })
     }
 }

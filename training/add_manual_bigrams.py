@@ -33,6 +33,8 @@ MANUAL_RULES = [
     ("만해", P["ETM"], P["NNP"], +PENALTY),  # ㄹ/ETM+만해/NNP(한용운 필명) 차단
     ("갈마", BOS,      P["NNP"], +PENALTY),  # 갈만한데의 갈마/NNP 인명 차단
     ("있",   P["NNB"], P["VV"],  +PENALTY),  # 수/것/리/NNB + 있/VV → 있/VX 유도
+    ("들",   BOS,      P["XSN"], +PENALTY),  # 문두 들/XSN 차단: 들만한데 → 들/VV+ㄹ
+    ("없",   P["VV"],  P["VA"],  +3.0),      # 갈리/VV+없/VA보다 ㄹ+리/NNB+없 선호
 ]
 
 

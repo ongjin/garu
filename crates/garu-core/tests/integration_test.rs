@@ -1,4 +1,5 @@
 use garu_core::model::Analyzer;
+use garu_core::types::Pos;
 
 fn load_analyzer() -> Analyzer {
     let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
@@ -94,4 +95,107 @@ fn test_cnn2_ensemble() {
     let r3 = analyzer.analyze("공부하는 학생");
     println!("\n공부하는 학생:");
     for t in &r3.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+}
+
+fn assert_analysis(analyzer: &Analyzer, input: &str, expected: &[(&str, Pos)]) {
+    let result = analyzer.analyze(input);
+    let got: Vec<(&str, Pos)> = result
+        .tokens
+        .iter()
+        .map(|token| (token.text.as_str(), token.pos))
+        .collect();
+    assert_eq!(got, expected, "analysis mismatch for '{input}'");
+}
+
+#[test]
+fn test_dependency_noun_constructions() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "갈수있는데",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("수", Pos::NNB),
+            ("있", Pos::VX),
+            ("는데", Pos::EC),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "올만한데",
+        &[
+            ("오", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("ㄴ", Pos::ETM),
+            ("데", Pos::NNB),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "볼만하다",
+        &[
+            ("보", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("다", Pos::EF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "갈만해",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("아", Pos::EF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "들만한데",
+        &[
+            ("들", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("ㄴ", Pos::ETM),
+            ("데", Pos::NNB),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "갈리없는데",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("리", Pos::NNB),
+            ("없", Pos::VA),
+            ("는데", Pos::EC),
+        ],
+    );
+}
+
+#[test]
+fn test_nbest_path_applies_determiner_postprocess() {
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("검찰은 방 전 사장을 조만간 피의자 신분으로 소환해 조사할 방침이다.");
+
+    let window = result
+        .tokens
+        .windows(3)
+        .find(|tokens| tokens[0].text == "방" && tokens[1].text == "전" && tokens[2].text == "사장")
+        .expect("expected 방 전 사장 window");
+
+    assert_eq!(window[1].pos, Pos::MM);
 }
