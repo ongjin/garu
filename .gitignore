@@ -9,6 +9,8 @@ __pycache__/
 
 # Training artifacts (large files, not needed for usage)
 training/*.jsonl
+training/**/*.jsonl
+training/**/*.pt
 training/checkpoints/
 training/codebook_data/
 training/codebook_data_backup/
@@ -16,6 +18,9 @@ training/charmodel/
 training/data.parquet
 training/kowikitext.txt
 training/error_analysis_results.json
+
+# wasm-pack snippet build artifacts (regenerated each build, hashed dir)
+js/pkg/snippets/
 
 # Internal docs
 docs/superpowers/
