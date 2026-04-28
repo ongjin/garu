@@ -103,8 +103,44 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 python3 training/eval_nikl_mp.py --n 2000
 ```
 
+## 릴리스 절차 (X.X.X 배포 시 항상 풀세트)
+
+순서를 절대 바꾸지 말 것. 한 단계라도 빠지면 WASM 버전 불일치 / npm-GitHub 불일치 / latest 표시 깨짐 사고가 난다.
+
+```bash
+# 1. Cargo 버전 (core + wasm 동시)
+sed -i '' 's/^version = ".*"/version = "X.X.X"/' crates/garu-core/Cargo.toml crates/garu-wasm/Cargo.toml
+
+# 2. WASM 리빌드 (env!("CARGO_PKG_VERSION") 새 버전 박힘)
+wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
+
+# 3. TypeScript 빌드
+(cd js && npx tsc)
+
+# 4. js/CHANGELOG.md 항목 추가 (## X.X.X 섹션)
+
+# 5. npm version (자동으로 git tag vX.X.X 생성 — --no-git-tag-version 쓰지 말 것)
+(cd js && npm version X.X.X)
+
+# 6. 커밋 + push (코드 + 태그)
+git add -A && git commit -m "feat: ..., bump to X.X.X"
+git push origin main
+git push origin vX.X.X
+
+# 7. npm publish
+(cd js && npm publish)
+
+# 8. GitHub Release 생성 (CHANGELOG.md 해당 섹션 그대로, --latest 명시)
+gh release create vX.X.X --title "vX.X.X" --latest --notes-file <(awk '/^## X.X.X$/{flag=1; next} /^## /{flag=0} flag' js/CHANGELOG.md)
+```
+
+주의:
+- 코드블록은 `cat <<'EOF'` heredoc 안에서 백틱을 그대로 사용. 이스케이프(`\``) 금지 — single-quote heredoc은 `\` 를 문자 그대로 받아 화면에 노출됨.
+- 옛 release를 일괄 추가할 때는 새 버전을 제외한 옛 버전들에 `--latest=false` 명시.
+
 ## 규칙
 
 - 커밋 메시지에 AI/Claude 관련 내용 포함 금지
 - git email: dydwls140@naver.com
 - 설계/계획 문서를 repo에 올리지 않음
+- push / 배포 / GitHub Release 생성은 사용자 허락 필수 (커밋은 자유)
