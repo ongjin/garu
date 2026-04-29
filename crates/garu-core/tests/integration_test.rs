@@ -372,3 +372,136 @@ fn test_issue1_sn_unit_copula() {
         &[("3", Pos::SN), ("개", Pos::NNB), ("이", Pos::VCP), ("예요", Pos::EF)],
     );
 }
+
+#[test]
+fn test_issue2_lge_monosyllable_ha() {
+    // 할게 → 하/VV + ㄹ게/EF (의존명사 분해 거부)
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("할게");
+    let texts: Vec<&str> = result.tokens.iter().map(|t| t.text.as_str()).collect();
+    assert!(
+        !texts.contains(&"거"),
+        "할게 must not decompose to 거/NNB: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+        "할게 must end with ㄹ게/EF"
+    );
+
+    // 내가 할게 (sentence-level)
+    let result = analyzer.analyze("내가 할게");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+        "내가 할게 must end with ㄹ게/EF"
+    );
+}
+
+#[test]
+fn test_issue2_lge_monosyllable_l_jongseong() {
+    // 살게/갈게/들게 → X/VV + ㄹ게/EF (EC 거부, ㄹ받침 단음절 어간)
+    let analyzer = load_analyzer();
+    for input in ["내가 살게", "내가 갈게", "내가 들게"] {
+        let result = analyzer.analyze(input);
+        let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+            .map(|t| (t.text.as_str(), t.pos)).collect();
+        assert!(
+            result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+            "{} must end with ㄹ게/EF, got: {:?}", input, pairs
+        );
+    }
+}
+
+#[test]
+fn test_issue2_lge_monosyllable_eul() {
+    // 먹을게 → 먹/VV + 을게/EF (의존명사 분해 거부)
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("먹을게");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        !pairs.iter().any(|(t, _)| *t == "거"),
+        "먹을게 must not decompose to 거/NNB: {:?}", pairs
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "을게" && t.pos == Pos::EF),
+        "먹을게 must end with 을게/EF"
+    );
+
+    // Regression: existing 받을게/씻을게 still work
+    for input in ["받을게", "씻을게", "앉을게"] {
+        let result = analyzer.analyze(input);
+        assert!(
+            result.tokens.iter().any(|t| t.text == "을게" && t.pos == Pos::EF),
+            "{} must end with 을게/EF", input
+        );
+    }
+}
+
+#[test]
+fn test_issue2_iri_mag_demotion() {
+    let analyzer = load_analyzer();
+
+    // 이리 단독 → MAG (NNP 거부)
+    let result = analyzer.analyze("이리");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "이리" && t.pos == Pos::MAG),
+        "이리 단독은 MAG여야 함: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+
+    // 이리 와 → 이리/MAG + 오/VV + 아/EF (와/JKB 거부)
+    let result = analyzer.analyze("이리 와");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이리" && *p == Pos::MAG),
+        "이리 와 → 이리/MAG: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "와" && *p == Pos::JKB),
+        "이리 와 must not have 와/JKB: {:?}", pairs
+    );
+
+    // 이리 와봐 → 이리/MAG ...
+    let result = analyzer.analyze("이리 와봐");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "이리" && t.pos == Pos::MAG),
+        "이리 와봐 → 이리/MAG"
+    );
+}
+
+#[test]
+fn test_issue2_oneora_recovery() {
+    let analyzer = load_analyzer();
+
+    // 오너라 단독 → 오/VV + 너라/EF (오너/NNG span 거부)
+    let result = analyzer.analyze("오너라");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        !pairs.iter().any(|(t, _)| *t == "오너"),
+        "오너라 must not contain 오너 span: {:?}", pairs
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "너라" && t.pos == Pos::EF),
+        "오너라 must end with 너라/EF"
+    );
+
+    // 이리 오너라 → 이리/MAG + 오/VV + 너라/EF
+    let result = analyzer.analyze("이리 오너라");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert_eq!(
+        pairs,
+        vec![("이리", Pos::MAG), ("오", Pos::VV), ("너라", Pos::EF)],
+        "이리 오너라 분석 불일치"
+    );
+
+    // Regression: 회사 오너 (proper noun usage) must be preserved
+    let result = analyzer.analyze("회사 오너가 와");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "오너" && t.pos == Pos::NNG),
+        "회사 오너가 와: 오너/NNG must be preserved"
+    );
+}

@@ -1563,9 +1563,9 @@ impl CodebookAnalyzer {
             const SPAN_FACTOR: f32 = 2.8;
             const SPAN_MIN_LEN: usize = 3;
             const SPAN_MAX_LEN: usize = 7;
-            const GUARD_SUBS: [&str; 11] = [
+            const GUARD_SUBS: [&str; 12] = [
                 "만한", "만하", "만해", "는데", "한데", "을만", "뿐이", "수있", "것같", "것이",
-                "어줘",
+                "어줘", "오너",
             ];
             let mut ej_start = 0;
             while ej_start < n {
@@ -2815,6 +2815,230 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Recover ~ㄹ게/~을게/EF promise endings on monosyllabic verb stems where
+    /// the codebook arc loses to NNB-decomposition or EC fallback.
+    ///
+    /// Three patterns (each gated to eojeol-final):
+    /// - P1: `[하/VV·VX·XSV (1 char)] + ㄹ/ETM + 거/NNB + 이/JKS|JX`
+    ///       → `하 + ㄹ게/EF`            (할게 → 하/VV + ㄹ게/EF)
+    /// - P2: `[X/VV·VX (1 char, ㄹ-final 종성)] + 게/EC`
+    ///       → `X + ㄹ게/EF`             (살게/갈게/들게 → ㄹ게/EF)
+    /// - P3: `[X/VV·VX (1 char, has 종성)] + 을/ETM + 거/NNB + 이/JKS|JX`
+    ///       → `X + 을게/EF`             (먹을게 → 을게/EF)
+    fn fix_lge_endings(tokens: &mut Vec<Token>) {
+        // P1 + P3: VV-stem + (ㄹ|을)/ETM + 거/NNB + 이/JKS|JX (eojeol-final)
+        let mut i = 0;
+        while i + 3 < tokens.len() {
+            let stem = &tokens[i];
+            let etm = &tokens[i + 1];
+            let nnb = &tokens[i + 2];
+            let cop = &tokens[i + 3];
+            let stem_ok = stem.text.chars().count() == 1
+                && matches!(stem.pos, Pos::VV | Pos::VX | Pos::XSV);
+            let etm_is_l = etm.pos == Pos::ETM && etm.text == "ㄹ";
+            let etm_is_eul = etm.pos == Pos::ETM && etm.text == "을";
+            let nnb_ok = nnb.pos == Pos::NNB && nnb.text == "거";
+            let cop_ok = matches!(cop.pos, Pos::JKS | Pos::JX) && cop.text == "이";
+            let same_eojeol = stem.start == etm.start
+                && stem.start == nnb.start
+                && stem.start == cop.start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != stem.start;
+            let eojeol_end = i + 4 == tokens.len()
+                || tokens[i + 4].start != stem.start
+                || tokens[i + 4].pos == Pos::SF;
+            if stem_ok && nnb_ok && cop_ok && same_eojeol && eojeol_start && eojeol_end {
+                if etm_is_l {
+                    // P1: 할게 → 하/VV + ㄹ게/EF
+                    let span_start = stem.start;
+                    let span_end = cop.end;
+                    let stem_text = stem.text.clone();
+                    let stem_pos = stem.pos;
+                    let new_tokens = vec![
+                        Token { text: stem_text, pos: stem_pos,
+                            start: span_start, end: span_end, score: None },
+                        Token { text: "ㄹ게".to_string(), pos: Pos::EF,
+                            start: span_start, end: span_end, score: None },
+                    ];
+                    tokens.splice(i..=i + 3, new_tokens);
+                    i += 2;
+                    continue;
+                }
+                if etm_is_eul {
+                    // P3: 먹을게 → 먹/VV + 을게/EF
+                    let span_start = stem.start;
+                    let span_end = cop.end;
+                    let stem_text = stem.text.clone();
+                    let stem_pos = stem.pos;
+                    let new_tokens = vec![
+                        Token { text: stem_text, pos: stem_pos,
+                            start: span_start, end: span_end, score: None },
+                        Token { text: "을게".to_string(), pos: Pos::EF,
+                            start: span_start, end: span_end, score: None },
+                    ];
+                    tokens.splice(i..=i + 3, new_tokens);
+                    i += 2;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        // P2: VV-stem (ㄹ-final 종성) + 게/EC (eojeol-final)
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let stem = &tokens[i];
+            let ec = &tokens[i + 1];
+            let stem_ch = stem.text.chars().next();
+            let stem_ok = stem.text.chars().count() == 1
+                && matches!(stem.pos, Pos::VV | Pos::VX);
+            let ec_ok = ec.pos == Pos::EC && ec.text == "게";
+            let same_eojeol = stem.start == ec.start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != stem.start;
+            let eojeol_end = i + 2 == tokens.len()
+                || tokens[i + 2].start != stem.start
+                || tokens[i + 2].pos == Pos::SF;
+            // 종성 코드 8 == ㄹ
+            let l_jongseong = stem_ch.map(|c| {
+                let code = c as u32;
+                if (0xAC00..=0xD7A3).contains(&code) {
+                    ((code - 0xAC00) % 28) == 8
+                } else { false }
+            }).unwrap_or(false);
+            if stem_ok && ec_ok && same_eojeol && eojeol_start && eojeol_end && l_jongseong {
+                let span_start = stem.start;
+                let span_end = ec.end;
+                let stem_text = stem.text.clone();
+                let stem_pos = stem.pos;
+                let new_tokens = vec![
+                    Token { text: stem_text, pos: stem_pos,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "ㄹ게".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None },
+                ];
+                tokens.splice(i..=i + 1, new_tokens);
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+
+        // P4: VV-stem (1 char, has 종성, not ㄹ) + 을/ETM + 게/EC (eojeol-final)
+        let mut i = 0;
+        while i + 2 < tokens.len() {
+            let stem = &tokens[i];
+            let etm = &tokens[i + 1];
+            let ec = &tokens[i + 2];
+            let stem_ch = stem.text.chars().next();
+            let stem_ok = stem.text.chars().count() == 1
+                && matches!(stem.pos, Pos::VV | Pos::VX);
+            let etm_ok = etm.pos == Pos::ETM && etm.text == "을";
+            let ec_ok = ec.pos == Pos::EC && ec.text == "게";
+            let same_eojeol = stem.start == etm.start && stem.start == ec.start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != stem.start;
+            let eojeol_end = i + 3 == tokens.len()
+                || tokens[i + 3].start != stem.start
+                || tokens[i + 3].pos == Pos::SF;
+            // 받침이 있고 ㄹ이 아닌 경우 (ㄹ받침은 P2가 처리)
+            let valid_jongseong = stem_ch.map(|c| {
+                let code = c as u32;
+                if (0xAC00..=0xD7A3).contains(&code) {
+                    let j = (code - 0xAC00) % 28;
+                    j != 0 && j != 8
+                } else { false }
+            }).unwrap_or(false);
+            if stem_ok && etm_ok && ec_ok && same_eojeol
+                && eojeol_start && eojeol_end && valid_jongseong
+            {
+                let span_start = stem.start;
+                let span_end = ec.end;
+                let stem_text = stem.text.clone();
+                let stem_pos = stem.pos;
+                let new_tokens = vec![
+                    Token { text: stem_text, pos: stem_pos,
+                        start: span_start, end: span_end, score: None },
+                    Token { text: "을게".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None },
+                ];
+                tokens.splice(i..=i + 2, new_tokens);
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    /// Recover `오너/NNG + 라/EF` (eojeol = 오너라) → `오/VV + 너라/EF`.
+    /// 오너 (business owner) is a real dict noun (freq 243), so the rewrite
+    /// is gated to the eojeol-final `라/EF` pattern that signals the
+    /// imperative `오너라` reading. Compound contexts like `회사 오너가` keep
+    /// the noun reading because they don't end in 라/EF.
+    fn fix_oneora(tokens: &mut Vec<Token>) {
+        // Find each eojeol (run of tokens with the same `start`). When the
+        // eojeol is exactly `오너라` (3 chars), starts with `오너/NNG`, and
+        // ends in any 라/EF-family ending (라/EF, 어라/EF, 이/VCP+라/EF, …),
+        // rewrite the entire run as `오/VV + 너라/EF`.
+        let mut start = 0;
+        while start < tokens.len() {
+            let eojeol_start = tokens[start].start;
+            let eojeol_end_pos = tokens[start].end;
+            let mut end = start;
+            while end + 1 < tokens.len() && tokens[end + 1].start == eojeol_start {
+                end += 1;
+            }
+            let head = &tokens[start];
+            let head_ok = head.text == "오너" && head.pos == Pos::NNG;
+            let last = &tokens[end];
+            let last_ok = last.text == "라" || last.text == "어라"
+                || last.text == "라고" || last.text == "어라고";
+            let tail_pos_ok = matches!(last.pos, Pos::EF | Pos::EC);
+            // Eojeol surface span must be exactly 3 chars (= 오너라).
+            let span_chars = eojeol_end_pos - eojeol_start;
+            if head_ok && last_ok && tail_pos_ok && span_chars == 3 {
+                let span_s = eojeol_start;
+                let span_e = tokens[end].end;
+                let new_tokens = vec![
+                    Token { text: "오".to_string(), pos: Pos::VV,
+                        start: span_s, end: span_e, score: None },
+                    Token { text: "너라".to_string(), pos: Pos::EF,
+                        start: span_s, end: span_e, score: None },
+                ];
+                tokens.splice(start..=end, new_tokens);
+                start += 2;
+                continue;
+            }
+            start = end + 1;
+        }
+    }
+
+    /// Demote `이리/NNP` to `이리/MAG` when it stands alone as an eojeol and
+    /// is followed by a verb / adverb / sentence-end. Dictionary-only fix:
+    /// `이리` is registered as NNP (proper noun, freq 338) but its dominant
+    /// use in colloquial speech is the directional adverb (cf. `저리/MAG`).
+    ///
+    /// Compound proper nouns like `이리시`/`이리역` are separate dict entries
+    /// so they keep their NNP status.
+    fn fix_iri_mag(tokens: &mut [Token]) {
+        for i in 0..tokens.len() {
+            if tokens[i].text != "이리" || tokens[i].pos != Pos::NNP {
+                continue;
+            }
+            let eojeol_start = i == 0 || tokens[i - 1].start != tokens[i].start;
+            let eojeol_end = i + 1 == tokens.len()
+                || tokens[i + 1].start != tokens[i].start;
+            if !eojeol_start || !eojeol_end {
+                continue;
+            }
+            // Allow promotion if next eojeol starts with a verb / adverb /
+            // sentence-end punctuation, or there is no next token.
+            let safe_next = i + 1 == tokens.len()
+                || matches!(tokens[i + 1].pos,
+                    Pos::VV | Pos::VA | Pos::VX | Pos::MAG | Pos::SF | Pos::SP);
+            if safe_next {
+                tokens[i].pos = Pos::MAG;
+            }
+        }
+    }
+
     /// Fix NNG → MM for common determiners: 전, 한, 그런, 이런, 저런, 어떤, 새, 헌, 옛
     fn fix_mm_determiners(tokens: &mut [Token]) {
         const MM_WORDS: &[&str] = &["전", "그런", "이런", "저런", "어떤", "새", "헌", "옛", "온"];
@@ -3061,12 +3285,15 @@ impl CodebookAnalyzer {
             Self::fix_xpn_standalone(&mut tokens);
             Self::fix_ec_eos(&mut tokens);
             Self::fix_imperative_ra(&mut tokens);
+            Self::fix_oneora(&mut tokens);
             Self::fix_vcp(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);
             Self::fix_myeoch_si_ya(&mut tokens);
             Self::fix_sn_counter_copula(&mut tokens);
             Self::fix_han_standalone_mm(&mut tokens);
+            Self::fix_lge_endings(&mut tokens);
+            Self::fix_iri_mag(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
