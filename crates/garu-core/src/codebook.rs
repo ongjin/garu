@@ -1307,6 +1307,95 @@ impl CodebookAnalyzer {
                                 }
                             }
                         }
+                    // Strategy E: Vowel contraction decomposition
+                    // Handles contracted verb forms after content words:
+                    //   이리+와 → 이리/MAG + 오/VV + 아/EC (ㅘ = ㅗ+ㅏ)
+                    //   빨리+줘 → 빨리/MAG + 주/VX + 어/EC (ㅝ = ㅜ+ㅓ)
+                    //   어서+돼 → 어서/MAG + 되/VV + 어/EC (ㅙ = ㅚ+ㅓ)
+                    {
+                        let ce_ch = chars[content_end];
+                        let ce_code = ce_ch as u32;
+                        if (0xAC00..=0xD7A3).contains(&ce_code) {
+                            let ce_off = ce_code - 0xAC00;
+                            let ce_cho = ce_off / (21 * 28);
+                            let ce_jung = (ce_off % (21 * 28)) / 28;
+                            let ce_jong = ce_off % 28;
+
+                            let decomp: Option<(u32, char)> = match ce_jung {
+                                9  => Some((8, '아')),   // ㅘ → ㅗ+ㅏ
+                                14 => Some((13, '어')),  // ㅝ → ㅜ+ㅓ
+                                10 => Some((11, '어')),  // ㅙ → ㅚ+ㅓ
+                                _ => None,
+                            };
+
+                            if let Some((stem_jung, ending_v)) = decomp {
+                                if ce_jong == 0 || ce_jong == 20 {
+                                    let stem_code = 0xAC00 + ce_cho * 21 * 28 + stem_jung * 28;
+                                    if let Some(stem_ch) = char::from_u32(stem_code) {
+                                        let stem_str = stem_ch.to_string();
+                                        let stem_matches = self.content_dict.lookup(&stem_str);
+
+                                        for stem_entry in &stem_matches {
+                                            if stem_entry.morphemes.is_empty() { continue; }
+                                            let stem_pos = stem_entry.morphemes[0].pos;
+                                            if !matches!(stem_pos, Pos::VV | Pos::VA | Pos::VX) {
+                                                continue;
+                                            }
+
+                                            let stem_freq = self.freq_from_score(stem_entry.score);
+                                            let stem_morphs: Vec<(String, Pos)> = stem_entry
+                                                .morphemes.iter()
+                                                .map(|m| (m.text.clone(), m.pos))
+                                                .collect();
+                                            let raw_stem_cost = if stem_freq > 0 {
+                                                (self.max_freq / stem_freq as f32).ln()
+                                            } else {
+                                                self.oov_penalty
+                                            };
+
+                                            let ending_base = if ce_jong == 20 {
+                                                if ending_v == '아' { "았".to_string() }
+                                                else { "었".to_string() }
+                                            } else {
+                                                ending_v.to_string()
+                                            };
+
+                                            let eb_chars = ending_base.chars().count();
+                                            let max_tail = self.max_suffix_len
+                                                .saturating_sub(eb_chars)
+                                                .min(n.saturating_sub(content_end + 1));
+
+                                            for tail_len in 0..=max_tail {
+                                                let mut suf_key = ending_base.clone();
+                                                for k in 0..tail_len {
+                                                    suf_key.push(chars[content_end + 1 + k]);
+                                                }
+                                                if let Some(&suf_idx) = self.suffix_map.get(&suf_key) {
+                                                    let suf_entry = &self.suffix_entries[suf_idx];
+                                                    for analysis in &suf_entry.analyses {
+                                                        let suf_cost = self.get_suffix_cost(
+                                                            &suf_key, analysis,
+                                                        );
+                                                        let mut combined = morphemes.clone();
+                                                        combined.extend(stem_morphs.iter().cloned());
+                                                        for m in &analysis.morphemes {
+                                                            combined.push((m.form.clone(), m.pos));
+                                                        }
+                                                        arcs.push(LatticeArc {
+                                                            start: i,
+                                                            end: content_end + 1 + tail_len,
+                                                            morphemes: combined,
+                                                            cost: word_cost + raw_stem_cost + suf_cost,
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     }
                 }
             }
