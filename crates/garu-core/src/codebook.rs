@@ -1812,15 +1812,17 @@ impl CodebookAnalyzer {
             const SPAN_FACTOR: f32 = 2.8;
             const SPAN_MIN_LEN: usize = 3;
             const SPAN_MAX_LEN: usize = 7;
-            const GUARD_SUBS: [&str; 25] = [
+            const GUARD_SUBS: [&str; 29] = [
                 "만한", "만하", "만해", "는데", "한데", "을만", "뿐이", "수있", "것같", "것이",
                 "어줘", "오너",
                 // VV/VA + 어미 패턴: 통째 NNG 차단 (예: 뒤척이다가/뒤척였다 → VV+다가/었다)
                 "이다가", "이며", "이라고", "이라는", "이지만", "였다",
                 // 축약형 패턴: 건데(=것이ㄴ데), 거야(=것이야), 텐데(=터이ㄴ데)
-                "건데", "거야", "텐데",
-                // VV+VX+EF: 봐라/줘라 통째 NNG 차단
-                "봐라", "줘라", "봐봐", "줘줘",
+                "건데", "거야", "텐데", "거예",
+                // VV+VX+EF: 봐/줘+요/라 통째 NNG 차단
+                "봐라", "줘라", "봐봐", "줘줘", "봐요", "줘요",
+                // VV+ㄹ래/EF: 래요 (갈래요, 올래요 etc.)
+                "래요",
             ];
             let mut ej_start = 0;
             while ej_start < n {
@@ -3363,13 +3365,14 @@ impl CodebookAnalyzer {
     /// at eojeol boundaries. Handles 가봐, 나봐, 가봐도, 가봐서 etc.
     fn fix_bwa_auxiliary(tokens: &mut [Token]) {
         for i in 0..tokens.len().saturating_sub(2) {
-            if tokens[i + 1].text != "보" || tokens[i + 1].pos != Pos::VV {
-                continue;
-            }
-            if tokens[i + 2].text != "아" && tokens[i + 2].text != "아도"
-                && tokens[i + 2].text != "아서" && tokens[i + 2].text != "아야" {
-                continue;
-            }
+            let bo_ok = tokens[i + 1].text == "보"
+                && matches!(tokens[i + 1].pos, Pos::VV | Pos::VX);
+            if !bo_ok { continue; }
+
+            let ending_ok = matches!(tokens[i + 2].text.as_str(),
+                "아" | "아도" | "아서" | "아야" | "아요");
+            if !ending_ok { continue; }
+
             let same_eojeol = tokens[i].start == tokens[i + 1].start
                 && tokens[i + 1].start == tokens[i + 2].start;
             if !same_eojeol { continue; }
