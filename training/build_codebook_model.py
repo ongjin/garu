@@ -839,6 +839,9 @@ def augment_contracted_suffixes(codebook: dict) -> dict:
         "와": [{"morphemes": [["오", "VV"], ["아", "EC"]], "freq": 3000}],
         "봐라": [{"morphemes": [["보", "VX"], ["아라", "EF"]], "freq": 3000}],
         "줘라": [{"morphemes": [["주", "VX"], ["어라", "EF"]], "freq": 3000}],
+        # 너래 = 너라고 해 (quotative imperative): 오너래 → 오/VV + 너래/EF
+        "너래": [{"morphemes": [["너래", "EF"]], "freq": 3000}],
+        "너래요": [{"morphemes": [["너래요", "EF"]], "freq": 3000}],
         "ㄹ건데": [{"morphemes": [["ㄹ", "ETM"], ["것", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 10000}],
         "을건데": [{"morphemes": [["을", "ETM"], ["것", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 10000}],
         "ㄹ거야": [{"morphemes": [["ㄹ", "ETM"], ["것", "NNB"], ["이", "VCP"], ["야", "EF"]], "freq": 10000}],

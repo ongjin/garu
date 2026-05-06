@@ -3233,10 +3233,9 @@ impl CodebookAnalyzer {
     /// imperative `오너라` reading. Compound contexts like `회사 오너가` keep
     /// the noun reading because they don't end in 라/EF.
     fn fix_oneora(tokens: &mut Vec<Token>) {
-        // Find each eojeol (run of tokens with the same `start`). When the
-        // eojeol is exactly `오너라` (3 chars), starts with `오너/NNG`, and
-        // ends in any 라/EF-family ending (라/EF, 어라/EF, 이/VCP+라/EF, …),
-        // rewrite the entire run as `오/VV + 너라/EF`.
+        // Rewrite `오너/NNG`-initial eojeols to `오/VV + 너라/EF` or `오/VV + 너래/EF`.
+        // 오너 (business owner) is a real dict noun, but eojeol-final 라/래 signals
+        // the imperative/quotative reading of 오다.
         let mut start = 0;
         while start < tokens.len() {
             let eojeol_start = tokens[start].start;
@@ -3245,26 +3244,38 @@ impl CodebookAnalyzer {
             while end + 1 < tokens.len() && tokens[end + 1].start == eojeol_start {
                 end += 1;
             }
+            let span_chars = eojeol_end_pos - eojeol_start;
             let head = &tokens[start];
             let head_ok = head.text == "오너" && head.pos == Pos::NNG;
-            let last = &tokens[end];
-            let last_ok = last.text == "라" || last.text == "어라"
-                || last.text == "라고" || last.text == "어라고";
-            let tail_pos_ok = matches!(last.pos, Pos::EF | Pos::EC);
-            // Eojeol surface span must be exactly 3 chars (= 오너라).
-            let span_chars = eojeol_end_pos - eojeol_start;
-            if head_ok && last_ok && tail_pos_ok && span_chars == 3 {
+
+            if head_ok && span_chars == 3 {
                 let span_s = eojeol_start;
                 let span_e = tokens[end].end;
-                let new_tokens = vec![
-                    Token { text: "오".to_string(), pos: Pos::VV,
-                        start: span_s, end: span_e, score: None },
-                    Token { text: "너라".to_string(), pos: Pos::EF,
-                        start: span_s, end: span_e, score: None },
-                ];
-                tokens.splice(start..=end, new_tokens);
-                start += 2;
-                continue;
+
+                // 오너라 → 오/VV + 너라/EF (imperative)
+                let last = &tokens[end];
+                let is_ra = (last.text == "라" || last.text == "어라"
+                    || last.text == "라고" || last.text == "어라고")
+                    && matches!(last.pos, Pos::EF | Pos::EC);
+
+                // 오너래 → 오/VV + 너래/EF (quotative: ~라고 해)
+                // Catches: 오너/NNG + 래/NNG, 오너/NNG + 래/EF, etc.
+                let surface: String = tokens[start..=end].iter()
+                    .map(|t| &t.text[..]).collect();
+                let is_rae = surface == "오너래";
+
+                if is_ra || is_rae {
+                    let ending = if is_rae { "너래" } else { "너라" };
+                    let new_tokens = vec![
+                        Token { text: "오".to_string(), pos: Pos::VV,
+                            start: span_s, end: span_e, score: None },
+                        Token { text: ending.to_string(), pos: Pos::EF,
+                            start: span_s, end: span_e, score: None },
+                    ];
+                    tokens.splice(start..=end, new_tokens);
+                    start += 2;
+                    continue;
+                }
             }
             start = end + 1;
         }
@@ -3345,6 +3356,30 @@ impl CodebookAnalyzer {
                 continue;
             }
             i += 1;
+        }
+    }
+
+    /// Fix "X/JKS|EC + 보/VV + 아/EF|EC" → "X/VV + 보/VX + 아/EF|EC"
+    /// at eojeol boundaries. Handles 가봐, 나봐, 가봐도, 가봐서 etc.
+    fn fix_bwa_auxiliary(tokens: &mut [Token]) {
+        for i in 0..tokens.len().saturating_sub(2) {
+            if tokens[i + 1].text != "보" || tokens[i + 1].pos != Pos::VV {
+                continue;
+            }
+            if tokens[i + 2].text != "아" && tokens[i + 2].text != "아도"
+                && tokens[i + 2].text != "아서" && tokens[i + 2].text != "아야" {
+                continue;
+            }
+            let same_eojeol = tokens[i].start == tokens[i + 1].start
+                && tokens[i + 1].start == tokens[i + 2].start;
+            if !same_eojeol { continue; }
+
+            let fixable = matches!(tokens[i].pos, Pos::JKS | Pos::EC | Pos::NNG)
+                && tokens[i].text.chars().count() == 1;
+            if !fixable { continue; }
+
+            tokens[i].pos = Pos::VV;
+            tokens[i + 1].pos = Pos::VX;
         }
     }
 
@@ -3512,6 +3547,7 @@ impl CodebookAnalyzer {
         Self::fix_vcp(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
         Self::fix_mag_wa_vv(&mut tokens);
+        Self::fix_bwa_auxiliary(&mut tokens);
         Self::fix_mm_determiners(&mut tokens);
 
         AnalyzeResult {
@@ -3637,6 +3673,7 @@ impl CodebookAnalyzer {
             Self::fix_iri_mag(&mut tokens);
             Self::fix_mag_ga_vv(&mut tokens);
             Self::fix_mag_wa_vv(&mut tokens);
+            Self::fix_bwa_auxiliary(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
