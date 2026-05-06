@@ -85,7 +85,7 @@ export class GaruWasm {
     }
 }
 if (Symbol.dispose) GaruWasm.prototype[Symbol.dispose] = GaruWasm.prototype.free;
-import * as import1 from "./snippets/garu-core-6c05a1f62b02a38f/inline0.js"
+import * as import1 from "./snippets/garu-core-80efec4e7e4b6e5e/inline0.js"
 
 function __wbg_get_imports() {
     const import0 = {
@@ -146,7 +146,7 @@ function __wbg_get_imports() {
     return {
         __proto__: null,
         "./garu_wasm_bg.js": import0,
-        "./snippets/garu-core-6c05a1f62b02a38f/inline0.js": import1,
+        "./snippets/garu-core-80efec4e7e4b6e5e/inline0.js": import1,
     };
 }
 

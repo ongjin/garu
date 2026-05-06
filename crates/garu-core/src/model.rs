@@ -18,6 +18,8 @@ const CNN_WEIGHT: f32 = 5.0;
 const POS_CONFIDENCE: f32 = 0.9;
 /// Number of Viterbi candidates to generate.
 const NBEST_K: usize = 5;
+/// Wider pool used only for short SNS-style lexical ambiguity.
+const CONTEXT_NBEST_K: usize = 10;
 
 impl Analyzer {
     pub fn from_bytes(model_data: &[u8], cnn_data: &[u8]) -> Result<Self, String> {
@@ -28,6 +30,9 @@ impl Analyzer {
 
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
         let mut candidates = self.codebook.analyze_topn(text, NBEST_K);
+        if Self::should_expand_contextual_nbest(text) {
+            candidates = self.codebook.analyze_topn(text, CONTEXT_NBEST_K);
+        }
 
         let cnn_result = self.cnn.predict(text);
         let cnn_morphs = Self::build_cnn_morphs(&cnn_result);
@@ -43,6 +48,30 @@ impl Analyzer {
             });
         }
 
+        if let Some(idx) = candidates
+            .iter()
+            .position(|cand| Self::has_dependent_noun_adjective_nominal_de_pattern(&cand.tokens))
+        {
+            let mut result = candidates.swap_remove(idx);
+            Self::apply_protected_auxiliary_rules(&mut result.tokens);
+            return result;
+        }
+
+        if candidates
+            .iter()
+            .any(|cand| Self::has_dependent_noun_adjective_ec_de_pattern(&cand.tokens))
+        {
+            let mut expanded = self.codebook.analyze_topn(text, 12);
+            if let Some(idx) = expanded
+                .iter()
+                .position(|cand| Self::has_dependent_noun_adjective_nominal_de_pattern(&cand.tokens))
+            {
+                let mut result = expanded.swap_remove(idx);
+                Self::apply_protected_auxiliary_rules(&mut result.tokens);
+                return result;
+            }
+        }
+
         if Self::has_dependent_noun_adjective_pattern(&candidates[0].tokens) {
             let mut result = candidates.swap_remove(0);
             Self::apply_protected_auxiliary_rules(&mut result.tokens);
@@ -54,7 +83,8 @@ impl Analyzer {
         let mut best_combined = f32::INFINITY;
         for (i, cand) in candidates.iter().enumerate() {
             let agreement = Self::score_cnn_agreement(&cnn_morphs, text, &cand.tokens);
-            let combined = cand.score - CNN_WEIGHT * agreement;
+            let context_bonus = Self::score_contextual_rerank_bonus(text, &cand.tokens);
+            let combined = cand.score - CNN_WEIGHT * agreement - context_bonus;
             if combined < best_combined {
                 best_combined = combined;
                 best_idx = i;
@@ -78,6 +108,10 @@ impl Analyzer {
             Self::apply_protected_auxiliary_rules(&mut result.tokens);
         }
         results
+    }
+
+    fn should_expand_contextual_nbest(text: &str) -> bool {
+        text.contains("대박")
     }
 
     pub fn tokenize(&self, text: &str) -> Vec<String> {
@@ -165,6 +199,64 @@ impl Analyzer {
             }
         }
         score
+    }
+
+    fn score_contextual_rerank_bonus(text: &str, tokens: &[Token]) -> f32 {
+        let mut bonus = 0.0;
+        let question_like = text.contains('?') || text.ends_with('까') || text.ends_with("냐");
+
+        for (i, token) in tokens.iter().enumerate() {
+            if question_like && token.text == "뭐" && token.pos == Pos::NP {
+                bonus += 4.0;
+            }
+
+            if token.text == "오늘" {
+                let next = tokens.get(i + 1);
+                if token.pos == Pos::NNG && next.map_or(false, |t| matches!(t.pos, Pos::NNG | Pos::NNP | Pos::NP)) {
+                    bonus += 2.0;
+                }
+                if token.pos == Pos::MAG && next.map_or(false, |t| matches!(t.pos, Pos::MAG | Pos::VA | Pos::VV)) {
+                    bonus += 2.0;
+                }
+                if token.pos == Pos::MAG && next.map_or(false, |t| t.text == "너무" && t.pos == Pos::MAG) {
+                    bonus += 3.0;
+                }
+            }
+
+            if token.text == "있"
+                && token.pos == Pos::VA
+                && i > 0
+                && matches!(tokens[i - 1].pos, Pos::NNG | Pos::NNP | Pos::NP)
+                && tokens.get(i + 1).map_or(false, |t| t.pos == Pos::EF)
+            {
+                bonus += 5.0;
+            }
+
+            if token.text == "냐" && token.pos == Pos::EF {
+                bonus += 4.0;
+            }
+
+            if token.text == "대박" && matches!(token.pos, Pos::NNG | Pos::IC) {
+                bonus += 4.0;
+            }
+        }
+
+        for window in tokens.windows(2) {
+            if window[0].pos == Pos::NNG && window[1].text == "냐" && window[1].pos == Pos::EF {
+                let surface = format!("{}냐", window[0].text);
+                if text.contains(&surface) {
+                    bonus += 3.0;
+                }
+            }
+
+            if window[0].text == "피곤" && window[0].pos == Pos::NNG
+                && window[1].text == "하" && window[1].pos == Pos::XSA
+            {
+                bonus += 5.0;
+            }
+        }
+
+        bonus
     }
 
     // -----------------------------------------------------------------------
@@ -301,6 +393,32 @@ impl Analyzer {
                 && window[1].pos == Pos::NNB
                 && window[2].text == "하"
                 && window[2].pos == Pos::XSA
+        })
+    }
+
+    fn has_dependent_noun_adjective_nominal_de_pattern(tokens: &[Token]) -> bool {
+        tokens.windows(5).any(|window| {
+            window[0].pos == Pos::ETM
+                && window[1].text == "만"
+                && window[1].pos == Pos::NNB
+                && window[2].text == "하"
+                && window[2].pos == Pos::XSA
+                && window[3].text == "ㄴ"
+                && window[3].pos == Pos::ETM
+                && window[4].text == "데"
+                && window[4].pos == Pos::NNB
+        })
+    }
+
+    fn has_dependent_noun_adjective_ec_de_pattern(tokens: &[Token]) -> bool {
+        tokens.windows(4).any(|window| {
+            window[0].pos == Pos::ETM
+                && window[1].text == "만"
+                && window[1].pos == Pos::NNB
+                && window[2].text == "하"
+                && window[2].pos == Pos::XSA
+                && window[3].text == "ㄴ데"
+                && window[3].pos == Pos::EC
         })
     }
 }
