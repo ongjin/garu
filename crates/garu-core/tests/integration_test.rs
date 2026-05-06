@@ -131,8 +131,7 @@ fn test_dependency_noun_constructions() {
             ("ㄹ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
-            ("ㄴ", Pos::ETM),
-            ("데", Pos::NNB),
+            ("ㄴ데", Pos::EC),
         ],
     );
 
@@ -168,8 +167,7 @@ fn test_dependency_noun_constructions() {
             ("ㄹ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
-            ("ㄴ", Pos::ETM),
-            ("데", Pos::NNB),
+            ("ㄴ데", Pos::EC),
         ],
     );
 

@@ -35,6 +35,11 @@ MANUAL_RULES = [
     ("있",   P["NNB"], P["VV"],  +PENALTY),  # 수/것/리/NNB + 있/VV → 있/VX 유도
     ("들",   BOS,      P["XSN"], +PENALTY),  # 문두 들/XSN 차단: 들만한데 → 들/VV+ㄹ
     ("없",   P["VV"],  P["VA"],  +3.0),      # 갈리/VV+없/VA보다 ㄹ+리/NNB+없 선호
+    # 방향부사 뒤 "가" → VV 유도 (저리가, 빨리가 etc.)
+    ("가",   P["MAG"], P["JKS"], +PENALTY),  # MAG+가/JKS 차단 → VV 선호
+    # 방향부사 뒤 "와" → JKB/JC 차단 (이리와, 빨리와 etc.)
+    ("와",   P["MAG"], P["JKB"], +PENALTY),  # MAG+와/JKB 차단
+    ("와",   P["MAG"], P["JC"],  +PENALTY),  # MAG+와/JC 차단
 ]
 
 

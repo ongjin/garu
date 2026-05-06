@@ -35,6 +35,7 @@ impl Analyzer {
         if candidates.len() <= 1 {
             if let Some(cand) = candidates.first_mut() {
                 Self::apply_pos_override(&cnn_morphs, text, &mut cand.tokens);
+                CodebookAnalyzer::apply_adj_root_xsa(&mut cand.tokens);
                 Self::apply_protected_auxiliary_rules(&mut cand.tokens);
             }
             return candidates.into_iter().next().unwrap_or(AnalyzeResult {
@@ -62,6 +63,7 @@ impl Analyzer {
 
         let mut result = candidates.swap_remove(best_idx);
         Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
+        CodebookAnalyzer::apply_adj_root_xsa(&mut result.tokens);
         Self::apply_protected_auxiliary_rules(&mut result.tokens);
         result
     }
@@ -72,6 +74,7 @@ impl Analyzer {
         let cnn_morphs = Self::build_cnn_morphs(&cnn_result);
         for result in &mut results {
             Self::apply_pos_override(&cnn_morphs, text, &mut result.tokens);
+            CodebookAnalyzer::apply_adj_root_xsa(&mut result.tokens);
             Self::apply_protected_auxiliary_rules(&mut result.tokens);
         }
         results

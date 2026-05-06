@@ -63,6 +63,14 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                 continue
             word, tag, freq_str = parts[0], parts[1], parts[2]
             freq = int(freq_str)
+            # Floor low-freq verb/adj stems with 3+ syl pure Hangul before filtering,
+            # so rare stems (뒤척이/VV freq=6) survive the MIN_CONTENT_FREQ cutoff
+            # and can compete with the eojeol-span NNG fallback in the analyzer.
+            VV_FLOOR = 80
+            is_verb_stem = tag in ("VV", "VA", "VX") and len(word) >= 3 and all(
+                '\uAC00' <= c <= '\uD7A3' for c in word)
+            if is_verb_stem and freq < VV_FLOOR:
+                freq = VV_FLOOR
             if freq < MIN_CONTENT_FREQ:
                 continue
             # Skip punctuation/symbols in content dict — they should be handled by OOV classifier
@@ -149,18 +157,49 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     sorted_words = sorted(best.keys(), key=lambda w: w.encode("utf-8"))
     dual_count = 0
 
+    # ㄹ-irregular verb/adjective stems that have a dominant homonym noun (NNG/NNB)
+    # which would otherwise hide the verbal reading. Forced as secondary POS so
+    # the lattice ㄹ-drop strategy (codebook.rs A4) can fire for 무니/돌면/풀세요 etc.
+    # Format: stem -> (POS, freq_override)
+    RIEUL_DUAL = {
+        "물": ("VV", 12000), # 물다 (to bite)
+        "굴": ("VV", 1500),  # 굴다 (to behave/roll)
+        "길": ("VA", 8000),  # 길다 (long)
+        "달": ("VA", 6000),  # 달다 (sweet/hang)
+        "돌": ("VV", 8000),  # 돌다 (to turn)
+        "밀": ("VV", 4000),  # 밀다 (to push)
+        "불": ("VV", 5000),  # 불다 (to blow)
+        "얼": ("VV", 1500),  # 얼다 (to freeze)
+        "줄": ("VV", 5000),  # 줄다 (to decrease)
+        "풀": ("VV", 6000),  # 풀다 (to untie)
+        "말": ("VV", 12000), # 말다 (to roll/stop)
+        "졸": ("VV", 1000),  # 졸다 (to doze)
+        "절": ("VV", 1200),  # 절다 (to limp)
+    }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = Path(tmpdir) / "dict_input.txt"
         output_path = Path(tmpdir) / "dict_output.bin"
 
+        rieul_added = 0
         with open(input_path, "w", encoding="utf-8") as f:
             for word in sorted_words:
                 tag, freq = best[word]
                 pb = pos_byte(tag) if isinstance(tag, str) else tag
                 f.write(f"{word}\t{pb}\t{freq}\n")
 
+                secondary_written = False
+
+                # Forced ㄹ-irregular dual-POS override (highest priority)
+                if word in RIEUL_DUAL:
+                    alt_tag, alt_freq = RIEUL_DUAL[word]
+                    if alt_tag != tag:
+                        f.write(f"{word}\t{pos_byte(alt_tag)}\t{alt_freq}\n")
+                        secondary_written = True
+                        rieul_added += 1
+
                 # Add secondary POS from NIKL if significantly different
-                if word in nikl_word_pos:
+                if not secondary_written and word in nikl_word_pos:
                     total = sum(nikl_word_pos[word].values())
                     if total >= 100:
                         for alt_tag, alt_count in sorted(nikl_word_pos[word].items(), key=lambda x: -x[1]):
@@ -172,7 +211,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                                 f.write(f"{word}\t{alt_pb}\t{alt_freq}\n")
                                 dual_count += 1
                                 break  # only 1 secondary
-        print(f"  Dual-POS words: {dual_count}")
+        print(f"  Dual-POS words: {dual_count} (NIKL) + {rieul_added} (ㄹ-irregular forced)")
 
         # Run build-dict from repo root
         result = subprocess.run(
@@ -496,7 +535,12 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
     contraction_added = 0
 
     for stem, (pos, freq) in stems.items():
-        if len(stem) < 2 or freq < 30:
+        if len(stem) < 2:
+            continue
+        # Lower freq cutoff for 3+ syl stems so rare verbs like 뒤척이/VV (freq=6)
+        # still get vowel-contraction surfaces (뒤척였다 etc.) in the codebook.
+        min_stem_freq = 5 if len(stem) >= 3 else 30
+        if freq < min_stem_freq:
             continue
         last_ch = stem[-1]
         dec = decompose_hangul(last_ch)
@@ -750,7 +794,7 @@ def augment_dependent_noun_patterns(codebook: dict) -> dict:
     """
     patterns = {
         "만한데": {
-            "morphemes": [["만", "NNB"], ["하", "XSA"], ["ㄴ", "ETM"], ["데", "NNB"]],
+            "morphemes": [["만", "NNB"], ["하", "XSA"], ["ㄴ데", "EC"]],
             "freq": 5000,
         },
         "만해": {
@@ -783,6 +827,48 @@ def augment_dependent_noun_patterns(codebook: dict) -> dict:
     return codebook
 
 
+def augment_contracted_suffixes(codebook: dict) -> dict:
+    """Add contracted form suffix entries for colloquial Korean patterns.
+
+    Handles:
+    - 와 = 오+아 (come): enables 이리와, 저리와, 빨리와 etc.
+    - 건데/거야/텐데 = 것이ㄴ데/것이야/터이ㄴ데: enables 할건데, 갈거야 etc.
+    - 봐라/줘라: enables 가봐라, 해줘라 etc.
+    """
+    CONTRACTED = {
+        "와": [{"morphemes": [["오", "VV"], ["아", "EC"]], "freq": 3000}],
+        "봐라": [{"morphemes": [["보", "VX"], ["아라", "EF"]], "freq": 3000}],
+        "줘라": [{"morphemes": [["주", "VX"], ["어라", "EF"]], "freq": 3000}],
+        "ㄹ건데": [{"morphemes": [["ㄹ", "ETM"], ["것", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 10000}],
+        "을건데": [{"morphemes": [["을", "ETM"], ["것", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 10000}],
+        "ㄹ거야": [{"morphemes": [["ㄹ", "ETM"], ["것", "NNB"], ["이", "VCP"], ["야", "EF"]], "freq": 10000}],
+        "을거야": [{"morphemes": [["을", "ETM"], ["것", "NNB"], ["이", "VCP"], ["야", "EF"]], "freq": 10000}],
+        "ㄹ텐데": [{"morphemes": [["ㄹ", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
+        "을텐데": [{"morphemes": [["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
+        "었을텐데": [{"morphemes": [["었", "EP"], ["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
+        "았을텐데": [{"morphemes": [["았", "EP"], ["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
+    }
+
+    added = 0
+    for surface, analyses in CONTRACTED.items():
+        if surface not in codebook:
+            codebook[surface] = analyses
+            added += len(analyses)
+        else:
+            for a in analyses:
+                new_key = tuple(tuple(m) for m in a["morphemes"])
+                found = any(
+                    tuple(tuple(m) for m in e["morphemes"]) == new_key
+                    for e in codebook[surface]
+                )
+                if not found:
+                    codebook[surface].append(a)
+                    added += 1
+
+    print(f"  Contracted suffix augmentation: {added} entries added")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -810,6 +896,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Preserve productive ETM+NNB adjective patterns filtered out by raw freq.
     codebook = augment_dependent_noun_patterns(codebook)
+
+    # Add contracted form suffixes (와=오+아, 건데=것이ㄴ데, etc.)
+    codebook = augment_contracted_suffixes(codebook)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())

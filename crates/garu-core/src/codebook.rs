@@ -141,6 +141,28 @@ const TYPO_JONG: &[(u32, u32)] = &[
 /// Additional cost for typo-corrected arcs (must beat OOV but lose to exact match).
 const TYPO_PENALTY: f32 = 3.0;
 
+/// Adjective root NNG list (sorted) for XSV→XSA post-processing override.
+/// Derived from suffix codebook: NNG roots whose `(NNG)한/(NNG)게` analyses are
+/// dominantly XSA. When 하/XSV follows one of these in analyzer output, it gets
+/// re-tagged to XSA — matches 표준국어대사전 convention for adjectives like
+/// 정직하다, 깨끗하다, 조용하다 etc.
+const ADJ_ROOTS: &[&str] = &[
+    "가난", "가능", "가혹", "각별", "강경", "강력", "거대", "건강", "건전", "건조",
+    "걸출", "고독", "고요", "고유", "곤란", "공정", "공평", "과도", "광대", "광범위",
+    "괴상", "규칙", "균일", "급속", "난폭", "냉정", "다양", "다정", "단순", "단일",
+    "대등", "독특", "동등", "동일", "랜덤", "막강", "무능", "무리", "무한", "미세",
+    "밀접", "부당", "부실", "부유", "부정", "부족", "부진", "분별", "불리", "불안",
+    "불우", "불편", "불행", "비옥", "비참", "빈약", "사악", "상당", "선량", "선명",
+    "성실", "순수", "신비", "신성", "신속", "신중", "악랄", "안전", "안정", "암울",
+    "양호", "영원", "온난", "완벽", "완전", "왕성", "우세", "우수", "우연", "우울",
+    "우월", "원활", "위험", "유능", "유력", "유리", "유망", "유명", "유사", "유용",
+    "유의미", "유익", "유일", "유한", "유해", "유효", "음란", "이상", "일정", "자비",
+    "잔인", "잔혹", "저명", "저조", "적법", "적합", "정밀", "정직", "정확", "주요",
+    "중대", "중요", "진실", "철저", "충만", "충실", "취약", "치열", "친밀", "친숙",
+    "친절", "침착", "투명", "특별", "특수", "특이", "특정", "편리", "편안", "평등",
+    "평온", "평탄", "필요", "행복", "허무", "현명",
+];
+
 // ---------------------------------------------------------------------------
 // Jamo normalization
 // ---------------------------------------------------------------------------
@@ -402,7 +424,25 @@ impl CodebookAnalyzer {
         let word_bigrams = Self::parse_word_bigrams(wbigram_data)?;
 
         // Parse eojeol cache (Section 13, optional)
-        let eojeol_cache = Self::parse_eojeol_cache(ecache_data)?;
+        let mut eojeol_cache = Self::parse_eojeol_cache(ecache_data)?;
+
+        // Inject directional adverb + motion verb patterns
+        let directional_patterns: &[(&str, &[(&str, Pos)])] = &[
+            ("이리와", &[("이리", Pos::MAG), ("오", Pos::VV), ("아", Pos::EC)]),
+            ("저리와", &[("저리", Pos::MAG), ("오", Pos::VV), ("아", Pos::EC)]),
+            ("이리가", &[("이리", Pos::MAG), ("가", Pos::VV)]),
+            ("저리가", &[("저리", Pos::MAG), ("가", Pos::VV)]),
+            ("빨리와", &[("빨리", Pos::MAG), ("오", Pos::VV), ("아", Pos::EC)]),
+            ("빨리가", &[("빨리", Pos::MAG), ("가", Pos::VV)]),
+            ("같이와", &[("같이", Pos::MAG), ("오", Pos::VV), ("아", Pos::EC)]),
+            ("같이가", &[("같이", Pos::MAG), ("가", Pos::VV)]),
+            ("나가라", &[("나가", Pos::VV), ("아라", Pos::EF)]),
+        ];
+        for &(eojeol, morphs) in directional_patterns {
+            eojeol_cache.entry(eojeol.to_string()).or_insert_with(|| {
+                morphs.iter().map(|&(f, p)| (f.to_string(), p)).collect()
+            });
+        }
 
         Ok(CodebookAnalyzer {
             suffix_entries,
@@ -1229,6 +1269,44 @@ impl CodebookAnalyzer {
                                 }
                             }
                         }
+
+                        // A2c: jongseong-split first suffix syllable
+                        // e.g. "깨신" → content="깨", first suffix syllable="신"
+                        //   → split as "시ㄴ" and look up in suffix codebook
+                        //     ("시ㄴ" → [시/EP, ㄴ/ETM])
+                        // Handles honorific 시 + ETM ㄴ merged into one syllable
+                        // when stem ends in open syllable (깨/뜨/가/오/사/주/보…).
+                        let first_suf_ch = chars[content_end];
+                        if let Some((base_char, jamo)) = split_jongseong(first_suf_ch) {
+                            let max_remain = self
+                                .max_suffix_len
+                                .saturating_sub(2)
+                                .min(n.saturating_sub(content_end + 1));
+                            for tail_len in 0..=max_remain {
+                                let mut split_key = String::new();
+                                split_key.push(base_char);
+                                split_key.push(jamo);
+                                for k in 0..tail_len {
+                                    split_key.push(chars[content_end + 1 + k]);
+                                }
+                                if let Some(&suf_idx) = self.suffix_map.get(&split_key) {
+                                    let suf_entry = &self.suffix_entries[suf_idx];
+                                    for analysis in &suf_entry.analyses {
+                                        let suf_cost = self.get_suffix_cost(&split_key, analysis);
+                                        let mut combined = morphemes.clone();
+                                        for m in &analysis.morphemes {
+                                            combined.push((m.form.clone(), m.pos));
+                                        }
+                                        arcs.push(LatticeArc {
+                                            start: i,
+                                            end: content_end + 1 + tail_len,
+                                            morphemes: combined,
+                                            cost: word_cost + suf_cost,
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1325,6 +1403,88 @@ impl CodebookAnalyzer {
                                             });
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy A4: ㄹ-irregular drop reconstruction.
+            // e.g. "무니" → 물/VV + 니/EC, "사세요" → 살/VV + 세요/EF
+            // When stem ends with ㄹ jongseong followed by suffix starting
+            // with ㄴ/ㅅ, the ㄹ is dropped in the surface form.
+            // Reconstruct by adding ㄹ jongseong to the prefix's last open syllable.
+            {
+                let max_prefix = (n - i).min(8);
+                for prefix_len in 1..=max_prefix {
+                    let j = i + prefix_len;
+                    if j >= n { break; }
+                    let last_ch = chars[j - 1];
+                    let code = last_ch as u32;
+                    if !(0xAC00..=0xD7A3).contains(&code) { continue; }
+                    let offset = code - 0xAC00;
+                    if offset % 28 != 0 { continue; } // last syl already has jongseong
+                    let with_rieul = char::from_u32(0xAC00 + offset + 8).unwrap();
+                    let mut stem: String = chars[i..j - 1].iter().collect();
+                    stem.push(with_rieul);
+                    let entries = self.content_dict.lookup(&stem);
+                    if entries.is_empty() { continue; }
+                    let next_ch = chars[j];
+                    let next_code = next_ch as u32;
+                    if !(0xAC00..=0xD7A3).contains(&next_code) { continue; }
+                    let next_cho = (next_code - 0xAC00) / (21 * 28);
+                    // ㄹ-drop triggers: ㄴ (cho 2), ㅅ (cho 9)
+                    if next_cho != 2 && next_cho != 9 { continue; }
+                    // Skip if the prefix already has a verb/adj reading in dict —
+                    // the regular path is preferred over ㄹ-restoration.
+                    // e.g. "가니까" → 가/VV + 니까/EC, NOT 갈/VV + 니까/EC
+                    let prefix_str: String = chars[i..j].iter().collect();
+                    let prefix_has_verb = self
+                        .content_dict
+                        .lookup(&prefix_str)
+                        .iter()
+                        .any(|e| e.morphemes.first().map_or(false, |m|
+                            matches!(m.pos, Pos::VV | Pos::VA | Pos::VX)));
+                    if prefix_has_verb { continue; }
+                    for entry in &entries {
+                        if entry.morphemes.is_empty() { continue; }
+                        let first_pos = entry.morphemes[0].pos;
+                        if !matches!(first_pos, Pos::VV | Pos::VA | Pos::VX) { continue; }
+                        let freq = self.freq_from_score(entry.score);
+                        // Cost: same shape as multi-char content word over the full arc
+                        // span (don't apply single_char_content_penalty for the dropped-ㄹ
+                        // stem — its surface is 1 syl but the conjugated arc is multi-syl).
+                        let raw_word_cost = if freq > 0 {
+                            (self.max_freq / freq as f32).ln()
+                        } else {
+                            self.oov_penalty
+                        };
+                        let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
+                            .map(|m| (m.text.clone(), m.pos))
+                            .collect();
+                        let max_suf = self.max_suffix_len.min(n - j);
+                        const RIEUL_PENALTY: f32 = 0.0;
+                        for suf_len in 1..=max_suf {
+                            let suf_surface: String = chars[j..j + suf_len].iter().collect();
+                            if let Some(&suf_idx) = self.suffix_map.get(&suf_surface) {
+                                let suf_entry = &self.suffix_entries[suf_idx];
+                                for analysis in &suf_entry.analyses {
+                                    let suf_cost = self.get_suffix_cost(&suf_surface, analysis);
+                                    let mut combined = morphemes.clone();
+                                    for m in &analysis.morphemes {
+                                        combined.push((m.form.clone(), m.pos));
+                                    }
+                                    let arc_char_len = (j + suf_len) - i;
+                                    let length_credit = self.length_bonus
+                                        * (arc_char_len.saturating_sub(1)) as f32;
+                                    arcs.push(LatticeArc {
+                                        start: i,
+                                        end: j + suf_len,
+                                        morphemes: combined,
+                                        cost: raw_word_cost + suf_cost + RIEUL_PENALTY
+                                            - length_credit,
+                                    });
                                 }
                             }
                         }
@@ -1563,9 +1723,15 @@ impl CodebookAnalyzer {
             const SPAN_FACTOR: f32 = 2.8;
             const SPAN_MIN_LEN: usize = 3;
             const SPAN_MAX_LEN: usize = 7;
-            const GUARD_SUBS: [&str; 12] = [
+            const GUARD_SUBS: [&str; 25] = [
                 "만한", "만하", "만해", "는데", "한데", "을만", "뿐이", "수있", "것같", "것이",
                 "어줘", "오너",
+                // VV/VA + 어미 패턴: 통째 NNG 차단 (예: 뒤척이다가/뒤척였다 → VV+다가/었다)
+                "이다가", "이며", "이라고", "이라는", "이지만", "였다",
+                // 축약형 패턴: 건데(=것이ㄴ데), 거야(=것이야), 텐데(=터이ㄴ데)
+                "건데", "거야", "텐데",
+                // VV+VX+EF: 봐라/줘라 통째 NNG 차단
+                "봐라", "줘라", "봐봐", "줘줘",
             ];
             let mut ej_start = 0;
             while ej_start < n {
@@ -2122,16 +2288,21 @@ impl CodebookAnalyzer {
         }
         for i in 1..tokens.len() {
             let prev_pos = tokens[i - 1].pos;
-            if prev_pos != Pos::NNG {
-                continue;
-            }
             let form = tokens[i].text.as_str();
-            if tokens[i].pos == Pos::VV && (form == "하" || form == "되" || form == "시키") {
-                tokens[i].pos = Pos::XSV;
-            } else if tokens[i].pos == Pos::VA && form == "하" {
-                tokens[i].pos = Pos::XSA;
+            if prev_pos == Pos::NNG {
+                if tokens[i].pos == Pos::VV && (form == "하" || form == "되" || form == "시키") {
+                    tokens[i].pos = Pos::XSV;
+                } else if tokens[i].pos == Pos::VA && form == "하" {
+                    tokens[i].pos = Pos::XSA;
+                }
+            } else if prev_pos == Pos::XR {
+                // XR roots (조용/깨끗/공평 …) + 하 always derive adjectives → XSA
+                if (tokens[i].pos == Pos::VV || tokens[i].pos == Pos::VA) && form == "하" {
+                    tokens[i].pos = Pos::XSA;
+                }
             }
         }
+        Self::apply_adj_root_xsa(tokens);
     }
 
     /// Fix VV/VA → VX for auxiliary verbs after EC (connective endings).
@@ -3039,6 +3210,55 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Fix 가/JKS → 가/VV when it's the last morpheme of an eojeol
+    /// preceded by MAG (directional adverb). "저리가" → 저리/MAG + 가/VV.
+    fn fix_mag_ga_vv(tokens: &mut [Token]) {
+        for i in 1..tokens.len() {
+            if tokens[i].text != "가" || tokens[i].pos != Pos::JKS {
+                continue;
+            }
+            if tokens[i - 1].pos != Pos::MAG {
+                continue;
+            }
+            let same_eojeol = tokens[i - 1].start == tokens[i].start;
+            let eojeol_end = i + 1 == tokens.len()
+                || tokens[i + 1].start != tokens[i].start;
+            if same_eojeol && eojeol_end {
+                tokens[i].pos = Pos::VV;
+            }
+        }
+    }
+
+    /// Fix 와/JKB|JC → 오/VV + 아/EC when preceded by MAG in same eojeol.
+    /// "빨리와" → 빨리/MAG + 오/VV + 아/EC.
+    fn fix_mag_wa_vv(tokens: &mut Vec<Token>) {
+        let mut i = 1;
+        while i < tokens.len() {
+            if tokens[i].text != "와" || !matches!(tokens[i].pos, Pos::JKB | Pos::JC) {
+                i += 1;
+                continue;
+            }
+            if tokens[i - 1].pos != Pos::MAG {
+                i += 1;
+                continue;
+            }
+            let same_eojeol = tokens[i - 1].start == tokens[i].start;
+            let eojeol_end = i + 1 == tokens.len()
+                || tokens[i + 1].start != tokens[i].start;
+            if same_eojeol && eojeol_end {
+                let s = tokens[i].start;
+                let e = tokens[i].end;
+                tokens.splice(i..=i, vec![
+                    Token { text: "오".to_string(), pos: Pos::VV, start: s, end: e, score: None },
+                    Token { text: "아".to_string(), pos: Pos::EC, start: s, end: e, score: None },
+                ]);
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Fix NNG → MM for common determiners: 전, 한, 그런, 이런, 저런, 어떤, 새, 헌, 옛
     fn fix_mm_determiners(tokens: &mut [Token]) {
         const MM_WORDS: &[&str] = &["전", "그런", "이런", "저런", "어떤", "새", "헌", "옛", "온"];
@@ -3201,6 +3421,8 @@ impl CodebookAnalyzer {
         Self::fix_ec_eos(&mut tokens);
         Self::fix_imperative_ra(&mut tokens);
         Self::fix_vcp(&mut tokens);
+        Self::fix_mag_ga_vv(&mut tokens);
+        Self::fix_mag_wa_vv(&mut tokens);
         Self::fix_mm_determiners(&mut tokens);
 
         AnalyzeResult {
@@ -3208,6 +3430,36 @@ impl CodebookAnalyzer {
             score,
             elapsed_ms: now_ms() - t0,
         }
+    }
+
+    /// Re-apply the adjective-root XSV→XSA override. Called from the analyzer
+    /// after CNN POS reranking, since CNN may flip XSA back to XSV based on its
+    /// NIKL-trained distribution.
+    pub fn apply_adj_root_xsa(tokens: &mut [Token]) {
+        for i in 1..tokens.len() {
+            if tokens[i].text != "하" {
+                continue;
+            }
+            // XSV → XSA when prev NNG is in adjective root whitelist
+            if tokens[i].pos == Pos::XSV
+                && tokens[i - 1].pos == Pos::NNG
+                && ADJ_ROOTS.binary_search(&tokens[i - 1].text.as_str()).is_ok()
+            {
+                tokens[i].pos = Pos::XSA;
+            }
+            // XR + 하 → always XSA (XR roots are unbound adjective stems)
+            if tokens[i - 1].pos == Pos::XR
+                && matches!(tokens[i].pos, Pos::XSV | Pos::VV | Pos::VA)
+            {
+                tokens[i].pos = Pos::XSA;
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn dump_arcs(&self, text: &str) -> Vec<(usize, usize, Vec<(String, Pos)>, f32)> {
+        let arcs = self.build_lattice(text);
+        arcs.into_iter().map(|a| (a.start, a.end, a.morphemes, a.cost)).collect()
     }
 
     /// Analyze returning top-N distinct results, sorted by Viterbi cost.
@@ -3294,6 +3546,8 @@ impl CodebookAnalyzer {
             Self::fix_han_standalone_mm(&mut tokens);
             Self::fix_lge_endings(&mut tokens);
             Self::fix_iri_mag(&mut tokens);
+            Self::fix_mag_ga_vv(&mut tokens);
+            Self::fix_mag_wa_vv(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
