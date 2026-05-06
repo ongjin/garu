@@ -198,6 +198,61 @@ fn test_nbest_path_applies_determiner_postprocess() {
     assert_eq!(window[1].pos, Pos::MM);
 }
 
+#[test]
+fn test_contextual_reranking_everyday_and_sns() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "오늘 점심 뭐 먹을까?",
+        &[
+            ("오늘", Pos::NNG),
+            ("점심", Pos::NNG),
+            ("뭐", Pos::NP),
+            ("먹", Pos::VV),
+            ("을까", Pos::EF),
+            ("?", Pos::SF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "여기 자리 있어요?",
+        &[
+            ("여기", Pos::NP),
+            ("자리", Pos::NNG),
+            ("있", Pos::VA),
+            ("어요", Pos::EF),
+            ("?", Pos::SF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "이거 실화냐 대박",
+        &[
+            ("이거", Pos::NP),
+            ("실화", Pos::NNG),
+            ("냐", Pos::EF),
+            ("대박", Pos::NNG),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "아 진짜 오늘 너무 피곤하다",
+        &[
+            ("아", Pos::IC),
+            ("진짜", Pos::MAG),
+            ("오늘", Pos::MAG),
+            ("너무", Pos::MAG),
+            ("피곤", Pos::NNG),
+            ("하", Pos::XSA),
+            ("다", Pos::EF),
+        ],
+    );
+}
+
 // ----- Issue #1 (sgbai78) regression suite -----
 
 #[test]

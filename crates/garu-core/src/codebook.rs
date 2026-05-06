@@ -160,7 +160,7 @@ const ADJ_ROOTS: &[&str] = &[
     "잔인", "잔혹", "저명", "저조", "적법", "적합", "정밀", "정직", "정확", "주요",
     "중대", "중요", "진실", "철저", "충만", "충실", "취약", "치열", "친밀", "친숙",
     "친절", "침착", "투명", "특별", "특수", "특이", "특정", "편리", "편안", "평등",
-    "평온", "평탄", "필요", "행복", "허무", "현명",
+    "평온", "평탄", "피곤", "필요", "행복", "허무", "현명",
 ];
 
 // ---------------------------------------------------------------------------
@@ -3361,6 +3361,27 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Merge ㄴ/ETM + 데/NNB → ㄴ데/EC after XSA/VA/VV.
+    /// Handles 볼만한데, 갈만한데 etc. where Viterbi prefers the split.
+    fn fix_nde_merge(tokens: &mut Vec<Token>) {
+        let mut i = 1;
+        while i + 1 < tokens.len() {
+            if tokens[i].text == "ㄴ" && tokens[i].pos == Pos::ETM
+                && tokens[i + 1].text == "데" && tokens[i + 1].pos == Pos::NNB
+                && matches!(tokens[i - 1].pos, Pos::XSA | Pos::VA | Pos::VV | Pos::VX)
+                && tokens[i].start == tokens[i + 1].start
+            {
+                let s = tokens[i].start;
+                let e = tokens[i + 1].end;
+                tokens.splice(i..=i + 1, [
+                    Token { text: "ㄴ데".to_string(), pos: Pos::EC, start: s, end: e, score: None },
+                ]);
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Fix "X/JKS|EC + 보/VV + 아/EF|EC" → "X/VV + 보/VX + 아/EF|EC"
     /// at eojeol boundaries. Handles 가봐, 나봐, 가봐도, 가봐서 etc.
     fn fix_bwa_auxiliary(tokens: &mut [Token]) {
@@ -3548,6 +3569,7 @@ impl CodebookAnalyzer {
         Self::fix_ec_eos(&mut tokens);
         Self::fix_imperative_ra(&mut tokens);
         Self::fix_vcp(&mut tokens);
+        Self::fix_nde_merge(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
         Self::fix_mag_wa_vv(&mut tokens);
         Self::fix_bwa_auxiliary(&mut tokens);
@@ -3667,6 +3689,7 @@ impl CodebookAnalyzer {
             Self::fix_imperative_ra(&mut tokens);
             Self::fix_oneora(&mut tokens);
             Self::fix_vcp(&mut tokens);
+            Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);
             Self::fix_myeoch_si_ya(&mut tokens);

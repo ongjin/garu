@@ -749,7 +749,7 @@ def augment_jamo_suffixes(codebook: dict) -> dict:
         "ㄴ다면": [{"morphemes": [["ㄴ다면", "EC"]], "freq": 20000}],
         "ㄴ다며": [{"morphemes": [["ㄴ다며", "EC"]], "freq": 10000}],
         "ㄴ다는": [{"morphemes": [["ㄴ다는", "ETM"]], "freq": 30000}],
-        "ㄴ데": [{"morphemes": [["ㄴ데", "EC"]], "freq": 30000}],
+        "ㄴ데": [{"morphemes": [["ㄴ데", "EC"]], "freq": 300000}],
         "ㄴ지": [{"morphemes": [["ㄴ지", "EC"]], "freq": 20000}],
         "ㄴ가": [{"morphemes": [["ㄴ가", "EF"]], "freq": 30000}],
         "ㄹ까": [{"morphemes": [["ㄹ까", "EF"]], "freq": 20000}],
@@ -800,6 +800,14 @@ def augment_dependent_noun_patterns(codebook: dict) -> dict:
         "만해": {
             "morphemes": [["만", "NNB"], ["하", "XSA"], ["어", "EF"]],
             "freq": 5000,
+        },
+        "ㄹ만한데": {
+            "morphemes": [["ㄹ", "ETM"], ["만", "NNB"], ["하", "XSA"], ["ㄴ데", "EC"]],
+            "freq": 50000,
+        },
+        "을만한데": {
+            "morphemes": [["을", "ETM"], ["만", "NNB"], ["하", "XSA"], ["ㄴ데", "EC"]],
+            "freq": 50000,
         },
     }
 
