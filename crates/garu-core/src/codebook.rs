@@ -2074,10 +2074,14 @@ impl CodebookAnalyzer {
                 }
             }
 
-            // Also convert 어→아 for EC/EF endings based on preceding vowel harmony
+            // Convert 어→아 for EC/EF endings based on preceding vowel harmony
+            // BUT skip if preceding token is EP (after 았/었, EC/EF is always 어)
             if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
                 && tokens[i].text.starts_with("어")
             {
+                if tokens[i - 1].pos == Pos::EP {
+                    continue;
+                }
                 let prev_text = &tokens[i - 1].text;
                 if let Some(last_char) = prev_text.chars().last() {
                     let code = last_char as u32;
@@ -2088,6 +2092,14 @@ impl CodebookAnalyzer {
                         }
                     }
                 }
+            }
+
+            // After EP, normalize 아→어 for EC/EF (았어, 었어 — always 어)
+            if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
+                && tokens[i - 1].pos == Pos::EP
+                && tokens[i].text.starts_with("아")
+            {
+                tokens[i].text = tokens[i].text.replacen("아", "어", 1);
             }
         }
 
@@ -2279,6 +2291,9 @@ impl CodebookAnalyzer {
                     }
                 }
                 if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF) && tokens[i].text.starts_with("어") {
+                    if tokens[i - 1].pos == Pos::EP {
+                        continue;
+                    }
                     if let Some(last_char) = tokens[i - 1].text.chars().last() {
                         let code = last_char as u32;
                         if code >= 0xAC00 && code <= 0xD7A3 {
@@ -2288,6 +2303,12 @@ impl CodebookAnalyzer {
                             }
                         }
                     }
+                }
+                if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
+                    && tokens[i - 1].pos == Pos::EP
+                    && tokens[i].text.starts_with("아")
+                {
+                    tokens[i].text = tokens[i].text.replacen("아", "어", 1);
                 }
             }
             Self::fix_xsv_xsa(&mut tokens);
