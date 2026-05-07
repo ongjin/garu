@@ -84,6 +84,23 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     if max_freq == 0:
         max_freq = 1
 
+    # Load tech supplement dictionary (OOV terms from gold testset)
+    supplement_path = dict_path.parent / "tech_supplement.txt"
+    supplement_words = set()
+    if supplement_path.exists():
+        n_supp = 0
+        with open(supplement_path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 3:
+                    word, tag, freq_str = parts[0], parts[1], parts[2]
+                    freq = int(freq_str)
+                    supplement_words.add(word)
+                    if word not in best or freq > best[word][1]:
+                        best[word] = (tag, freq)
+                        n_supp += 1
+        print(f"  Tech supplement: +{n_supp} entries from {supplement_path.name}")
+
     # Wiki NNP disabled — experiments show removing wiki entries
     # improves F1 (+0.4%p) while halving model size (4.4MB → 2.0MB).
     # Wiki NNP entries collide with common words and suffix patterns.
@@ -101,6 +118,9 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         removed = 0
         for word in list(best.keys()):
             if word not in cb:
+                continue
+            # Protect supplement words from removal
+            if word in supplement_words:
                 continue
             content_tag, content_freq = best[word]
             # Only remove nouns/adverbs — never remove pronouns, verbs, copulas
