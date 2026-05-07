@@ -1198,10 +1198,11 @@ def main():
         ecache_data = ecache_path.read_bytes()
         marker = int.from_bytes(ecache_data[:4], 'little')
         if marker == 0xFFFFFFFF:
-            # v1 compact format: skip marker(4) + version(1) + string table, read entry count later
+            sub_ver = ecache_data[4]
             st_len = int.from_bytes(ecache_data[5:9], 'little')
             ns = int.from_bytes(ecache_data[9+st_len:11+st_len], 'little')
-            ec_off = 11 + st_len + (ns + 1) * 2
+            off_size = 4 if sub_ver >= 2 else 2
+            ec_off = 11 + st_len + (ns + 1) * off_size
             n_ec = int.from_bytes(ecache_data[ec_off:ec_off+4], 'little')
         else:
             n_ec = marker

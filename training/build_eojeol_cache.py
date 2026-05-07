@@ -209,17 +209,17 @@ def main():
 
     print(f"\n  String table: {len(sorted_forms)} unique forms, {len(string_table):,} bytes")
 
-    # Build compact binary cache (v1 format)
+    # Build compact binary cache (v2 format: u32 offsets for large string tables)
     buf = bytearray()
     buf.extend(struct.pack("<I", 0xFFFFFFFF))  # format marker
-    buf.extend(struct.pack("B", 1))            # sub-version 1
+    buf.extend(struct.pack("B", 2))            # sub-version 2 (u32 offsets)
 
     # String table
     buf.extend(struct.pack("<I", len(string_table)))
     buf.extend(string_table)
     buf.extend(struct.pack("<H", len(sorted_forms)))
     for off in string_offsets:
-        buf.extend(struct.pack("<H", off))
+        buf.extend(struct.pack("<I", off))
 
     # Entries
     buf.extend(struct.pack("<I", len(selected)))

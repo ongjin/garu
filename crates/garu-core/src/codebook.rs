@@ -906,6 +906,7 @@ impl CodebookAnalyzer {
     }
 
     fn parse_eojeol_cache_v1(data: &[u8]) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
+        let sub_version = data[4];
         let mut pos = 5; // skip marker + sub-version
 
         // String table
@@ -922,12 +923,22 @@ impl CodebookAnalyzer {
         pos += 2;
 
         let mut string_offsets = Vec::with_capacity(num_strings + 1);
-        for _ in 0..=num_strings {
-            let off = u16::from_le_bytes(
-                data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
-            ) as usize;
-            string_offsets.push(off);
-            pos += 2;
+        if sub_version >= 2 {
+            for _ in 0..=num_strings {
+                let off = u32::from_le_bytes(
+                    data[pos..pos + 4].try_into().map_err(|_| "Bad string offset")?,
+                ) as usize;
+                string_offsets.push(off);
+                pos += 4;
+            }
+        } else {
+            for _ in 0..=num_strings {
+                let off = u16::from_le_bytes(
+                    data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
+                ) as usize;
+                string_offsets.push(off);
+                pos += 2;
+            }
         }
 
         let mut forms: Vec<String> = Vec::with_capacity(num_strings);
