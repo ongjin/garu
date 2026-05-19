@@ -615,3 +615,151 @@ fn test_noun_inga_copula_split() {
         "여기가 학교인가?: still produces ㄴ가/EF: {:?}", pairs
     );
 }
+
+#[test]
+fn test_vcp_eojeol_start_recovery_inji() {
+    let analyzer = load_analyzer();
+
+    // 인지 능력 — eojeol-start NNG (compound across eojeol)
+    let result = analyzer.analyze("인지 능력이 떨어진다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지 능력: 인지/NNG: {:?}", pairs
+    );
+    assert!(
+        !(pairs.first() == Some(&("이", Pos::VCP))),
+        "인지 능력: 어절 시작이 이/VCP면 안 됨: {:?}", pairs
+    );
+
+    // 인지능력 — same eojeol compound
+    let result = analyzer.analyze("인지능력이 떨어진다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지능력: 인지/NNG: {:?}", pairs
+    );
+
+    // 인지하다 — eojeol-start NNG + 파생동사
+    let result = analyzer.analyze("인지하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지하다: 인지/NNG: {:?}", pairs
+    );
+
+    // 치매 환자의 인지 — eojeol-end position
+    let result = analyzer.analyze("치매 환자의 인지");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "치매 환자의 인지: 인지/NNG: {:?}", pairs
+    );
+
+    // Regression — true copula context (이게 학생인지 모른다)
+    let result = analyzer.analyze("이게 학생인지 모른다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "학생" && *p == Pos::NNG),
+        "학생인지: 학생/NNG preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "학생인지: copula 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ지" && *p == Pos::EC),
+        "학생인지: ㄴ지/EC preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "학생인지: 인지/NNG로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+
+    // Regression — different ending (는지) on a verb stem
+    let result = analyzer.analyze("맞는지 모르겠다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "맞" && *p == Pos::VV),
+        "맞는지: 맞/VV preserved: {:?}", pairs
+    );
+}
+
+#[test]
+fn test_vcp_eojeol_start_recovery_imyon() {
+    let analyzer = load_analyzer();
+
+    // 이면 분석 — eojeol-start NNG (compound across eojeol)
+    let result = analyzer.analyze("이면 분석이 필요하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면 분석: 이면/NNG: {:?}", pairs
+    );
+
+    // 동전의 이면 — eojeol-end position
+    let result = analyzer.analyze("동전의 이면");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "동전의 이면: 이면/NNG: {:?}", pairs
+    );
+
+    // 이면을, 이면이 — eojeol-start (이/MM + 면/NNG 경로)
+    let result = analyzer.analyze("이면을 보다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면을: 이면/NNG: {:?}", pairs
+    );
+
+    let result = analyzer.analyze("이면이 드러나다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면이: 이면/NNG: {:?}", pairs
+    );
+
+    // Regression — true copula+조건어미 (내일이면, 학생이면)
+    let result = analyzer.analyze("내일이면 도착한다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "내일" && *p == Pos::NNG),
+        "내일이면: 내일/NNG preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "내일이면: 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "면" && *p == Pos::EC),
+        "내일이면: 면/EC preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "내일이면: 이면/NNG으로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+
+    let result = analyzer.analyze("학생이면 누구나");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "학생이면: 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "학생이면: 이면/NNG으로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+}

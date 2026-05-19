@@ -2987,6 +2987,56 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Recover NNG nouns wrongly decomposed at eojeol start. The codebook
+    /// sometimes prefers a copula+ending split (`이/VCP + ㄴX/EC`) or a
+    /// determiner+noun split (`이/MM + X/NNG`) for words that should be a
+    /// single NNG. This pass merges those splits back when they appear in
+    /// eojeol-initial position — `이/VCP` is structurally post-nominal, so an
+    /// eojeol-initial 이/VCP is invalid by Korean grammar.
+    ///
+    /// Whitelist (verified against NIKL MP, expand carefully):
+    /// - 어절-시작 `이/VCP + ㄴ지/{EC|EF}` → `인지/NNG` (認知)
+    /// - 어절-시작 `이/VCP + 면/EC`         → `이면/NNG` (裏面)
+    /// - 어절-시작 `이/MM  + 면/NNG`        → `이면/NNG` (裏面)
+    fn fix_vcp_eojeol_start_recovery(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != tokens[i].start;
+            if !(same_eojeol && eojeol_start) {
+                i += 1;
+                continue;
+            }
+            let recovered: Option<&str> = match (
+                tokens[i].text.as_str(),
+                tokens[i].pos,
+                tokens[i + 1].text.as_str(),
+                tokens[i + 1].pos,
+            ) {
+                ("이", Pos::VCP, "ㄴ지", Pos::EC) => Some("인지"),
+                ("이", Pos::VCP, "ㄴ지", Pos::EF) => Some("인지"),
+                ("이", Pos::VCP, "면", Pos::EC) => Some("이면"),
+                ("이", Pos::MM, "면", Pos::NNG) => Some("이면"),
+                _ => None,
+            };
+            if let Some(form) = recovered {
+                let span_start = tokens[i].start;
+                let span_end = tokens[i + 1].end;
+                tokens[i] = Token {
+                    text: form.to_string(),
+                    pos: Pos::NNG,
+                    start: span_start,
+                    end: span_end,
+                    score: None,
+                };
+                tokens.remove(i + 1);
+                i += 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Recover and merge 해요체 endings.
     ///
     /// Two passes (eojeol-final, same eojeol):
@@ -3639,6 +3689,7 @@ impl CodebookAnalyzer {
         Self::fix_imperative_ra(&mut tokens);
         Self::fix_vcp(&mut tokens);
         Self::fix_noun_inga_copula(&mut tokens);
+        Self::fix_vcp_eojeol_start_recovery(&mut tokens);
         Self::fix_nde_merge(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
         Self::fix_mag_wa_vv(&mut tokens);
@@ -3760,6 +3811,7 @@ impl CodebookAnalyzer {
             Self::fix_oneora(&mut tokens);
             Self::fix_vcp(&mut tokens);
             Self::fix_noun_inga_copula(&mut tokens);
+            Self::fix_vcp_eojeol_start_recovery(&mut tokens);
             Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);
