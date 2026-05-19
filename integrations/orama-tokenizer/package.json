@@ -1,0 +1,44 @@
+{
+  "name": "garu-orama-tokenizer",
+  "version": "0.1.0",
+  "description": "Korean tokenizer for Orama search, powered by garu-ko (1.9MB WASM morphological analyzer)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "orama",
+    "tokenizer",
+    "korean",
+    "search",
+    "wasm",
+    "morphological-analysis",
+    "garu"
+  ],
+  "author": "cyj <dydwls140@naver.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ongjin/garu.git",
+    "directory": "integrations/orama-tokenizer"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "garu-ko": "^0.6.11"
+  },
+  "peerDependencies": {
+    "@orama/orama": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@orama/orama": "^3.0.0",
+    "typescript": "^5.4",
+    "vitest": "^2.0"
+  }
+}

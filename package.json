@@ -1,0 +1,8 @@
+{
+  "name": "garu-workspace",
+  "private": true,
+  "workspaces": [
+    "js",
+    "integrations/*"
+  ]
+}
