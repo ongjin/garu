@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0
+
+### 진입점 분리 — 브라우저/Node 별도 번들
+
+- `src/index.ts` 단일 파일을 `core.ts` / `browser.ts` / `node.ts`로 분리
+- 브라우저 진입점은 `fs/promises`·`url`·`path` Node 전용 import 완전 제거
+- `package.json` conditional `exports`로 환경별 자동 라우팅
+  - `import { Garu } from 'garu-ko'` — 환경 자동 감지 (Node → `dist/node.js`, 브라우저 번들러 → `dist/browser.js`)
+  - 명시적 진입: `garu-ko/browser`, `garu-ko/node`
+- 공개 API(`Garu.load()`, `Garu.analyze()` 등) 변동 없음
+
+### `이/VCP + ㄴ가/EF` 후처리 규칙 추가
+
+- `fix_noun_inga_copula`: `<noun> + 인가/NNG` (어절 끝) → `<noun> + 이/VCP + ㄴ가/EF`
+- "눈물인가", "학생인가 선생인가" 같은 문장부호 없는 의문형이 올바르게 분해됨
+- 진짜 인가(認可/license) 명사는 어절 게이팅으로 보호 ("조선시대 인가가 필요" 등)
+- 통합 테스트 1개 추가 (4 assertion)
+
+### 검증
+- Rust 통합 테스트 19/19 통과 (회귀 0건)
+- vitest 7/7 (`js/tests`) + Orama 11/11 + MiniSearch 14/14 모두 통과
+
 ## 0.6.11
 
 ### CNN 재순위 모델 업그레이드 (h=96 → h=144, 16 에폭)

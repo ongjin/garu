@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Garu } from '../src/index';
+import { Garu } from '../src/node';
 
 describe('Garu API surface', () => {
   it('Garu class is defined', () => {
