@@ -16,17 +16,15 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_garuwasm_free: (a: number, b: number) => void;
-    readonly garuwasm_analyze: (a: number, b: number, c: number) => [number, number, number];
-    readonly garuwasm_analyze_topn: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly garuwasm_new: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly garuwasm_tokenize: (a: number, b: number, c: number) => [number, number, number];
-    readonly garuwasm_version: () => [number, number];
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
-    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-    readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-    readonly __wbindgen_start: () => void;
+    readonly garuwasm_analyze: (a: number, b: number, c: number, d: number) => void;
+    readonly garuwasm_analyze_topn: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly garuwasm_new: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly garuwasm_tokenize: (a: number, b: number, c: number, d: number) => void;
+    readonly garuwasm_version: (a: number) => void;
+    readonly __wbindgen_export: (a: number, b: number) => number;
+    readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
+    readonly __wbindgen_export3: (a: number, b: number, c: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;

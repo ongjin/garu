@@ -3,9 +3,9 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + CNN 재순위로 동작.
-- **F1 91.1%** (5,000문장 수동검증 골드 테스트셋) / NIKL MP 93.7%
-- **모델 1.2MB + CNN 408KB** (gzip 압축, npm 패키지에 포함, CDN 불필요)
-- **WASM** — 브라우저에서 실행
+- **F1 93.9%** (5,000문장 수동검증 골드 테스트셋) / NIKL MP 93.7%
+- **모델 998KB + CNN 701KB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요)
+- **WASM** — 브라우저에서 실행 (raw 337KB / gzip 155KB, opt-level=z + wasm-opt -Oz + brotli decoder)
 
 ## 아키텍처
 
@@ -18,7 +18,7 @@
 ```
 
 ### 모델 구성 (codebook.gmdl, GMDL v3 포맷)
-| Section | 내용 | 크기 |
+| Section | 내용 | 크기 (raw) |
 |---------|------|------|
 | 6 | 내용어 사전 (FST, 다중 POS) | 1,061 KB |
 | 7 | 접미사 코드북 (31K 패턴, string table + u8 freq 양자화) | 847 KB |
@@ -28,20 +28,23 @@
 | 11 | 모호성 테이블 (비활성) | 4 B |
 | 12 | 단어 바이그램 비용 보정 (734 규칙) | 8 KB |
 | 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 230 KB |
-| — | **gzip 압축 후 전체** | **1,174 KB** |
+| — | **brotli q=11 압축 후** | **998 KB** |
 
 ### CNN 재순위 모델 (cnn2.bin, int8 양자화)
+js/models/cnn2.bin 기준 (npm 패키지에 번들된 최신 모델, hidden=144).
 | 구성요소 | 파라미터 | int8 크기 |
 |----------|----------|-----------|
-| 임베딩 (3002×48) | 144K | 140 KB |
-| Conv Layer 1 (k=3,5,9, 96ch) | 79K | 77 KB |
-| Conv Layer 2 (k=3,7, 96ch) | 277K | 270 KB |
-| 출력 FC (192→81) | 16K | 15 KB |
-| **합계** | **516K** | **408 KB** (gzip) |
+| 임베딩 (3002×48) | 144K | 141 KB |
+| Conv Layer 1 (k=3,5,9, 144ch) | 124K | 115 KB |
+| Conv Layer 2 (k=3,7, 144ch) | 622K | 608 KB |
+| 출력 FC (288→81) | 23K | 23 KB |
+| 바이어스 + 스케일 + vocab | — | 24 KB |
+| **합계** | ~913K | **brotli q=11 압축 후 701 KB** |
+| (참고: models/cnn2.bin — 구버전 hidden=96, 384 KB) | | |
 
 ### 핵심 Rust 코드
 - `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리
-- `crates/garu-core/src/cnn.rs` — 2-layer 1D CNN 추론 엔진 (int8, gzip 지원)
+- `crates/garu-core/src/cnn.rs` — 2-layer 1D CNN 추론 엔진 (int8, brotli 지원, 수동 JSON 파서)
 - `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + CNN agreement 스코어링 + POS override)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
@@ -86,6 +89,9 @@
 20. **MM 관형사 후처리** → 전/그런/이런/저런/어떤/새/헌/옛/온 + 명사 → MM 교정 (0KB)
 21. **CNN 노이즈 증강 학습** → 한글 오타+띄어쓰기 변형 데이터 3배 확장, val acc 96.95%→97.51% (CNN 408KB)
 22. **ㅂ불규칙 활용 확장** → "어야" 접미사 추가, 곱다/돕다 모음조화 "와" 구분 (고와야, 도와야)
+23. **WASM 사이즈 최적화** → [profile.release] opt-level=z + lto + codegen-units=1 + panic=abort + strip + wasm-opt -Oz (327KB→266KB raw, -19%)
+24. **serde_json 제거** → cnn2 vocab 파싱을 수동 미니 파서로 교체, 의존성 제거 (raw -30KB)
+25. **gzip → brotli q=11 압축** → base.gmdl 1238→1022KB (-216KB), cnn2.bin 733→718KB (-15KB). WASM에 brotli-decompressor 추가로 +78KB. 순절감 -196KB unpacked (-9%).
 
 ## 빌드
 

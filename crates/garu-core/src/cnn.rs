@@ -6,6 +6,79 @@
 
 use std::collections::HashMap;
 
+/// Decompress brotli-compressed bytes.
+pub(crate) fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut decoder = brotli_decompressor::Decompressor::new(data, 4096);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// Minimal JSON string-array parser for `["a","b",...]` payloads.
+/// Supports `\"`, `\\`, `\/` escapes. No unicode escapes (Korean is stored as UTF-8).
+fn parse_json_string_array(s: &str) -> Result<Vec<String>, String> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    // Skip leading whitespace
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
+    if i >= bytes.len() || bytes[i] != b'[' {
+        return Err("expected '['".into());
+    }
+    i += 1;
+    let mut out = Vec::new();
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
+        if i >= bytes.len() { return Err("unexpected EOF".into()); }
+        if bytes[i] == b']' { return Ok(out); }
+        if bytes[i] != b'"' { return Err(format!("expected '\"' at {}", i)); }
+        i += 1;
+        let mut buf = Vec::new();
+        while i < bytes.len() && bytes[i] != b'"' {
+            if bytes[i] == b'\\' {
+                i += 1;
+                if i >= bytes.len() { return Err("bad escape".into()); }
+                match bytes[i] {
+                    b'"' => buf.push(b'"'),
+                    b'\\' => buf.push(b'\\'),
+                    b'/' => buf.push(b'/'),
+                    c => return Err(format!("unsupported escape \\{}", c as char)),
+                }
+                i += 1;
+            } else {
+                buf.push(bytes[i]);
+                i += 1;
+            }
+        }
+        if i >= bytes.len() { return Err("unterminated string".into()); }
+        i += 1; // skip closing "
+        out.push(String::from_utf8(buf).map_err(|_| "bad UTF-8")?);
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
+        if i >= bytes.len() { return Err("unexpected EOF".into()); }
+        match bytes[i] {
+            b',' => { i += 1; }
+            b']' => return Ok(out),
+            c => return Err(format!("expected ',' or ']' at {} got {}", i, c as char)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_json_string_array;
+    #[test] fn empty() { assert_eq!(parse_json_string_array("[]").unwrap(), Vec::<String>::new()); }
+    #[test] fn one() { assert_eq!(parse_json_string_array("[\"가\"]").unwrap(), vec!["가"]); }
+    #[test] fn many() {
+        assert_eq!(parse_json_string_array("[\"가\",\"나\",\"다\"]").unwrap(), vec!["가","나","다"]);
+    }
+    #[test] fn escapes() {
+        assert_eq!(parse_json_string_array("[\"\\\"\",\"\\\\\",\"\\/\"]").unwrap(), vec!["\"","\\","/"]);
+    }
+    #[test] fn whitespace() {
+        assert_eq!(parse_json_string_array(" [ \"a\" , \"b\" ] ").unwrap(), vec!["a","b"]);
+    }
+}
+
 /// Int8 quantized tensor with scale factor.
 struct QTensor {
     data: Vec<i8>,
@@ -41,17 +114,12 @@ pub struct Cnn2 {
 }
 
 impl Cnn2 {
-    /// Parse CNN2 binary format (supports gzip).
+    /// Parse CNN2 binary format. Accepts raw or brotli-compressed input.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        let data = if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
-            use std::io::Read;
-            let mut decoder = flate2::read::GzDecoder::new(data);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed)
-                .map_err(|e| format!("CNN gzip decompress failed: {}", e))?;
-            decompressed
-        } else {
+        let data = if data.len() >= 4 && &data[0..4] == b"CNN2" {
             data.to_vec()
+        } else {
+            decompress_brotli(data).map_err(|e| format!("CNN brotli decompress failed: {}", e))?
         };
 
         if data.len() < 13 || &data[0..4] != b"CNN2" {
@@ -124,7 +192,7 @@ impl Cnn2 {
             .map_err(|_| "Bad UTF-8 in label vocab")?;
 
         // Parse syllable vocab → char→index map
-        let syls: Vec<String> = serde_json::from_str(syl_json)
+        let syls = parse_json_string_array(syl_json)
             .map_err(|e| format!("Bad syllable vocab JSON: {}", e))?;
         let mut syl_to_idx = HashMap::with_capacity(syls.len());
         for (i, s) in syls.iter().enumerate() {
@@ -133,7 +201,7 @@ impl Cnn2 {
             }
         }
 
-        let labels: Vec<String> = serde_json::from_str(lab_json)
+        let labels = parse_json_string_array(lab_json)
             .map_err(|e| format!("Bad label vocab JSON: {}", e))?;
 
         Ok(Cnn2 {

@@ -1,6 +1,6 @@
 [package]
 name = "garu-wasm"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 
 [lib]
@@ -11,3 +11,6 @@ garu-core = { path = "../garu-core" }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--all-features"]

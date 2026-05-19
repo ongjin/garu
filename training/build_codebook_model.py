@@ -1211,10 +1211,10 @@ def main():
     else:
         print(f"  Eojeol cache: none")
 
-    # Write output with gzip compression
-    import gzip as _gzip
+    # Write output with brotli compression (q=11, max)
+    import brotli as _brotli
     raw_bytes = bytes(buf)
-    compressed = _gzip.compress(raw_bytes, 9)
+    compressed = _brotli.compress(raw_bytes, quality=11)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_PATH, "wb") as f:

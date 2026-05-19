@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.2
+
+### 패키지 사이즈 최적화 (정확도 무변화)
+
+내부 압축 / 빌드 설정 / 의존성 정리. F1 93.86% 유지 (5K 골드셋, 변화 0).
+
+**모델 파일 압축 알고리즘 교체 (gzip → brotli q=11):**
+- `base.gmdl`: 1,238 KB → 998 KB (**-216 KB**)
+- `cnn2.bin`: 733 KB → 718 KB (-15 KB)
+- 코덱 자체는 둘 다 잘 압축 가능한 영역이라 base.gmdl 절감폭이 큼
+
+**WASM 사이즈 최적화:**
+- `[profile.release] opt-level=z + lto + codegen-units=1 + panic=abort + strip`
+- `wasm-opt -Oz --all-features` 자동 적용
+- `serde_json` 의존성 제거 — CNN vocab 파싱은 수동 미니 파서로 교체
+- brotli decoder 추가 비용 약 78 KB raw / 24 KB gzip 발생했으나, 모델 절감폭이 훨씬 큼
+
+**순효과 (npm tarball unpacked):**
+- 이전: WASM 327 KB + base 1,238 KB + cnn 733 KB = 2,298 KB
+- 현재: WASM 337 KB + base 998 KB + cnn 718 KB = 2,053 KB
+- **합계 -245 KB (-10.7%)**
+
+**내부 변경:**
+- `crates/garu-core/Cargo.toml`: `flate2`, `serde_json` 제거. `brotli-decompressor` 추가.
+- `Cargo.toml` (workspace): `[profile.release]` 사이즈 최적화 추가.
+- `crates/garu-wasm/Cargo.toml`: `[package.metadata.wasm-pack.profile.release]` 설정.
+- `crates/garu-core/src/cnn.rs`: brotli decoder 호출 + 수동 JSON 파서.
+- `crates/garu-core/src/codebook.rs`: brotli decoder 호출.
+- `training/build_codebook_model.py`: gzip → brotli.
+
+**호환성:** 외부 API/동작 변화 없음. 모델 파일 포맷이 내부적으로 gzip→brotli 로 바뀌었으나 npm 패키지에 동시 번들되므로 사용자 영향 0.
+
 ## 0.7.1
 
 ### 인지·이면 reverse 버그 픽스 (어절-시작 NNG 복원)
