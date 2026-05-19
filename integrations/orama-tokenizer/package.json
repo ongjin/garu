@@ -1,6 +1,6 @@
 {
   "name": "garu-orama-tokenizer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Korean tokenizer for Orama search, powered by garu-ko (1.9MB WASM morphological analyzer)",
   "type": "module",
   "main": "dist/index.js",
@@ -31,7 +31,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "garu-ko": "^0.6.11"
+    "garu-ko": "^0.7.0"
   },
   "peerDependencies": {
     "@orama/orama": ">=2.0.0"
