@@ -109,6 +109,28 @@ Returns surface-form strings only. Lightweight alternative to `analyze()`.
 
 Free WASM memory. Instance is unusable after this call.
 
+## Integrations
+
+Drop-in tokenizers for popular JS search libraries:
+
+- **[`garu-orama-tokenizer`](https://www.npmjs.com/package/garu-orama-tokenizer)** — Korean tokenization for [Orama](https://github.com/oramasearch/orama)
+- **[`garu-minisearch-tokenizer`](https://www.npmjs.com/package/garu-minisearch-tokenizer)** — Korean tokenization for [MiniSearch](https://github.com/lucaong/minisearch)
+
+Both solve the same problem: default tokenizers don't handle Korean particles or verb inflections, so `"먹다"` never matches `"먹었다"` and `"학교"` misses `"학교에"`. These adapters run morphological analysis so the inflections fall off before indexing.
+
+```ts
+import { create, insert, search } from '@orama/orama'
+import { createTokenizer } from 'garu-orama-tokenizer'
+
+const db = await create({
+  schema: { title: 'string' },
+  components: { tokenizer: await createTokenizer() }
+})
+await insert(db, { title: '학교에서 점심을 먹었다' })
+
+await search(db, { term: '먹다' })  // ← matches
+```
+
 ## Acknowledgments
 
 The morphological analysis model is trained on the **NIKL Morpheme-Tagged Corpus (v1.1)** provided by the National Institute of Korean Language (국립국어원). The model contains only derived frequency statistics, not original text.
