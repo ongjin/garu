@@ -25,3 +25,11 @@ js/pkg/snippets/
 # Internal docs
 docs/superpowers/
 .claude/
+
+# CNN rerank experiment scripts (local research, not part of build)
+crates/garu-core/examples/dump_topk.rs
+training/neural/error_analysis.py
+training/neural/final_report.py
+training/neural/rerank_simulator.py
+training/neural/train_variants.py
+training/neural/variants.py
