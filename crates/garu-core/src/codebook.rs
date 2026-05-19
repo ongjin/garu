@@ -2950,6 +2950,43 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Promote `<noun> + 인가/NNG` (same eojeol, eojeol-final) →
+    /// `<noun> + 이/VCP + ㄴ가/EF`. The 인가/NNG noun (認可, license/
+    /// authorization) is rare when glued to a preceding noun in the same
+    /// eojeol; the copula reading dominates in NIKL MP. Eojeol-end gating
+    /// preserves `조선시대 인가가` (separate eojeols, real noun usage).
+    fn fix_noun_inga_copula(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let prev_is_noun = matches!(tokens[i].pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
+                | Pos::SN | Pos::SL | Pos::XSN);
+            let curr_is_inga = tokens[i + 1].pos == Pos::NNG
+                && tokens[i + 1].text == "인가";
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let eojeol_end = i + 2 == tokens.len()
+                || tokens[i + 2].start != tokens[i + 1].start
+                || tokens[i + 2].pos == Pos::SF;
+            if prev_is_noun && curr_is_inga && same_eojeol && eojeol_end {
+                let span_start = tokens[i + 1].start;
+                let span_end = tokens[i + 1].end;
+                tokens.splice((i + 1)..=(i + 1), vec![
+                    Token {
+                        text: "이".to_string(), pos: Pos::VCP,
+                        start: span_start, end: span_end, score: None,
+                    },
+                    Token {
+                        text: "ㄴ가".to_string(), pos: Pos::EF,
+                        start: span_start, end: span_end, score: None,
+                    },
+                ]);
+                i += 3;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Recover and merge 해요체 endings.
     ///
     /// Two passes (eojeol-final, same eojeol):
@@ -3601,6 +3638,7 @@ impl CodebookAnalyzer {
         Self::fix_ec_eos(&mut tokens);
         Self::fix_imperative_ra(&mut tokens);
         Self::fix_vcp(&mut tokens);
+        Self::fix_noun_inga_copula(&mut tokens);
         Self::fix_nde_merge(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
         Self::fix_mag_wa_vv(&mut tokens);
@@ -3721,6 +3759,7 @@ impl CodebookAnalyzer {
             Self::fix_imperative_ra(&mut tokens);
             Self::fix_oneora(&mut tokens);
             Self::fix_vcp(&mut tokens);
+            Self::fix_noun_inga_copula(&mut tokens);
             Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);

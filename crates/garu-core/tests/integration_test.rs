@@ -558,3 +558,60 @@ fn test_issue2_oneora_recovery() {
         "회사 오너가 와: 오너/NNG must be preserved"
     );
 }
+
+#[test]
+fn test_noun_inga_copula_split() {
+    let analyzer = load_analyzer();
+
+    // 눈물인가 (eojeol-final, no punctuation) → 눈물/NNG + 이/VCP + ㄴ가/EF
+    let result = analyzer.analyze("눈물인가");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "눈물인가 must split into 이/VCP: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "눈물인가 must split into ㄴ가/EF: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "인가" && *p == Pos::NNG),
+        "눈물인가 must not keep 인가/NNG: {:?}", pairs
+    );
+
+    // 학생인가 선생인가 → both 인가 split
+    let result = analyzer.analyze("학생인가 선생인가");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    let vcp_count = pairs.iter().filter(|(t, p)| *t == "이" && *p == Pos::VCP).count();
+    let ef_count = pairs.iter().filter(|(t, p)| *t == "ㄴ가" && *p == Pos::EF).count();
+    assert_eq!(vcp_count, 2, "학생인가 선생인가: expected 2 VCP, got {:?}", pairs);
+    assert_eq!(ef_count, 2, "학생인가 선생인가: expected 2 EF, got {:?}", pairs);
+
+    // Regression: real noun 인가 (認可) followed by JKS must stay NNG
+    let result = analyzer.analyze("조선시대 인가가 필요하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인가" && *p == Pos::NNG),
+        "조선시대 인가가: 인가/NNG (real noun) must be preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "조선시대 인가가: must not produce ㄴ가/EF: {:?}", pairs
+    );
+
+    // Regression: already-correct case with SF punctuation should remain correct
+    let result = analyzer.analyze("여기가 학교인가?");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "여기가 학교인가?: still produces 이/VCP: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "여기가 학교인가?: still produces ㄴ가/EF: {:?}", pairs
+    );
+}
