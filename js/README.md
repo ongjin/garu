@@ -2,7 +2,7 @@
 
 **Browser-native Korean morphological analyzer.** No server required.
 
-- **1.6MB model** bundled in npm package (no CDN needed)
+- **1.9MB model** bundled in npm package (no CDN needed)
 - **93KB WASM** engine -- runs in any modern browser
 - **F1 91.1%** on human-verified gold testset (vs. Kiwi 89.7%)
 - **< 1ms** inference per sentence
@@ -13,7 +13,7 @@
 
 |  | Kiwi | MeCab-ko | garu-ko |
 |---|---|---|---|
-| Model size | ~40MB | ~50MB | **1.6MB** |
+| Model size | ~40MB | ~50MB | **1.9MB** |
 | npm package | No | No | **Yes** |
 | F1 (gold testset) | 89.7% | — | **91.1%** |
 | F1 (NIKL MP) | 87.9% | ~85% | **93.7%** |
