@@ -10,6 +10,7 @@ __pycache__/
 # Training artifacts (large files, not needed for usage)
 training/*.jsonl
 training/**/*.jsonl
+!training/gold_testset/*.jsonl
 training/**/*.pt
 training/checkpoints/
 training/codebook_data/
