@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.3
+
+### CNN 게이팅 + WASM SIMD로 속도 11× 가속 (정확도 무변화 수준)
+
+5K 골드 테스트셋 1,000문장 벤치 기준 **81 → 951 sent/s** (1.09 ms/sent), Kiwi 대비 격차 87× → 약 6.7×로 좁힘. F1 영향은 noise 수준.
+
+**Margin gating (`crates/garu-core/src/model.rs`):**
+- Viterbi top-1 vs top-2 스코어 마진이 `2.0` 이상이면 CNN 호출 자체를 건너뜀
+- 5K 골드 시뮬레이션 결과: 어절 81%가 이 조건을 통과, CNN이 결과를 바꾸는 케이스는 4.4%(222문장)에 불과
+- 게이팅 자체로 8.2× 가속 (81 → 660 sent/s)
+
+**CNN 가중치 처리 변경 (`crates/garu-core/src/cnn.rs`):**
+- 로드 시 int8 → f32 dequant (이전엔 inner loop마다 변환)
+- conv 가중치 레이아웃을 `[oc, ic, ks]` → `[oc, ks, ic]` 로 transpose하여 `ic` 차원이 contiguous — SIMD load 가능
+- wasm32 + `simd128` 타깃에서 `f32x4_mul / f32x4_add` intrinsics로 dot product 가속
+
+**빌드 설정 (`.cargo/config.toml`):**
+- `[target.wasm32-unknown-unknown] rustflags = ["-C", "target-feature=+simd128"]`
+- 브라우저 호환성: Chrome 91+ / Safari 16.4+ / Firefox 89+ / Node 16.4+ (2026 기준 거의 100% 커버)
+
+**정확도 (5K 골드 / 2K NIKL MP):**
+- Gold F1: 0.9389 → **0.9386** (Δ -0.0003, 시뮬레이션 예측치와 일치)
+- NIKL F1: 0.9400 → **0.9394** (Δ -0.0006)
+- 도메인별 최대 손실: 일상 -0.09%p, SNS -0.05%p (대부분 noise floor)
+
+**크기 / 메모리:**
+- WASM raw: 337 KB → 344 KB (+7 KB, SIMD intrinsics + 새 conv 코드)
+- 모델 파일(disk/network): 변화 없음
+- 런타임 RAM: 약 +3.6 MB (int8 가중치를 f32로 dequant해 보유)
+
+**호환성:** 외부 API/동작 변화 없음.
+
 ## 0.7.2
 
 ### 패키지 사이즈 최적화 (정확도 무변화)
