@@ -3133,6 +3133,48 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// 구어 over-segment 회복: stem + (EC|EF "X") + JX("요") → stem + EF("X요").
+    /// gold v15k 양방향 빈도 검증으로 통합형 비율 ≥98%인 surface만 화이트리스트.
+    /// (구요·는데요는 양립 분포라 제외)
+    fn fix_yo_jx_merge(tokens: &mut Vec<Token>) {
+        const WHITELIST: &[&str] = &[
+            "거든", "나", "은데", "네", "께", "니깐",
+            "잖아", "으니까", "군", "다면서", "을게", "랄까",
+        ];
+
+        let mut i = 0;
+        while i + 2 < tokens.len() {
+            let stem_pos = tokens[i].pos;
+            let mid_pos = tokens[i + 1].pos;
+            let mid_text = tokens[i + 1].text.clone();
+            let yo_pos = tokens[i + 2].pos;
+            let yo_text = tokens[i + 2].text.clone();
+            let same_eojeol = tokens[i].start == tokens[i + 1].start
+                && tokens[i + 1].start == tokens[i + 2].start;
+            let eojeol_end = i + 3 == tokens.len()
+                || tokens[i + 3].start != tokens[i + 2].start
+                || tokens[i + 3].pos == Pos::SF;
+            let stem_ok = matches!(stem_pos,
+                Pos::VV | Pos::VA | Pos::VX | Pos::EP | Pos::XSV | Pos::XSA);
+            let mid_ok = (mid_pos == Pos::EC || mid_pos == Pos::EF)
+                && WHITELIST.contains(&mid_text.as_str());
+            let yo_ok = yo_pos == Pos::JX && yo_text == "요";
+            if same_eojeol && eojeol_end && stem_ok && mid_ok && yo_ok {
+                let merged = format!("{}요", mid_text);
+                let new_start = tokens[i + 1].start;
+                let new_end = tokens[i + 2].end;
+                tokens[i + 1] = Token {
+                    text: merged, pos: Pos::EF,
+                    start: new_start, end: new_end, score: None,
+                };
+                tokens.remove(i + 2);
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Promote `<adverb>` + 야/JX (eojeol-final) → MAG + 이/VCP + 야/EF.
     /// Handles colloquial copula-elided endings (별로야, 진짜야, 정말야)
     /// that the lattice never proposes when no sentence-final punctuation
@@ -3831,6 +3873,7 @@ impl CodebookAnalyzer {
             Self::fix_vcp_eojeol_start_recovery(&mut tokens);
             Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
+            Self::fix_yo_jx_merge(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);
             Self::fix_myeoch_si_ya(&mut tokens);
             Self::fix_sn_counter_copula(&mut tokens);
@@ -3906,6 +3949,96 @@ mod tests {
         assert_eq!(runs2[1], (4, 8, Pos::SL));   // BM25
         assert_eq!(runs2[2], (9, 15, Pos::SL));  // GPT-4o
         assert_eq!(runs2[3], (16, 20, Pos::SN)); // 2024
+    }
+
+    fn tok(text: &str, pos: Pos, start: usize, end: usize) -> Token {
+        Token { text: text.into(), pos, start, end, score: None }
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_geodeun() {
+        // 하/VV + 거든/EF + 요/JX + ?/SF → 하/VV + 거든요/EF + ?/SF
+        let mut tokens = vec![
+            tok("하", Pos::VV, 0, 4),
+            tok("거든", Pos::EF, 0, 4),
+            tok("요", Pos::JX, 0, 4),
+            tok("?", Pos::SF, 4, 5),
+        ];
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[1].text, "거든요");
+        assert_eq!(tokens[1].pos, Pos::EF);
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_nayo() {
+        // 되/VV + 나/EF + 요/JX (eojeol-final) → 되/VV + 나요/EF
+        let mut tokens = vec![
+            tok("되", Pos::VV, 0, 3),
+            tok("나", Pos::EF, 0, 3),
+            tok("요", Pos::JX, 0, 3),
+        ];
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[1].text, "나요");
+        assert_eq!(tokens[1].pos, Pos::EF);
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_eundae() {
+        // 많/VA + 은데/EC + 요/JX → 많/VA + 은데요/EF
+        let mut tokens = vec![
+            tok("많", Pos::VA, 0, 4),
+            tok("은데", Pos::EC, 0, 4),
+            tok("요", Pos::JX, 0, 4),
+        ];
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[1].text, "은데요");
+        assert_eq!(tokens[1].pos, Pos::EF);
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_skips_guyo() {
+        // 좋/VA + 구/EC + 요/JX — 구는 whitelist 제외 (양립 분포)
+        let mut tokens = vec![
+            tok("좋", Pos::VA, 0, 3),
+            tok("구", Pos::EC, 0, 3),
+            tok("요", Pos::JX, 0, 3),
+        ];
+        let before = tokens.len();
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), before);
+        assert_eq!(tokens[1].text, "구");
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_skips_neundae() {
+        // 있/VV + 는데/EC + 요/JX — 는데는 분리형이 우세, 제외
+        let mut tokens = vec![
+            tok("있", Pos::VV, 0, 4),
+            tok("는데", Pos::EC, 0, 4),
+            tok("요", Pos::JX, 0, 4),
+        ];
+        let before = tokens.len();
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), before);
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_not_eojeol_final() {
+        // 거든/EF + 요/JX 뒤에 다른 morpheme(SF 아님)이 같은 eojeol이면 skip
+        // (이 패턴은 실제로는 드물지만, 가드 동작 확인)
+        let mut tokens = vec![
+            tok("하", Pos::VV, 0, 5),
+            tok("거든", Pos::EF, 0, 5),
+            tok("요", Pos::JX, 0, 5),
+            tok("X", Pos::NNG, 0, 5), // same eojeol, not SF
+        ];
+        let before_len = tokens.len();
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), before_len);
+        assert_eq!(tokens[1].text, "거든");
     }
 
     #[test]
