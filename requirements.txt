@@ -1,0 +1,3 @@
+kiwipiepy>=0.21
+python-mecab-ko
+tqdm
