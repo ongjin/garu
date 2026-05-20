@@ -2578,6 +2578,17 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Normalize colloquial 1인칭 겸칭 '제' → '저' (NP).
+    /// Other 거/그거/이거/요거 variants are kept as-is because both forms
+    /// appear naturally in the gold (e.g., 그거/NP appears 2x more than 그것/NP).
+    fn fix_colloquial_pronouns(tokens: &mut [Token]) {
+        for token in tokens.iter_mut() {
+            if token.text == "제" && token.pos == Pos::NP {
+                token.text = "저".to_string();
+            }
+        }
+    }
+
     /// Fix JKS → JKC for 가/이 before 되다/아니다.
     fn fix_jkc(tokens: &mut [Token]) {
         for i in 0..tokens.len() {
@@ -3694,6 +3705,7 @@ impl CodebookAnalyzer {
         Self::fix_imperative_ra(&mut tokens);
         Self::fix_vcp(&mut tokens);
         Self::fix_noun_inga_copula(&mut tokens);
+        Self::fix_colloquial_pronouns(&mut tokens);
         Self::fix_vcp_eojeol_start_recovery(&mut tokens);
         Self::fix_nde_merge(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
@@ -3829,6 +3841,7 @@ impl CodebookAnalyzer {
             Self::fix_mag_wa_vv(&mut tokens);
             Self::fix_bwa_auxiliary(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
+            Self::fix_colloquial_pronouns(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
         }).collect()
