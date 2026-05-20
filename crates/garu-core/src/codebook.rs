@@ -3175,6 +3175,57 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// 추가 어미 통합. gold v9k 양방향 빈도 검증으로 ≥95% 통합형인 쌍만 화이트리스트.
+    /// (어 EC + 도 JX → 어도 EC, 었 EP + 었 EP → 었었 EP 등)
+    fn fix_extra_endings(tokens: &mut Vec<Token>) {
+        // (s1, p1, s2, p2) → (combined_surface, combined_pos)
+        const PAIRS: &[((&str, Pos), (&str, Pos), (&str, Pos))] = &[
+            (("어",   Pos::EC), ("도",   Pos::JX), ("어도",   Pos::EC)),
+            (("아",   Pos::EC), ("도",   Pos::JX), ("아도",   Pos::EC)),
+            (("어야", Pos::EC), ("지",   Pos::EC), ("어야지", Pos::EF)),
+            (("다",   Pos::EF), ("더라", Pos::EF), ("다더라", Pos::EF)),
+            (("었",   Pos::EP), ("었",   Pos::EP), ("었었",   Pos::EP)),
+            (("ㄴ가", Pos::EF), ("요",   Pos::JX), ("ㄴ가요", Pos::EF)),
+            (("어",   Pos::EC), ("라",   Pos::EF), ("어라",   Pos::EF)),
+            (("지만", Pos::EC), ("은",   Pos::JX), ("지만은", Pos::EC)),
+            (("ㄹ게", Pos::EF), ("요",   Pos::JX), ("ㄹ게요", Pos::EF)),
+            (("더군", Pos::EF), ("요",   Pos::JX), ("더군요", Pos::EF)),
+            (("을래", Pos::EF), ("요",   Pos::JX), ("을래요", Pos::EF)),
+            (("지만", Pos::EC), ("요",   Pos::JX), ("지만요", Pos::EF)),
+            (("ㄴ다", Pos::EF), ("더라", Pos::EF), ("ㄴ다더라", Pos::EF)),
+        ];
+
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let cur_text = tokens[i].text.as_str();
+            let cur_pos = tokens[i].pos;
+            let nxt_text = tokens[i + 1].text.as_str();
+            let nxt_pos = tokens[i + 1].pos;
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let mut matched = false;
+            if same_eojeol {
+                for ((s1, p1), (s2, p2), (sc, pc)) in PAIRS {
+                    if cur_text == *s1 && cur_pos == *p1
+                        && nxt_text == *s2 && nxt_pos == *p2
+                    {
+                        let new_start = tokens[i].start;
+                        let new_end = tokens[i + 1].end;
+                        tokens[i] = Token {
+                            text: (*sc).to_string(), pos: *pc,
+                            start: new_start, end: new_end, score: None,
+                        };
+                        tokens.remove(i + 1);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if !matched {
+                i += 1;
+            }
+        }
+    }
+
     /// Promote `<adverb>` + 야/JX (eojeol-final) → MAG + 이/VCP + 야/EF.
     /// Handles colloquial copula-elided endings (별로야, 진짜야, 정말야)
     /// that the lattice never proposes when no sentence-final punctuation
@@ -3874,6 +3925,7 @@ impl CodebookAnalyzer {
             Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
             Self::fix_yo_jx_merge(&mut tokens);
+            Self::fix_extra_endings(&mut tokens);
             Self::fix_mag_copula_ya(&mut tokens);
             Self::fix_myeoch_si_ya(&mut tokens);
             Self::fix_sn_counter_copula(&mut tokens);
@@ -4039,6 +4091,46 @@ mod tests {
         CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
         assert_eq!(tokens.len(), before_len);
         assert_eq!(tokens[1].text, "거든");
+    }
+
+    #[test]
+    fn test_fix_extra_endings_eodo() {
+        let mut tokens = vec![
+            tok("먹", Pos::VV, 0, 3),
+            tok("어", Pos::EC, 0, 3),
+            tok("도", Pos::JX, 0, 3),
+        ];
+        CodebookAnalyzer::fix_extra_endings(&mut tokens);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[1].text, "어도");
+        assert_eq!(tokens[1].pos, Pos::EC);
+    }
+
+    #[test]
+    fn test_fix_extra_endings_eosseosseo() {
+        let mut tokens = vec![
+            tok("먹", Pos::VV, 0, 3),
+            tok("었", Pos::EP, 0, 3),
+            tok("었", Pos::EP, 0, 3),
+            tok("다", Pos::EF, 0, 3),
+        ];
+        CodebookAnalyzer::fix_extra_endings(&mut tokens);
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[1].text, "었었");
+        assert_eq!(tokens[1].pos, Pos::EP);
+    }
+
+    #[test]
+    fn test_fix_extra_endings_skip_cross_eojeol() {
+        // 다른 어절 경계면 합치지 않음
+        let mut tokens = vec![
+            tok("먹", Pos::VV, 0, 3),
+            tok("어", Pos::EC, 0, 3),
+            tok("도", Pos::JX, 4, 5),  // start 다름
+        ];
+        let before_len = tokens.len();
+        CodebookAnalyzer::fix_extra_endings(&mut tokens);
+        assert_eq!(tokens.len(), before_len);
     }
 
     #[test]
