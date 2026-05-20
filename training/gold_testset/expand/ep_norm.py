@@ -22,24 +22,37 @@ COMPAT_TO_COMBINING = {
     "ㅍ": "ᇁ", "ㅎ": "ᇂ",
 }
 
-# 모음조화: 음성(어/었/워/웠) → 양성(아/았/와/왔) (EC/EP 한정)
-VOWEL_HARMONY_EC_EP = {
+# 모음조화 시작 음절 매핑 (어/었/워/웠 등) — EC/EP/EF 한정
+VOWEL_HARMONY_PREFIX = {
     "어": "아", "었": "았", "워": "와", "웠": "왔",
 }
 
 # 태그 하위분류 통일
 TAG_NORM = {
     "SSO": "SS", "SSC": "SS",  # 묶음표 열림/닫힘
+    "SS": "SS",
 }
 
 
+def _convert_leading_jamo(surface: str) -> str:
+    """첫 글자가 호환 자모면 결합 자모로 치환."""
+    if surface and surface[0] in COMPAT_TO_COMBINING:
+        return COMPAT_TO_COMBINING[surface[0]] + surface[1:]
+    return surface
+
+
+def _apply_vowel_harmony(surface: str, pos: str) -> str:
+    """EC/EP/EF의 모음조화 prefix를 양성으로 통일."""
+    if pos not in ("EC", "EP", "EF"):
+        return surface
+    if surface and surface[0] in VOWEL_HARMONY_PREFIX:
+        return VOWEL_HARMONY_PREFIX[surface[0]] + surface[1:]
+    return surface
+
+
 def _norm_surface(surface: str, pos: str) -> str:
-    # 자모 통일 (단일 호환 자모)
-    if len(surface) == 1 and surface in COMPAT_TO_COMBINING:
-        return COMPAT_TO_COMBINING[surface]
-    # 모음조화 (EC/EP 한정)
-    if pos in ("EC", "EP") and surface in VOWEL_HARMONY_EC_EP:
-        return VOWEL_HARMONY_EC_EP[surface]
+    surface = _convert_leading_jamo(surface)
+    surface = _apply_vowel_harmony(surface, pos)
     return surface
 
 
@@ -102,5 +115,27 @@ if __name__ == "__main__":
     big1 = [["가", "VV"], ["ㄴ", "ETM"], ["수", "NNB"], ["있", "VA"], ["었", "EP"], ["다", "EF"], ["”", "SS"]]
     big2 = [["가", "VV"], ["ᆫ", "ETM"], ["수", "NNB"], ["있", "VA"], ["았", "EP"], ["다", "EF"], ["”", "SSC"]]
     assert normalize_ep_morphemes(big1) == normalize_ep_morphemes(big2)
+
+    # 다음절 어미 leading jamo + 모음조화: ㄴ다 / ㅂ니다 / 어야 / 어서
+    m1 = [["하", "VV"], ["ㄴ다", "EF"]]
+    m2 = [["하", "VV"], ["ᆫ다", "EF"]]
+    assert normalize_ep_morphemes(m1) == normalize_ep_morphemes(m2)
+
+    n1 = [["하", "VV"], ["ㅂ니다", "EF"]]
+    n2 = [["하", "VV"], ["ᆸ니다", "EF"]]
+    assert normalize_ep_morphemes(n1) == normalize_ep_morphemes(n2)
+
+    o1 = [["가", "VV"], ["아야", "EC"]]
+    o2 = [["가", "VV"], ["어야", "EC"]]
+    assert normalize_ep_morphemes(o1) == normalize_ep_morphemes(o2)
+
+    p1 = [["가", "VV"], ["아서", "EC"]]
+    p2 = [["가", "VV"], ["어서", "EC"]]
+    assert normalize_ep_morphemes(p1) == normalize_ep_morphemes(p2)
+
+    # SSO도 SS와 매치
+    so1 = [["“", "SS"]]
+    so2 = [["“", "SSO"]]
+    assert normalize_ep_morphemes(so1) == normalize_ep_morphemes(so2)
 
     print("OK")
