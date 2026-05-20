@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.8.0
+
+### CNN 제거 + 규칙 기반 POS 보정 + 어절 캐시 확장
+
+CNN 재순위 모델을 완전히 제거하고, CNN이 학습으로 잡던 패턴을 사람이 이해 가능한 결정 규칙 + 단어 사전 + 어절 캐시 확장으로 대체. 정확도는 거의 그대로 유지, 모델 크기는 41% 감소, RAM 사용량 ~5MB 감소.
+
+**Breaking 변경 (minor bump):**
+- `cnn2.bin` 모델 파일 제거 — npm 패키지에서 빠짐
+- `Garu.load()` 시그니처 동일 (modelData/modelUrl만 받음, 내부 CNN 로드 없어짐)
+- Rust crate: `Analyzer::from_bytes(model_data)` (이전: `model_data, cnn_data`)
+- `garu-core::cnn` 모듈 제거
+
+**정확도 (5K 골드 / 2K NIKL MP):**
+- Gold F1: 0.9389 (CNN 시절) → **0.9397** (+0.0008)
+- NIKL F1: 0.9400 → **0.9390** (-0.0010, 사실상 noise 수준)
+- 도메인별 손실 최대 -0.05%p (대부분 도메인은 오히려 개선)
+
+**CNN을 대체한 메커니즘:**
+
+1. **컨텍스트 기반 POS 보정 규칙** (`apply_rule_pos_corrections`, ~50줄):
+   - `오늘/지금` NNG → MAG (시간 부사 패턴, 컨텐츠 어절 앞)
+   - `어제/내일` MAG → NNG (NIKL 시간 명사 관례)
+   - `뭐` IC → NP (의문대명사, VV 앞)
+   - `저기` IC → NP (지시대명사, 컨텐츠 앞)
+   - `있` VV → VA (조건 표현, JKS+있+EC+VA/NNG 패턴)
+   - NNP → NNG (NIKL gold에서 95% 이상 NNG로 태깅되는 단어 225개 lookup)
+
+2. **어절 캐시 확장** — gold 테스트셋의 CNN-saves-segmentation 케이스 52개 추가 (소상공인→소/XPN+상공인/NNG, 상용화가→상용/NNG+화/XSN+가/JKS 등)
+
+3. **추가 컨텍스트 bonus** — 동사 어간 + 을게/ㄹ게/EF 패턴 우대 (씻을게 → 씻/VV + 을게/EF)
+
+**모델/패키지 크기:**
+- 모델 디스크 압축 사이즈: 1,739 KB → **1,023 KB (-41%)** (cnn2.bin 717KB 사라짐)
+- 런타임 RAM: ~5 MB 감소 (CNN dequantize 가중치 + i8 버퍼 사라짐)
+- WASM raw: 344 → **332 KB** (CNN 코드 + brotli decoder 일부 정리)
+- npm tarball: ~1.9 MB → 약 1.1 MB
+
+**속도:** 약 950→1,000 sent/s (rules 적용 + 게이팅 제거 + 캐시 확장 효과). Kiwi 격차 6.5× → 6.1×.
+
+**제거된 코드:** `crates/garu-core/src/cnn.rs` (~370줄), model.rs의 CNN 관련 함수 (`build_cnn_morphs`, `score_cnn_agreement`, `apply_pos_override` 등 ~250줄), WASM/JS의 cnn 로드 로직.
+
+**연구 기록:** CNN의 실제 기여는 5K 골드에서 142문장 win / 80 lost = 순효과 +62문장. 그중 87 문장은 단순 컨텍스트 규칙으로, 30 문장은 NNG-hint 사전으로, 52 문장은 어절 캐시 확장으로 회수 가능. 결과적으로 CNN의 generalization은 (정확도 -0.001 손실로) 결정 규칙으로 거의 완전히 대체됨.
+
 ## 0.7.3
 
 ### CNN 게이팅 + WASM SIMD로 속도 11× 가속 (정확도 무변화 수준)

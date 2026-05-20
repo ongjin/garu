@@ -45,8 +45,8 @@ pub struct GaruWasm {
 #[wasm_bindgen]
 impl GaruWasm {
     #[wasm_bindgen(constructor)]
-    pub fn new(model_data: &[u8], cnn_data: &[u8]) -> Result<GaruWasm, JsError> {
-        let analyzer = Analyzer::from_bytes(model_data, cnn_data)
+    pub fn new(model_data: &[u8]) -> Result<GaruWasm, JsError> {
+        let analyzer = Analyzer::from_bytes(model_data)
             .map_err(|e| JsError::new(&e))?;
         Ok(GaruWasm { analyzer })
     }

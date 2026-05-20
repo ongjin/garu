@@ -47,10 +47,7 @@ export class Garu extends GaruBase {
       modelBytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
-    const cnnBuf = await readFile(join(dir, '..', 'models', 'cnn2.bin'));
-    const cnnBytes = new Uint8Array(cnnBuf.buffer, cnnBuf.byteOffset, cnnBuf.byteLength);
-
-    const wasmInstance = new wasmModule.GaruWasm(modelBytes, cnnBytes);
-    return new Garu(wasmInstance, modelBytes.byteLength + cnnBytes.byteLength);
+    const wasmInstance = new wasmModule.GaruWasm(modelBytes);
+    return new Garu(wasmInstance, modelBytes.byteLength);
   }
 }

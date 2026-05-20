@@ -48,14 +48,7 @@ export class Garu extends GaruBase {
       modelBytes = new Uint8Array(await response.arrayBuffer());
     }
 
-    const cnnUrl = new URL('../models/cnn2.bin', import.meta.url).href;
-    const cnnResp = await fetch(cnnUrl);
-    if (!cnnResp.ok) {
-      throw new Error(`Failed to fetch CNN model from ${cnnUrl}: ${cnnResp.status}`);
-    }
-    const cnnBytes = new Uint8Array(await cnnResp.arrayBuffer());
-
-    const wasmInstance = new wasmModule.GaruWasm(modelBytes, cnnBytes);
-    return new Garu(wasmInstance, modelBytes.byteLength + cnnBytes.byteLength);
+    const wasmInstance = new wasmModule.GaruWasm(modelBytes);
+    return new Garu(wasmInstance, modelBytes.byteLength);
   }
 }

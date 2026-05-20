@@ -4,6 +4,15 @@ use std::collections::HashMap;
 use crate::trie::Dict;
 use crate::types::{AnalyzeResult, Pos, Token};
 
+/// Decompress brotli-compressed bytes (used for GMDL model files).
+fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut decoder = brotli_decompressor::Decompressor::new(data, 4096);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -288,7 +297,7 @@ impl CodebookAnalyzer {
         if data.len() >= 4 && &data[0..4] == b"GMDL" {
             return Self::from_bytes_inner(data);
         }
-        let decompressed = crate::cnn::decompress_brotli(data)
+        let decompressed = decompress_brotli(data)
             .map_err(|e| format!("Brotli decompression failed: {}", e))?;
         Self::from_bytes_inner(&decompressed)
     }

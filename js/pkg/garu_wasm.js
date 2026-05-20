@@ -56,16 +56,13 @@ export class GaruWasm {
     }
     /**
      * @param {Uint8Array} model_data
-     * @param {Uint8Array} cnn_data
      */
-    constructor(model_data, cnn_data) {
+    constructor(model_data) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passArray8ToWasm0(model_data, wasm.__wbindgen_export);
             const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passArray8ToWasm0(cnn_data, wasm.__wbindgen_export);
-            const len1 = WASM_VECTOR_LEN;
-            wasm.garuwasm_new(retptr, ptr0, len0, ptr1, len1);
+            wasm.garuwasm_new(retptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -121,7 +118,7 @@ export class GaruWasm {
     }
 }
 if (Symbol.dispose) GaruWasm.prototype[Symbol.dispose] = GaruWasm.prototype.free;
-import * as import1 from "./snippets/garu-core-996c7dd407e72272/inline0.js"
+import * as import1 from "./snippets/garu-core-3f8b0a7607e8c8ca/inline0.js"
 
 function __wbg_get_imports() {
     const import0 = {
@@ -180,7 +177,7 @@ function __wbg_get_imports() {
     return {
         __proto__: null,
         "./garu_wasm_bg.js": import0,
-        "./snippets/garu-core-996c7dd407e72272/inline0.js": import1,
+        "./snippets/garu-core-3f8b0a7607e8c8ca/inline0.js": import1,
     };
 }
 

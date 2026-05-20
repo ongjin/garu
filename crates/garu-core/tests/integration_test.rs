@@ -3,10 +3,8 @@ use garu_core::types::Pos;
 
 fn load_analyzer() -> Analyzer {
     let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
-    let cnn_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn2.bin");
     let model_data = std::fs::read(model_path).expect("Failed to read model");
-    let cnn_data = std::fs::read(cnn_path).expect("Failed to read CNN model");
-    Analyzer::from_bytes(&model_data, &cnn_data).expect("Failed to load analyzer")
+    Analyzer::from_bytes(&model_data).expect("Failed to load analyzer")
 }
 
 #[test]
@@ -206,7 +204,7 @@ fn test_contextual_reranking_everyday_and_sns() {
         &analyzer,
         "오늘 점심 뭐 먹을까?",
         &[
-            ("오늘", Pos::NNG),
+            ("오늘", Pos::MAG),
             ("점심", Pos::NNG),
             ("뭐", Pos::NP),
             ("먹", Pos::VV),

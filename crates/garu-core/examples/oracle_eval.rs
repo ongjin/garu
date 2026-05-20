@@ -153,10 +153,8 @@ fn main() {
 
     let model_path =
         std::env::var("GARU_MODEL").unwrap_or_else(|_| "models/codebook.gmdl".to_string());
-    let cnn_path = std::env::var("GARU_CNN").unwrap_or_else(|_| "models/cnn2.bin".to_string());
     let model_data = fs::read(&model_path).expect("failed to read model");
-    let cnn_data = fs::read(&cnn_path).expect("failed to read CNN model");
-    let analyzer = Analyzer::from_bytes(&model_data, &cnn_data).expect("failed to load analyzer");
+    let analyzer = Analyzer::from_bytes(&model_data).expect("failed to load analyzer");
 
     let file = fs::File::open(gold_path).expect("failed to open gold jsonl");
     let reader = BufReader::new(file);

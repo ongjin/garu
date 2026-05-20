@@ -6,7 +6,7 @@ export class GaruWasm {
     [Symbol.dispose](): void;
     analyze(text: string): any;
     analyze_topn(text: string, n: number): any;
-    constructor(model_data: Uint8Array, cnn_data: Uint8Array);
+    constructor(model_data: Uint8Array);
     tokenize(text: string): any;
     static version(): string;
 }
@@ -18,7 +18,7 @@ export interface InitOutput {
     readonly __wbg_garuwasm_free: (a: number, b: number) => void;
     readonly garuwasm_analyze: (a: number, b: number, c: number, d: number) => void;
     readonly garuwasm_analyze_topn: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly garuwasm_new: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly garuwasm_new: (a: number, b: number, c: number) => void;
     readonly garuwasm_tokenize: (a: number, b: number, c: number, d: number) => void;
     readonly garuwasm_version: (a: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
