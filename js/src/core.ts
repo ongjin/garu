@@ -138,7 +138,7 @@ export class GaruBase {
     return {
       version: this._wasm.constructor.version(),
       size: this._modelSize,
-      accuracy: 0.939,
+      accuracy: 0.94,
     };
   }
 
