@@ -34,9 +34,17 @@ def collect(pairs_path: str, batches_dir: str) -> list[dict]:
                            "source": "missing-batch-result"})
                 continue
             r = id_to_result[di_index]
+            morphemes = r.get("morphemes")
+            if morphemes is None:
+                if r.get("choice") == "garu":
+                    morphemes = pair["garu"]
+                elif r.get("choice") == "kiwi":
+                    morphemes = pair["kiwi"]
+                else:
+                    morphemes = pair["garu"]
             out.append({
                 **pair,
-                "morphemes": r["morphemes"],
+                "morphemes": morphemes,
                 "confidence": "reviewed",
                 "source": f"garu+kiwi+claude(선택:{r['choice']})",
                 "reason": r.get("reason", ""),
