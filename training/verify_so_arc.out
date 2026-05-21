@@ -1,0 +1,48 @@
+Total gold sentences: 8000
+Sentences with ~/SO in gold: 209
+
+Result: hit=20/209 (9.6%), miss=189
+
+Decision threshold: hit rate ≥ 90% → skip Task 12. Current: 9.6%
+
+First 10 miss samples:
+
+  TEXT: 어~ 어~ 저는 배불리 먹습니다.
+  GOLD SO: [['~', 'SO'], ['~', 'SO']]
+  PRED:    []
+
+  TEXT: 저 이런 요리 저~ 뭐 푸아그라나
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 뭐~ 사장이든. 뭐~ 누구든지간에.
+  GOLD SO: [['~', 'SO'], ['~', 'SO']]
+  PRED:    []
+
+  TEXT: 아~ 그런 측면에서 어~ 저는 뭐~ 중장기적으로 볼 때
+  GOLD SO: [['~', 'SO'], ['~', 'SO'], ['~', 'SO']]
+  PRED:    []
+
+  TEXT: 어~ 노력을 많이 하고 있는데요.
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 이제 국어라고 하는 것도 문화부에서 어~ 문화라고 생각을 하고
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 선생님께서 그~ 이름을 정하신 게
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 무엇보다도 학생들이 어~ 조금 더 미래나 사회에 대해서
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 그~ 세금 일년에 세금만
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
+
+  TEXT: 그러다가 이제 우리가 인제 그~ 다시
+  GOLD SO: [['~', 'SO']]
+  PRED:    []
