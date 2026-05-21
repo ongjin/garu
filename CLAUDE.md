@@ -92,6 +92,10 @@ js/models/cnn2.bin 기준 (npm 패키지에 번들된 최신 모델, hidden=144)
 23. **WASM 사이즈 최적화** → [profile.release] opt-level=z + lto + codegen-units=1 + panic=abort + strip + wasm-opt -Oz (327KB→266KB raw, -19%)
 24. **serde_json 제거** → cnn2 vocab 파싱을 수동 미니 파서로 교체, 의존성 제거 (raw -30KB)
 25. **gzip → brotli q=11 압축** → base.gmdl 1238→1022KB (-216KB), cnn2.bin 733→718KB (-15KB). WASM에 brotli-decompressor 추가로 +78KB. 순절감 -196KB unpacked (-9%).
+26. **eval_f1.py ep_norm 정합화** → jamo/모음조화/EP축약/태그 정규화의 측정 아티팩트 제거. norm 적용 시 overall +2.06pp (양쪽 분석기 모두 게인). 정규화 후 실제 Kiwi가 5/6 도메인 우위라는 사실 드러남.
+27. **자모 정규화 옵트인** → `normalizeJamo: bool` 옵션 (기본 false). gold v15k가 호환/결합 자모 67:33 혼재라 `project_guuh_weakness.md` 양방향 검증 규칙 적용 → 기본값 false 유지.
+28. **`~/SO` 캐시 자동 보강** → NIKL annotation 누락된 35개 trailing-tilde 캐시 항목에 SO morpheme 추가. 구어 `~/SO` 인식 9.6% → 100% (~0.34pp F1).
+29. **in-place 캐시 패칭 도입** → `build_eojeol_cache.py` 전체 리빌드 대신 `eojeol_cache.bin`을 직접 파싱/수정/재기록. 옛 curated cache의 hand-tuned 가치를 보존 (full rebuild는 -2pp 회귀 위험).
 
 ## 빌드
 

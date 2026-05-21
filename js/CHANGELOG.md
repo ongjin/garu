@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- **자모 정규화 옵트인**: 분석 결과의 단일 자모 형태소(ETM `ㄴ` 등)를 U+11xx 결합 자모로 변환하는 옵션 추가. 기본값 `false` (gold v15k 다수가 호환 자모를 사용). canonical 출력이 필요하면 `Garu.load(url, {normalizeJamo: true})`.
+- **`~/SO` 캐시 보강**: NIKL MP에서 trailing tilde가 annotation에서 누락된 35개 캐시 항목에 자동으로 `(~, SO)` morpheme 추가. 구어 도메인 SO 인식 9.6% → 100%.
+- **eval 스크립트 정합화**: `training/gold_testset/eval_f1.py`가 `ep_norm` 적용. `--no-norm`으로 옛 raw 비교 가능. 정규화 적용 시 measurement artifact 제거로 양쪽 분석기 모두 절대 F1 상승.
+- **F1 v15k (norm 적용)**: overall 0.9113 → 0.9329 (+2.06pp). 구어 0.8987 → 0.9292 (+3.05pp). 강 도메인 회귀 없음.
+- **모델 크기**: 1.0 MB 그대로 (실제 -331 bytes).
+
 ## 0.8.1
 
 ### 구어 도메인 약점 회복 — 2라운드 (구어 +0.49%p, NIKL +0.1%p)
