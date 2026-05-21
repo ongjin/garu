@@ -1,6 +1,6 @@
 {
   "name": "garu-minisearch-tokenizer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Korean tokenizer for MiniSearch, powered by garu-ko (1.9MB WASM morphological analyzer)",
   "type": "module",
   "main": "dist/index.js",
@@ -31,7 +31,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "garu-ko": "^0.8.0"
+    "garu-ko": "^0.9.0"
   },
   "peerDependencies": {
     "minisearch": ">=6.0.0"
