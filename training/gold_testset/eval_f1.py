@@ -1,10 +1,16 @@
-"""4개 분석기 F1 비교: Garu, Kiwi, Claude, Mecab vs Gold"""
-import json, os, subprocess, sys
+"""4개 분석기 F1 비교: Garu, Kiwi, Claude, Mecab vs Gold
+
+기본: ep_norm(jamo/모음조화/EP축약/태그 정규화) 적용 후 비교.
+--no-norm 플래그로 끄면 raw 비교.
+"""
+import argparse, json, os, subprocess, sys
 from kiwipiepy import Kiwi
 import mecab
 
 BASE = os.path.dirname(__file__)
 ROOT = os.path.join(BASE, "..", "..")
+sys.path.insert(0, os.path.join(BASE, "expand"))
+from ep_norm import normalize_ep_morphemes
 
 def load_gold():
     records = []
@@ -41,17 +47,20 @@ def run_mecab(texts):
     for t in texts:
         tokens = []
         for form, tag in mc.pos(t):
-            # Mecab uses + for compound tags like VCP+EC -> split
             if "+" in tag:
-                # 복합태그는 첫 번째만 사용 (단순화)
                 tokens.append([form, tag.split("+")[0]])
             else:
                 tokens.append([form, tag])
         results.append(tokens)
     return results
 
+def _maybe_norm(token_lists, apply_norm):
+    if not apply_norm:
+        return token_lists
+    return [normalize_ep_morphemes(s) for s in token_lists]
+
 def compute_f1(pred, gold):
-    """Token-level F1 (form+POS pair matching)"""
+    """Token-level F1 (form+POS pair matching). 호출자가 사전 정규화 책임."""
     tp = fp = fn = 0
     for p_tokens, g_tokens in zip(pred, gold):
         p_set = {}
@@ -76,38 +85,48 @@ def compute_f1(pred, gold):
     return prec, rec, f1
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-norm", action="store_true", help="ep_norm 비적용 (raw 비교)")
+    args = ap.parse_args()
+    apply_norm = not args.no_norm
+
     records = load_gold()
     texts = [r["text"] for r in records]
-    gold = [r["morphemes"] for r in records]
+    gold_raw = [r["morphemes"] for r in records]
 
-    print("Running Garu...", flush=True)
-    garu = run_garu(texts)
+    print(f"Running Garu... (norm={apply_norm})", flush=True)
+    garu_raw = run_garu(texts)
     print("Running Kiwi...", flush=True)
-    kiwi = run_kiwi(texts)
+    kiwi_raw = run_kiwi(texts)
     print("Running Mecab...", flush=True)
-    mec = run_mecab(texts)
-    # Claude는 이미 gold 구축에 사용됐으므로 저장된 결과 없음 -> skip
+    mec_raw = run_mecab(texts)
 
-    print("\n=== F1 Score (vs Gold Testset, 5000 sentences) ===\n")
+    gold = _maybe_norm(gold_raw, apply_norm)
+    garu = _maybe_norm(garu_raw, apply_norm)
+    kiwi = _maybe_norm(kiwi_raw, apply_norm)
+    mec = _maybe_norm(mec_raw, apply_norm)
+
+    print(f"\n=== F1 Score (vs Gold Testset) — norm={apply_norm} ===\n")
     print(f"{'Analyzer':<10} {'Precision':>10} {'Recall':>10} {'F1':>10}")
     print("-" * 42)
     for name, pred in [("Garu", garu), ("Kiwi", kiwi), ("Mecab", mec)]:
         p, r, f1 = compute_f1(pred, gold)
         print(f"{name:<10} {p:>10.4f} {r:>10.4f} {f1:>10.4f}")
 
-    # Domain별 F1
-    print("\n=== Domain별 Garu F1 ===\n")
+    print("\n=== Domain별 F1 ===\n")
     domains = {}
     for i, rec in enumerate(records):
         d = rec["domain"]
         if d not in domains:
-            domains[d] = {"pred": [], "gold": []}
-        domains[d]["pred"].append(garu[i])
+            domains[d] = {"pred_garu": [], "pred_kiwi": [], "gold": []}
+        domains[d]["pred_garu"].append(garu[i])
+        domains[d]["pred_kiwi"].append(kiwi[i])
         domains[d]["gold"].append(gold[i])
-    for d in ["뉴스", "일상", "SNS", "기술", "문학", "엣지케이스"]:
-        if d in domains:
-            p, r, f1 = compute_f1(domains[d]["pred"], domains[d]["gold"])
-            print(f"  {d:<10} F1={f1:.4f}")
+    for d in sorted(domains.keys()):
+        pg, _, fg = compute_f1(domains[d]["pred_garu"], domains[d]["gold"])
+        pk, _, fk = compute_f1(domains[d]["pred_kiwi"], domains[d]["gold"])
+        delta = fg - fk
+        print(f"  {d:<10} Garu={fg:.4f}  Kiwi={fk:.4f}  Δ={delta:+.4f}")
 
 if __name__ == "__main__":
     main()
