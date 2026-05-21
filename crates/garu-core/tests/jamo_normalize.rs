@@ -1,4 +1,5 @@
-//! Jamo normalization: U+3134(ㄴ) → U+11AB(ᆫ) for ETM/EC/EF/etc. surfaces.
+//! Jamo normalization: U+3139(ㄹ) → U+11AF(ᆯ) for ETM surfaces, etc.
+//! "갈 사람" → 가/VV + ㄹ/ETM(U+3139 compat) or ᆯ/ETM(U+11AF combining).
 
 use garu_core::model::{Analyzer, AnalyzerOptions};
 use garu_core::types::Pos;
@@ -15,12 +16,18 @@ fn load_default_analyzer(normalize_jamo: bool) -> Analyzer {
 #[test]
 fn jamo_normalize_on_emits_combining() {
     let a = load_default_analyzer(true);
-    let result = a.analyze("간 사람"); // expects 가/VV + ᆫ/ETM ...
-    let has_combining = result.tokens.iter().any(|t| t.text == "ᆫ" && t.pos == Pos::ETM);
-    let has_compat = result.tokens.iter().any(|t| t.text == "ㄴ" && t.pos == Pos::ETM);
+    // "갈 사람" → 가/VV + ㄹ/ETM. With normalize_jamo=true, ㄹ(U+3139) → ᆯ(U+11AF).
+    let result = a.analyze("갈 사람");
+    let has_combining = result.tokens.iter().any(|t| t.text == "ᆯ" && t.pos == Pos::ETM);
+    let has_compat = result.tokens.iter().any(|t| t.text == "ㄹ" && t.pos == Pos::ETM);
     assert!(
-        has_combining || !has_compat,
-        "expected combining ᆫ U+11AB, got compat ㄴ U+3134. tokens: {:?}",
+        has_combining,
+        "expected combining ᆯ U+11AF with normalize_jamo=true, but got: has_combining={has_combining}, has_compat={has_compat}. tokens: {:?}",
+        result.tokens.iter().map(|t| (t.text.clone(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        !has_compat,
+        "should not have compat ㄹ U+3139 with normalize_jamo=true. tokens: {:?}",
         result.tokens.iter().map(|t| (t.text.clone(), t.pos)).collect::<Vec<_>>()
     );
 }
@@ -28,12 +35,18 @@ fn jamo_normalize_on_emits_combining() {
 #[test]
 fn jamo_normalize_off_emits_compat() {
     let a = load_default_analyzer(false);
-    let result = a.analyze("간 사람");
-    let has_compat = result.tokens.iter().any(|t| t.text == "ㄴ" && t.pos == Pos::ETM);
-    let has_combining = result.tokens.iter().any(|t| t.text == "ᆫ" && t.pos == Pos::ETM);
+    // "갈 사람" → 가/VV + ㄹ/ETM. With normalize_jamo=false, stays compat U+3139.
+    let result = a.analyze("갈 사람");
+    let has_compat = result.tokens.iter().any(|t| t.text == "ㄹ" && t.pos == Pos::ETM);
+    let has_combining = result.tokens.iter().any(|t| t.text == "ᆯ" && t.pos == Pos::ETM);
     assert!(
-        has_compat || !has_combining,
-        "with normalize_jamo=false, expected compat ㄴ U+3134. tokens: {:?}",
+        has_compat,
+        "with normalize_jamo=false, expected compat ㄹ U+3139. tokens: {:?}",
+        result.tokens.iter().map(|t| (t.text.clone(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        !has_combining,
+        "should not have combining ᆯ U+11AF with normalize_jamo=false. tokens: {:?}",
         result.tokens.iter().map(|t| (t.text.clone(), t.pos)).collect::<Vec<_>>()
     );
 }

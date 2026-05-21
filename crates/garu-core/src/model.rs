@@ -7,8 +7,24 @@
 use crate::codebook::CodebookAnalyzer;
 use crate::types::{AnalyzeResult, Pos, Token};
 
+/// 런타임 동작 옵션. 기본값은 production-safe.
+#[derive(Debug, Clone)]
+pub struct AnalyzerOptions {
+    /// 분석 결과의 자모 surface(EC/EF/ETM 등의 단일 자모 형태소)를
+    /// U+3130-318F 호환 자모에서 U+11A8-11FF 결합 자모로 변환.
+    /// 기본값 true (Kiwi 호환).
+    pub normalize_jamo: bool,
+}
+
+impl Default for AnalyzerOptions {
+    fn default() -> Self {
+        Self { normalize_jamo: true }
+    }
+}
+
 pub struct Analyzer {
     codebook: CodebookAnalyzer,
+    options: AnalyzerOptions,
 }
 
 /// Number of Viterbi candidates to generate.
@@ -19,7 +35,12 @@ const CONTEXT_NBEST_K: usize = 10;
 impl Analyzer {
     pub fn from_bytes(model_data: &[u8]) -> Result<Self, String> {
         let codebook = CodebookAnalyzer::from_bytes(model_data)?;
-        Ok(Self { codebook })
+        Ok(Self { codebook, options: AnalyzerOptions::default() })
+    }
+
+    pub fn from_bytes_with_options(model_data: &[u8], options: AnalyzerOptions) -> Result<Self, String> {
+        let codebook = CodebookAnalyzer::from_bytes(model_data)?;
+        Ok(Self { codebook, options })
     }
 
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
