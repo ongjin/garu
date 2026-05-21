@@ -1,0 +1,21 @@
+{
+  "news": {
+    "rss_feeds": [
+      "https://www.hani.co.kr/rss/",
+      "https://www.hani.co.kr/rss/economy/",
+      "https://www.hani.co.kr/rss/society/",
+      "https://www.hani.co.kr/rss/politics/"
+    ],
+    "target_articles": 200,
+    "target_sentences": 3000
+  },
+  "blog": {
+    "queries": [
+      "여행 후기", "맛집", "취미", "독서", "영화 리뷰",
+      "운동", "요리", "육아", "반려동물", "일상",
+      "공부 방법", "직장 생활", "투자", "건강 관리"
+    ],
+    "target_posts_per_query": 30,
+    "target_sentences": 8000
+  }
+}
