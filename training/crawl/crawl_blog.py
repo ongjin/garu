@@ -1,0 +1,46 @@
+"""Naver Blog Search 기반 블로그 본문 크롤러.
+
+API 결과의 description은 자체 한국어 문장 → fallback source.
+원본 블로그 페이지는 robots.txt 준수해서 fetch.
+"""
+import requests
+
+from text_clean import extract_sentences, is_korean_sentence
+
+
+class BlogCrawler:
+    USER_AGENT = "garu-crawler/0.1 (+https://garu.zerry.co.kr)"
+
+    def __init__(self, naver_client, rate_limiter, robots, timeout: float = 15.0):
+        self.naver = naver_client
+        self.rl = rate_limiter
+        self.robots = robots
+        self.timeout = timeout
+
+    def search(self, query: str, display: int = 100) -> list[dict]:
+        return self.naver.search_blog(query, display=display)
+
+    def descriptions_to_sentences(self, items: list[dict]) -> list[str]:
+        out = []
+        for it in items:
+            desc = it.get("description", "")
+            for s in extract_sentences(desc):
+                out.append(s)
+            # description 자체가 짧으면 통째로 검사
+            if is_korean_sentence(desc):
+                out.append(desc)
+        return list(dict.fromkeys(out))  # 순서 보존 dedup
+
+    def fetch_post_sentences(self, url: str) -> list[str]:
+        if self.robots is not None and not self.robots.is_allowed(url):
+            return []
+        if self.rl is not None:
+            self.rl.wait(url)
+        try:
+            resp = requests.get(url, headers={"User-Agent": self.USER_AGENT},
+                                timeout=self.timeout)
+        except Exception:
+            return []
+        if resp.status_code != 200:
+            return []
+        return extract_sentences(resp.text)
