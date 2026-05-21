@@ -28,3 +28,10 @@ fi
 
 echo "GARU_ENSEMBLE_PYTHON=$GARU_ENSEMBLE_PYTHON"
 echo "JAVA_HOME=$JAVA_HOME"
+
+# ---- Plan B: Naver Search API 자격증명 ----
+# 사용자가 https://developers.naver.com/apps 에서 발급해 ~/.zshrc 에 export.
+# 본 스크립트는 키를 echo 하지 않음 (보안). 미설정 시 경고만.
+if [ -z "$NAVER_CLIENT_ID" ] || [ -z "$NAVER_CLIENT_SECRET" ]; then
+  echo "warn: NAVER_CLIENT_ID/SECRET unset — Naver API crawl will fail" >&2
+fi
