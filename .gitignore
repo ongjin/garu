@@ -26,6 +26,7 @@ js/pkg/snippets/
 # Internal docs
 docs/superpowers/
 .claude/
+.specs/
 
 # CNN rerank experiment scripts (local research, not part of build)
 crates/garu-core/examples/dump_topk.rs
