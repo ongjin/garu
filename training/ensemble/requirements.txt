@@ -6,3 +6,9 @@ kiwipiepy>=0.23.0,<0.24
 python-mecab-ko>=1.3.7
 konlpy==0.6.0
 JPype1>=1.5.0
+
+# Plan B 크롤 인프라 의존성
+requests>=2.31
+trafilatura>=1.12
+feedparser>=6.0
+simhash>=2.1
