@@ -187,6 +187,24 @@ def main():
 
     selected = corrections[:max_cache_entries]
 
+    # === 캐시 SO 자동 보강 ===
+    # NIKL MP에서 trailing ~/-/–/− 가 annotation에서 누락된 케이스가 다수.
+    # 어절이 SO 문자로 끝나는데 마지막 morph가 그 문자 SO가 아니면 추가.
+    SO_CHARS = {"~", "-", "–", "−"}
+    fixed_count = 0
+    new_selected = []
+    for entry in selected:
+        eojeol, morphs, weighted_cv, cv, gold_total = entry
+        if eojeol and eojeol[-1] in SO_CHARS:
+            last_char = eojeol[-1]
+            already_so = (morphs and morphs[-1][0] == last_char and morphs[-1][1] == "SO")
+            if not already_so:
+                morphs = list(morphs) + [(last_char, "SO")]
+                fixed_count += 1
+        new_selected.append((eojeol, morphs, weighted_cv, cv, gold_total))
+    selected = new_selected
+    print(f"\n  SO 자동 보강: {fixed_count}건")
+
     # Show top 20
     print(f"\n  Top 20 cache entries:")
     for eojeol, morphs, wcv, cv, freq in selected[:20]:
