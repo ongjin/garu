@@ -1,0 +1,20 @@
+Running Garu... (norm=True)
+Running Kiwi...
+Running Mecab...
+
+=== F1 Score (vs Gold Testset) — norm=True ===
+
+Analyzer    Precision     Recall         F1
+------------------------------------------
+Garu           0.9203     0.9460     0.9330
+Kiwi           0.9313     0.9692     0.9499
+Mecab          0.7650     0.7385     0.7515
+
+=== Domain별 F1 ===
+
+  SNS        Garu=0.9175  Kiwi=0.9628  Δ=-0.0453
+  구어         Garu=0.9292  Kiwi=0.9706  Δ=-0.0414
+  기술         Garu=0.9571  Kiwi=0.8958  Δ=+0.0613
+  뉴스         Garu=0.9298  Kiwi=0.9415  Δ=-0.0116
+  문학         Garu=0.9623  Kiwi=0.9773  Δ=-0.0149
+  일상         Garu=0.9209  Kiwi=0.9582  Δ=-0.0373
