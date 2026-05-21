@@ -1,0 +1,8 @@
+# Garu 사전 확장 P0 — 5분석기 ensemble 의존성 핀
+# Plan A Task 2에서 신규.
+# 주: 로컬 Homebrew python3.14에 kiwipiepy 0.23.1이 이미 설치되어 있어
+#     `==0.23.0` 대신 `>=0.23.0,<0.24` 로 완화 (스펙 허용 범위).
+kiwipiepy>=0.23.0,<0.24
+python-mecab-ko>=1.3.7
+konlpy==0.6.0
+JPype1>=1.5.0
