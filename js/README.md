@@ -4,7 +4,7 @@
 
 - **1MB model** bundled in npm package (no CDN needed)
 - **332KB WASM** engine (152KB gzipped) -- runs in any modern browser
-- **F1 93.97%** on human-verified gold testset (vs. Kiwi 89.7%)
+- **F1 93.29%** on 9k human-verified gold testset (ep_norm), **F1 93.7%** on NIKL MP
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -15,8 +15,8 @@
 |---|---|---|---|
 | Model size | ~40MB | ~50MB | **1MB** |
 | npm package | No | No | **Yes** |
-| F1 (gold testset) | 89.7% | — | **93.97%** |
-| F1 (NIKL MP) | 87.9% | ~85% | **93.90%** |
+| F1 (gold v15k, ep_norm) | 95.0% | 75.5% | 93.3% |
+| F1 (NIKL MP) | 87.9% | ~85% | **93.7%** |
 | Browser support | Impractical | No | **Yes** |
 
 ## Quick Start
