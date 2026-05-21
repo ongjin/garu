@@ -2640,7 +2640,7 @@ impl CodebookAnalyzer {
 
     /// Fix NNG → XSN/XPN for common suffix/prefix morphemes.
     fn fix_xsn_xpn(tokens: &mut [Token]) {
-        // Conservative: only clear suffixes. Removed: 제(NP 제), 상/장(NNG)
+        // Conservative: only clear suffixes. Removed: 상/장(NNG)
         const XSN_FORMS: &[&str] = &[
             "성", "형", "적", "식", "계", "권", "화", "률", "율", "급",
         ];
@@ -2652,14 +2652,17 @@ impl CodebookAnalyzer {
                 continue;
             }
             let form = tokens[i].text.as_str();
+            if form.chars().count() != 1 {
+                continue;
+            }
             // XSN: single-char after NNG
-            if form.chars().count() == 1 && i > 0 && tokens[i - 1].pos == Pos::NNG {
+            if i > 0 && tokens[i - 1].pos == Pos::NNG {
                 if XSN_FORMS.iter().any(|&w| w == form) {
                     tokens[i].pos = Pos::XSN;
                 }
             }
             // XPN: single-char before NNG
-            if form.chars().count() == 1 && i + 1 < tokens.len() && tokens[i + 1].pos == Pos::NNG {
+            if i + 1 < tokens.len() && tokens[i + 1].pos == Pos::NNG {
                 if XPN_FORMS.iter().any(|&w| w == form) {
                     tokens[i].pos = Pos::XPN;
                 }
@@ -2816,6 +2819,19 @@ impl CodebookAnalyzer {
                     Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::XR
                 );
                 tokens[i].pos = if followed_by_noun { Pos::MM } else { Pos::NP };
+            } else if form == "제"
+                && i > 0
+                && tokens[i - 1].end == tokens[i].end
+                && matches!(
+                    tokens[i - 1].pos,
+                    Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::XSN
+                )
+            {
+                // '제' at eojeol-final position after noun-like POS within the
+                // same eojeol → XSN (NIKL: 99.8% in this context, e.g.
+                // 최고가격제, 상한제, 내각제). Standalone-eojeol '제'
+                // (often NP/JKG) is handled by other paths.
+                tokens[i].pos = Pos::XSN;
             } else {
                 tokens[i].pos = Pos::NNG;
             }
