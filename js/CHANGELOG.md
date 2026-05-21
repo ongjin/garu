@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.9.1
+
+표준국어대사전 등재 검증 기반 임시 합성명사 사전 정리. 사용자 직관("주유비는 분해돼야 하지 않나?")에서 출발해 데이터 기반 일괄 점검.
+
+**임시 합성명사 식별 + 사전 정리**:
+- kowikitext + gold v15k에서 Garu(단일 NNG) vs Kiwi(NNG+NNG 분해) 불일치 어절 412K 어절 분석 → 275개 후보 추출.
+- 표준국어대사전 stdict.korean.go.kr 자동 검색으로 91개 미등재 확정.
+- `content_dict.txt`에서 70개 단일 NNG entry 제거, 어절 캐시에서 `제조업체인` in-place 분해.
+- 단독 어절 `주유비` 캐시 분해 등재(`주유/NNG + 비/NNG`) — 코드북의 "유비/NNP"(역사 인물) 우선순위 회피.
+
+**Gold 양방향 빈도 재검증**:
+- 71개 제거분을 gold v15k에서 단일/분해 빈도 카운트 → 10개는 gold가 단일을 일관 선호(외래어 + 등재 합성어) → content_dict 복원. net -61 NNG entries.
+- neither 20개(suffix codebook 경유 단일 NNG)도 같은 룰로 검증 → 전원 skip(gold가 단일 정답 또는 ambiguous).
+
+**모델 크기 / F1**:
+- base.gmdl: 1,028,183 → 1,027,863 bytes (-320 bytes brotli q=11).
+- F1 v15k norm: 0.9329 → 0.9330 (회귀 없음, noise 이내).
+- 도메인별 변동 없음.
+
+**사전 동기화 (CLAUDE.md)**: 어절 캐시 raw 230 KB → 246 KB, 전체 brotli 998 KB → 1004 KB 실측 반영.
+
 ## 0.9.0
 
 - **자모 정규화 옵트인**: 분석 결과의 단일 자모 형태소(ETM `ㄴ` 등)를 U+11xx 결합 자모로 변환하는 옵션 추가. 기본값 `false` (gold v15k 다수가 호환 자모를 사용). canonical 출력이 필요하면 `Garu.load(url, {normalizeJamo: true})`.
