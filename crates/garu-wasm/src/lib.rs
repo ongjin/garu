@@ -45,9 +45,13 @@ pub struct GaruWasm {
 #[wasm_bindgen]
 impl GaruWasm {
     #[wasm_bindgen(constructor)]
-    pub fn new(model_data: &[u8]) -> Result<GaruWasm, JsError> {
-        let analyzer = Analyzer::from_bytes(model_data)
-            .map_err(|e| JsError::new(&e))?;
+    pub fn new(model_data: &[u8], normalize_jamo: Option<bool>) -> Result<GaruWasm, JsError> {
+        let mut opts = garu_core::AnalyzerOptions::default();
+        if let Some(b) = normalize_jamo {
+            opts.normalize_jamo = b;
+        }
+        let analyzer = Analyzer::from_bytes_with_options(model_data, opts)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(GaruWasm { analyzer })
     }
 

@@ -56,13 +56,14 @@ export class GaruWasm {
     }
     /**
      * @param {Uint8Array} model_data
+     * @param {boolean | null} [normalize_jamo]
      */
-    constructor(model_data) {
+    constructor(model_data, normalize_jamo) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passArray8ToWasm0(model_data, wasm.__wbindgen_export);
             const len0 = WASM_VECTOR_LEN;
-            wasm.garuwasm_new(retptr, ptr0, len0);
+            wasm.garuwasm_new(retptr, ptr0, len0, isLikeNone(normalize_jamo) ? 0xFFFFFF : normalize_jamo ? 1 : 0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -227,6 +228,10 @@ let heap = new Array(1024).fill(undefined);
 heap.push(undefined, null, true, false);
 
 let heap_next = heap.length;
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
 
 function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;
