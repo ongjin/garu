@@ -1,0 +1,4 @@
+{"eojeol": "그러다", "gold_analysis": [["그러", "VV"], ["다", "EC"]], "garu_pred": [["그러", "VV"], ["다", "EF"]], "freq": 3}
+{"eojeol": "그러면서", "gold_analysis": [["그러", "VV"], ["면서", "EC"]], "garu_pred": [["그러면서", "MAJ"]], "freq": 3}
+{"eojeol": "그러면은", "gold_analysis": [["그러면", "MAJ"], ["은", "JX"]], "garu_pred": [["그렇", "VA"], ["으면", "EC"], ["은", "JX"]], "freq": 2}
+{"eojeol": "이렇게.", "gold_analysis": [["이렇게", "MAG"]], "garu_pred": [["이렇", "VA"], ["게", "EF"], [".", "SF"]], "freq": 2}
