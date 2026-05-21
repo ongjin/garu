@@ -878,6 +878,40 @@ def augment_contracted_suffixes(codebook: dict) -> dict:
         "을텐데": [{"morphemes": [["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
         "었을텐데": [{"morphemes": [["었", "EP"], ["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
         "았을텐데": [{"morphemes": [["았", "EP"], ["을", "ETM"], ["터", "NNB"], ["이", "VCP"], ["ㄴ데", "EC"]], "freq": 5000}],
+
+        # -스럽- irregular forms
+        "스러워": [{"morphemes": [["스럽", "XSA"], ["어", "EC"]], "freq": 10000}, {"morphemes": [["스럽", "XSA"], ["어", "EF"]], "freq": 10000}],
+        "스러운": [{"morphemes": [["스럽", "XSA"], ["은", "ETM"]], "freq": 10000}],
+        "스러울": [{"morphemes": [["스럽", "XSA"], ["을", "ETM"]], "freq": 10000}],
+        "스러움": [{"morphemes": [["스럽", "XSA"], ["음", "ETN"]], "freq": 10000}],
+        "스러웠다": [{"morphemes": [["스럽", "XSA"], ["었", "EP"], ["다", "EF"]], "freq": 10000}],
+        "스러웠고": [{"morphemes": [["스럽", "XSA"], ["었", "EP"], ["고", "EC"]], "freq": 10000}],
+        "스러웠어": [{"morphemes": [["스럽", "XSA"], ["었", "EP"], ["어", "EC"]], "freq": 10000}, {"morphemes": [["스럽", "XSA"], ["었", "EP"], ["어", "EF"]], "freq": 10000}],
+        "스러웠어요": [{"morphemes": [["스럽", "XSA"], ["었", "EP"], ["어요", "EF"]], "freq": 10000}],
+        "스러워서": [{"morphemes": [["스럽", "XSA"], ["어서", "EC"]], "freq": 10000}],
+        "스러우면": [{"morphemes": [["스럽", "XSA"], ["으면", "EC"]], "freq": 10000}],
+        "스러우니": [{"morphemes": [["스럽", "XSA"], ["으니", "EC"]], "freq": 10000}],
+        "스러우니까": [{"morphemes": [["스럽", "XSA"], ["으니까", "EC"]], "freq": 10000}],
+        "스러워도": [{"morphemes": [["스럽", "XSA"], ["어도", "EC"]], "freq": 10000}],
+        "스러우면서": [{"morphemes": [["스럽", "XSA"], ["으면서", "EC"]], "freq": 10000}],
+        "스러워요": [{"morphemes": [["스럽", "XSA"], ["어요", "EF"]], "freq": 10000}],
+
+        # -답- irregular forms
+        "다워": [{"morphemes": [["답", "XSA"], ["어", "EC"]], "freq": 10000}, {"morphemes": [["답", "XSA"], ["어", "EF"]], "freq": 10000}],
+        "다운": [{"morphemes": [["답", "XSA"], ["은", "ETM"]], "freq": 10000}],
+        "다울": [{"morphemes": [["답", "XSA"], ["을", "ETM"]], "freq": 10000}],
+        "다움": [{"morphemes": [["답", "XSA"], ["음", "ETN"]], "freq": 10000}],
+        "다웠다": [{"morphemes": [["답", "XSA"], ["었", "EP"], ["다", "EF"]], "freq": 10000}],
+        "다웠고": [{"morphemes": [["답", "XSA"], ["었", "EP"], ["고", "EC"]], "freq": 10000}],
+        "다웠어": [{"morphemes": [["답", "XSA"], ["었", "EP"], ["어", "EC"]], "freq": 10000}, {"morphemes": [["답", "XSA"], ["었", "EP"], ["어", "EF"]], "freq": 10000}],
+        "다웠어요": [{"morphemes": [["답", "XSA"], ["었", "EP"], ["어요", "EF"]], "freq": 10000}],
+        "다워서": [{"morphemes": [["답", "XSA"], ["어서", "EC"]], "freq": 10000}],
+        "다우면": [{"morphemes": [["답", "XSA"], ["으면", "EC"]], "freq": 10000}],
+        "다우니": [{"morphemes": [["답", "XSA"], ["으니", "EC"]], "freq": 10000}],
+        "다우니까": [{"morphemes": [["답", "XSA"], ["으니까", "EC"]], "freq": 10000}],
+        "다워도": [{"morphemes": [["답", "XSA"], ["어도", "EC"]], "freq": 10000}],
+        "다우면서": [{"morphemes": [["답", "XSA"], ["으면서", "EC"]], "freq": 10000}],
+        "다워요": [{"morphemes": [["답", "XSA"], ["어요", "EF"]], "freq": 10000}],
     }
 
     added = 0

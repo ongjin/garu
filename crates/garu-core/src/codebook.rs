@@ -1130,22 +1130,92 @@ impl CodebookAnalyzer {
             } else if chars[i].is_ascii_digit() {
                 // SN run: digits, including decimal points and thousand separators
                 // e.g. "3.14", "1,900", "12,345,678"
-                let start = i;
-                i += 1;
-                while i < chars.len() {
-                    if chars[i].is_ascii_digit() {
-                        i += 1;
-                    } else if (chars[i] == '.' || chars[i] == ',')
-                        && i + 1 < chars.len()
-                        && chars[i + 1].is_ascii_digit()
-                    {
-                        // Include separator only if followed by digit
-                        i += 1;
-                    } else {
-                        break;
+                // Check if a date pattern starts here, e.g., YYYY.MM.DD or YY.MM.DD
+                let match_date_pattern = |start: usize| -> Option<usize> {
+                    let mut idx = start;
+                    // 1. First part: digits (must be 2 or 4)
+                    let mut len1 = 0;
+                    while idx < chars.len() && chars[idx].is_ascii_digit() {
+                        idx += 1;
+                        len1 += 1;
                     }
+                    if len1 != 2 && len1 != 4 {
+                        return None;
+                    }
+                    // Must have a '.'
+                    if idx >= chars.len() || chars[idx] != '.' {
+                        return None;
+                    }
+                    idx += 1; // consume '.'
+
+                    // 2. Second part: digits (must be 1 or 2)
+                    let mut len2 = 0;
+                    while idx < chars.len() && chars[idx].is_ascii_digit() {
+                        idx += 1;
+                        len2 += 1;
+                    }
+                    if len2 != 1 && len2 != 2 {
+                        return None;
+                    }
+                    // Must have a '.'
+                    if idx >= chars.len() || chars[idx] != '.' {
+                        return None;
+                    }
+                    idx += 1; // consume '.'
+
+                    // 3. Third part: digits (must be >= 1)
+                    let mut len3 = 0;
+                    let third_start = idx;
+                    while idx < chars.len() && chars[idx].is_ascii_digit() {
+                        idx += 1;
+                        len3 += 1;
+                    }
+                    if len3 < 1 {
+                        return None;
+                    }
+
+                    // Determine how many digits belong to the day
+                    let day_len = if len3 == 1 {
+                        1
+                    } else {
+                        // len3 >= 2
+                        let d1 = chars[third_start];
+                        let d2 = chars[third_start + 1];
+                        if d1 == '0' {
+                            2
+                        } else {
+                            let val = (d1 as u32 - '0' as u32) * 10 + (d2 as u32 - '0' as u32);
+                            if val >= 10 && val <= 31 {
+                                2
+                            } else {
+                                1
+                            }
+                        }
+                    };
+                    Some(third_start + day_len)
+                };
+
+                if let Some(date_end) = match_date_pattern(i) {
+                    runs.push((i, date_end, Pos::SN));
+                    i = date_end;
+                } else {
+                    let start = i;
+                    i += 1;
+                    while i < chars.len() {
+                        if chars[i].is_ascii_digit() {
+                            i += 1;
+                        } else if (chars[i] == '.' || chars[i] == ',')
+                            && i + 1 < chars.len()
+                            && chars[i + 1].is_ascii_digit()
+                        {
+                            // Include separator only if followed by digit
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    runs.push((start, i, Pos::SN));
                 }
-                runs.push((start, i, Pos::SN));
             } else {
                 i += 1;
             }
@@ -3719,6 +3789,7 @@ impl CodebookAnalyzer {
                 if last.pos == token.pos
                     && (last.pos == Pos::SL || last.pos == Pos::SN)
                     && last.end == token.start
+                    && (last.text.chars().count() == 1 || token.text.chars().count() == 1)
                 {
                     last.text.push_str(&token.text);
                     last.end = token.end;
@@ -4059,6 +4130,13 @@ mod tests {
         assert_eq!(runs2[1], (4, 8, Pos::SL));   // BM25
         assert_eq!(runs2[2], (9, 15, Pos::SL));  // GPT-4o
         assert_eq!(runs2[3], (16, 20, Pos::SN)); // 2024
+
+        // Glued date and view count
+        let chars3: Vec<char> = "2026.04.0924,991".chars().collect();
+        let runs3 = CodebookAnalyzer::find_ascii_runs(&chars3);
+        assert_eq!(runs3.len(), 2);
+        assert_eq!(runs3[0], (0, 10, Pos::SN));  // 2026.04.09
+        assert_eq!(runs3[1], (10, 16, Pos::SN)); // 24,991
     }
 
     fn tok(text: &str, pos: Pos, start: usize, end: usize) -> Token {
