@@ -15,6 +15,7 @@ training/**/*.pt
 training/checkpoints/
 training/codebook_data/
 training/codebook_data_backup/
+training/crawl_data/
 training/charmodel/
 training/data.parquet
 training/kowikitext.txt
