@@ -96,6 +96,7 @@ js/models/cnn2.bin 기준 (npm 패키지에 번들된 최신 모델, hidden=144)
 27. **자모 정규화 옵트인** → `normalizeJamo: bool` 옵션 (기본 false). gold v15k가 호환/결합 자모 67:33 혼재라 `project_guuh_weakness.md` 양방향 검증 규칙 적용 → 기본값 false 유지.
 28. **`~/SO` 캐시 자동 보강** → NIKL annotation 누락된 35개 trailing-tilde 캐시 항목에 SO morpheme 추가. 구어 `~/SO` 인식 9.6% → 100% (~0.34pp F1).
 29. **in-place 캐시 패칭 도입** → `build_eojeol_cache.py` 전체 리빌드 대신 `eojeol_cache.bin`을 직접 파싱/수정/재기록. 옛 curated cache의 hand-tuned 가치를 보존 (full rebuild는 -2pp 회귀 위험).
+30. **Phase 1: Averaged Structured Perceptron 시도 → 폐기** (2026-05-21). 8 feature(POS trigram/lex bigram/jongseong/last syl/surface trigram/morph len/cache hit/sent position) + Python POC + Rust integration. 시뮬레이션 F1 (dev 800) +0.85pp 보였으나 Rust 실측(전체 8K gold) +0.03pp에 그침. **핵심 원인**: Python `rescore_topk`는 raw 후보 점수만 비교, Rust `analyze_with_perceptron`는 후처리(`fix_*`) 추가 통과 — 측정 대상 불일치로 0.60pp 갭. 도메인 편차: SNS/구어/일상 +0.6~1.0pp 이득, 뉴스 -0.70pp 회귀(상쇄). 7,200 train 규모로는 뉴스 패턴 학습 부족. **재시도 시 주의**: (a) Python sim에도 동일 후처리 적용해 비교 가능하게, (b) 도메인-balanced sampling 또는 weight 분리, (c) 7,200 → silver corpus 확장 후 재시도가 본질적 해결책. 인프라(dump_for_training API, extract-training 바이너리, perceptron 학습 스크립트)는 폐기 — phase1 branch 삭제. 사용자가 부분 채택도 거부 (regression test 11건 영향).
 
 ## 빌드
 
