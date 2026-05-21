@@ -4,7 +4,7 @@
 //! Viterbi cost + contextual rerank bonus, then applies deterministic
 //! POS corrections distilled from CNN's behavior on the gold testset.
 
-use crate::codebook::CodebookAnalyzer;
+use crate::codebook::{CodebookAnalyzer, compat_to_combining_jongseong, normalize_surface_leading_jamo};
 use crate::types::{AnalyzeResult, Pos, Token};
 
 /// 런타임 동작 옵션. 기본값은 production-safe.
@@ -44,6 +44,14 @@ impl Analyzer {
     }
 
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
+        let mut result = self.analyze_inner(text);
+        if self.options.normalize_jamo {
+            Self::apply_jamo_normalization(&mut result.tokens);
+        }
+        result
+    }
+
+    fn analyze_inner(&self, text: &str) -> AnalyzeResult {
         let mut candidates = self.codebook.analyze_topn(text, NBEST_K);
         if Self::should_expand_contextual_nbest(text) {
             candidates = self.codebook.analyze_topn(text, CONTEXT_NBEST_K);
@@ -112,6 +120,19 @@ impl Analyzer {
         result
     }
 
+    /// Normalize leading compat jamo (U+3130-318F) in ETM/EC/EF/EP/JKO/JX token
+    /// surfaces to combining jongseong jamo (U+11A8-11FF).
+    fn apply_jamo_normalization(tokens: &mut Vec<Token>) {
+        for tok in tokens.iter_mut() {
+            let needs = tok.text.chars().next()
+                .and_then(compat_to_combining_jongseong)
+                .is_some();
+            if needs && matches!(tok.pos, Pos::ETM | Pos::EC | Pos::EF | Pos::EP | Pos::JKO | Pos::JX) {
+                tok.text = normalize_surface_leading_jamo(&tok.text);
+            }
+        }
+    }
+
     /// Context-based POS corrections distilled from CNN's behavior on the gold
     /// testset. Cheap, deterministic alternative to neural POS prediction.
     fn apply_rule_pos_corrections(tokens: &mut [Token]) {
@@ -177,6 +198,9 @@ impl Analyzer {
             CodebookAnalyzer::apply_adj_root_xsa(&mut result.tokens);
             Self::apply_protected_auxiliary_rules(&mut result.tokens);
             Self::apply_rule_pos_corrections(&mut result.tokens);
+            if self.options.normalize_jamo {
+                Self::apply_jamo_normalization(&mut result.tokens);
+            }
         }
         results
     }

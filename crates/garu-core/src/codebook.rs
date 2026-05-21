@@ -72,6 +72,64 @@ fn classify_oov_char(ch: char) -> Pos {
 }
 
 // ---------------------------------------------------------------------------
+// Jamo normalization: compat (U+3130-318F) → combining jongseong (U+11A8-11FF)
+// ---------------------------------------------------------------------------
+
+/// U+3130-318F 호환 자모 → U+11A8-11FF 결합 자모 종성.
+/// 매핑되지 않은 문자는 None.
+pub(crate) fn compat_to_combining_jongseong(c: char) -> Option<char> {
+    let mapped = match c as u32 {
+        0x3131 => 0x11A8, // ㄱ → ᆨ
+        0x3132 => 0x11A9, // ㄲ → ᆩ
+        0x3133 => 0x11AA, // ㄳ → ᆪ
+        0x3134 => 0x11AB, // ㄴ → ᆫ
+        0x3135 => 0x11AC, // ㄵ → ᆬ
+        0x3136 => 0x11AD, // ㄶ → ᆭ
+        0x3137 => 0x11AE, // ㄷ → ᆮ
+        0x3139 => 0x11AF, // ㄹ → ᆯ
+        0x313A => 0x11B0, // ㄺ → ᆰ
+        0x313B => 0x11B1, // ㄻ → ᆱ
+        0x313C => 0x11B2, // ㄼ → ᆲ
+        0x313D => 0x11B3, // ㄽ → ᆳ
+        0x313E => 0x11B4, // ㄾ → ᆴ
+        0x313F => 0x11B5, // ㄿ → ᆵ
+        0x3140 => 0x11B6, // ㅀ → ᆶ
+        0x3141 => 0x11B7, // ㅁ → ᆷ
+        0x3142 => 0x11B8, // ㅂ → ᆸ
+        0x3144 => 0x11B9, // ㅄ → ᆹ
+        0x3145 => 0x11BA, // ㅅ → ᆺ
+        0x3146 => 0x11BB, // ㅆ → ᆻ
+        0x3147 => 0x11BC, // ㅇ → ᆼ
+        0x3148 => 0x11BD, // ㅈ → ᆽ
+        0x314A => 0x11BE, // ㅊ → ᆾ
+        0x314B => 0x11BF, // ㅋ → ᆿ
+        0x314C => 0x11C0, // ㅌ → ᇀ
+        0x314D => 0x11C1, // ㅍ → ᇁ
+        0x314E => 0x11C2, // ㅎ → ᇂ
+        _ => return None,
+    };
+    char::from_u32(mapped)
+}
+
+/// 표면형 문자열의 leading 호환 자모 한 글자를 결합 자모로 치환.
+pub(crate) fn normalize_surface_leading_jamo(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => {
+            if let Some(replaced) = compat_to_combining_jongseong(first) {
+                let mut out = String::with_capacity(s.len() + 3);
+                out.push(replaced);
+                out.extend(chars);
+                out
+            } else {
+                s.to_string()
+            }
+        }
+        None => s.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Hangul syllable decomposition (for jongseong splitting)
 // ---------------------------------------------------------------------------
 

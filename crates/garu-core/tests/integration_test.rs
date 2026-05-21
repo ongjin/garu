@@ -47,8 +47,8 @@ fn test_codebook_analyzer_v3() {
 
     // Conjugation tests: jongseong split + vowel contraction
     let conjugation_cases: Vec<(&str, Vec<&str>)> = vec![
-        ("고친다", vec!["고치", "ㄴ다"]),
-        ("소 잃고 외양간 고친다", vec!["소", "잃", "고", "외양간", "고치", "ㄴ다"]),
+        ("고친다", vec!["고치", "ᆫ다"]),
+        ("소 잃고 외양간 고친다", vec!["소", "잃", "고", "외양간", "고치", "ᆫ다"]),
         ("건너라", vec!["건너", "어라"]),
         ("가라", vec!["가", "아라"]),
     ];
@@ -114,7 +114,7 @@ fn test_dependency_noun_constructions() {
         "갈수있는데",
         &[
             ("가", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("수", Pos::NNB),
             ("있", Pos::VX),
             ("는데", Pos::EC),
@@ -126,10 +126,10 @@ fn test_dependency_noun_constructions() {
         "올만한데",
         &[
             ("오", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
-            ("ㄴ데", Pos::EC),
+            ("ᆫ데", Pos::EC),
         ],
     );
 
@@ -138,7 +138,7 @@ fn test_dependency_noun_constructions() {
         "볼만하다",
         &[
             ("보", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
             ("다", Pos::EF),
@@ -150,7 +150,7 @@ fn test_dependency_noun_constructions() {
         "갈만해",
         &[
             ("가", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
             ("아", Pos::EF),
@@ -162,10 +162,10 @@ fn test_dependency_noun_constructions() {
         "들만한데",
         &[
             ("들", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("만", Pos::NNB),
             ("하", Pos::XSA),
-            ("ㄴ데", Pos::EC),
+            ("ᆫ데", Pos::EC),
         ],
     );
 
@@ -174,7 +174,7 @@ fn test_dependency_noun_constructions() {
         "갈리없는데",
         &[
             ("가", Pos::VV),
-            ("ㄹ", Pos::ETM),
+            ("ᆯ", Pos::ETM),
             ("리", Pos::NNB),
             ("없", Pos::VA),
             ("는데", Pos::EC),
@@ -370,7 +370,7 @@ fn test_issue1_han_standalone_mm() {
     // Regression: multi-syllable XX한 must keep XSV+ETM
     let result = analyzer.analyze("공부한 사람");
     assert!(result.tokens.iter().any(|t| t.text == "하" && t.pos == Pos::XSV));
-    assert!(result.tokens.iter().any(|t| t.text == "ㄴ" && t.pos == Pos::ETM));
+    assert!(result.tokens.iter().any(|t| t.text == "ᆫ" && t.pos == Pos::ETM));
 }
 
 #[test]
@@ -436,15 +436,15 @@ fn test_issue2_lge_monosyllable_ha() {
         result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
     );
     assert!(
-        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
-        "할게 must end with ㄹ게/EF"
+        result.tokens.iter().any(|t| t.text == "ᆯ게" && t.pos == Pos::EF),
+        "할게 must end with ᆯ게/EF"
     );
 
     // 내가 할게 (sentence-level)
     let result = analyzer.analyze("내가 할게");
     assert!(
-        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
-        "내가 할게 must end with ㄹ게/EF"
+        result.tokens.iter().any(|t| t.text == "ᆯ게" && t.pos == Pos::EF),
+        "내가 할게 must end with ᆯ게/EF"
     );
 }
 
@@ -457,8 +457,8 @@ fn test_issue2_lge_monosyllable_l_jongseong() {
         let pairs: Vec<(&str, Pos)> = result.tokens.iter()
             .map(|t| (t.text.as_str(), t.pos)).collect();
         assert!(
-            result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
-            "{} must end with ㄹ게/EF, got: {:?}", input, pairs
+            result.tokens.iter().any(|t| t.text == "ᆯ게" && t.pos == Pos::EF),
+            "{} must end with ᆯ게/EF, got: {:?}", input, pairs
         );
     }
 }
@@ -570,8 +570,8 @@ fn test_noun_inga_copula_split() {
         "눈물인가 must split into 이/VCP: {:?}", pairs
     );
     assert!(
-        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
-        "눈물인가 must split into ㄴ가/EF: {:?}", pairs
+        pairs.iter().any(|(t, p)| *t == "ᆫ가" && *p == Pos::EF),
+        "눈물인가 must split into ᆫ가/EF: {:?}", pairs
     );
     assert!(
         !pairs.iter().any(|(t, p)| *t == "인가" && *p == Pos::NNG),
@@ -583,7 +583,7 @@ fn test_noun_inga_copula_split() {
     let pairs: Vec<(&str, Pos)> = result.tokens.iter()
         .map(|t| (t.text.as_str(), t.pos)).collect();
     let vcp_count = pairs.iter().filter(|(t, p)| *t == "이" && *p == Pos::VCP).count();
-    let ef_count = pairs.iter().filter(|(t, p)| *t == "ㄴ가" && *p == Pos::EF).count();
+    let ef_count = pairs.iter().filter(|(t, p)| *t == "ᆫ가" && *p == Pos::EF).count();
     assert_eq!(vcp_count, 2, "학생인가 선생인가: expected 2 VCP, got {:?}", pairs);
     assert_eq!(ef_count, 2, "학생인가 선생인가: expected 2 EF, got {:?}", pairs);
 
@@ -596,8 +596,8 @@ fn test_noun_inga_copula_split() {
         "조선시대 인가가: 인가/NNG (real noun) must be preserved: {:?}", pairs
     );
     assert!(
-        !pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
-        "조선시대 인가가: must not produce ㄴ가/EF: {:?}", pairs
+        !pairs.iter().any(|(t, p)| *t == "ᆫ가" && *p == Pos::EF),
+        "조선시대 인가가: must not produce ᆫ가/EF: {:?}", pairs
     );
 
     // Regression: already-correct case with SF punctuation should remain correct
@@ -609,8 +609,8 @@ fn test_noun_inga_copula_split() {
         "여기가 학교인가?: still produces 이/VCP: {:?}", pairs
     );
     assert!(
-        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
-        "여기가 학교인가?: still produces ㄴ가/EF: {:?}", pairs
+        pairs.iter().any(|(t, p)| *t == "ᆫ가" && *p == Pos::EF),
+        "여기가 학교인가?: still produces ᆫ가/EF: {:?}", pairs
     );
 }
 
@@ -671,8 +671,8 @@ fn test_vcp_eojeol_start_recovery_inji() {
         "학생인지: copula 이/VCP preserved: {:?}", pairs
     );
     assert!(
-        pairs.iter().any(|(t, p)| *t == "ㄴ지" && *p == Pos::EC),
-        "학생인지: ㄴ지/EC preserved: {:?}", pairs
+        pairs.iter().any(|(t, p)| *t == "ᆫ지" && *p == Pos::EC),
+        "학생인지: ᆫ지/EC preserved: {:?}", pairs
     );
     assert!(
         !pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),

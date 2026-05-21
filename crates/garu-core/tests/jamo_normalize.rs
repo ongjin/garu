@@ -6,7 +6,9 @@ use garu_core::types::Pos;
 
 fn load_default_analyzer(normalize_jamo: bool) -> Analyzer {
     let model_path = std::env::var("GARU_MODEL")
-        .unwrap_or_else(|_| "js/models/base.gmdl".to_string());
+        .unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl").to_string()
+        });
     let bytes = std::fs::read(&model_path).expect("model file");
     let mut opts = AnalyzerOptions::default();
     opts.normalize_jamo = normalize_jamo;
