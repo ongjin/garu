@@ -1,4 +1,4 @@
-"""시범 크롤 orchestrator (news + blog, specialist 제외).
+"""시범 크롤 orchestrator (news + blog, specialist 제외) — Expanded version.
 
 각 도메인의 정해진 쿼리/소스를 돌면서 한국어 문장을 수집.
 출력: training/crawl_data/<domain>/<date>/sentences.jsonl.gz (한 줄당 1 문장 JSON).
@@ -63,8 +63,11 @@ def crawl_blog(config: dict, naver: NaverSearchClient, rl: RateLimiter,
                robots: RobotsCache, dedup: SimhashDedup) -> int:
     crawler = BlogCrawler(naver, rate_limiter=rl, robots=robots)
     collected = 0
+    pages = config.get("pages_per_query", 5)
+    display = config.get("display_per_page", 100)
+    total_results = pages * display
     for q in config["queries"]:
-        items = crawler.search(q, display=config["target_posts_per_query"])
+        items = crawler.search_paginated(q, total_results=total_results, display=display)
         desc_sents = crawler.descriptions_to_sentences(items)
         batch = []
         for s in desc_sents:
@@ -73,7 +76,7 @@ def crawl_blog(config: dict, naver: NaverSearchClient, rl: RateLimiter,
         if batch:
             _write_sents("blog", batch)
             collected += len(batch)
-        print(f"  [blog] query='{q}' added {len(batch)}, total {collected}")
+        print(f"  [blog] query='{q}' added {len(batch)} (total {collected})")
         if collected >= config["target_sentences"]:
             break
     print(f"[blog] collected {collected} unique sentences")
@@ -91,7 +94,7 @@ def main():
 
     rl = RateLimiter(min_interval_sec=1.0)
     robots = RobotsCache(user_agent="garu-crawler/0.1")
-    dedup = SimhashDedup(hamming_threshold=16)  # 한국어 word-level에서 16이 ~80% 유사도
+    dedup = SimhashDedup(hamming_threshold=16)
 
     naver_id = os.environ.get("NAVER_CLIENT_ID")
     naver_secret = os.environ.get("NAVER_CLIENT_SECRET")

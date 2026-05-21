@@ -4,18 +4,38 @@
       "https://www.hani.co.kr/rss/",
       "https://www.hani.co.kr/rss/economy/",
       "https://www.hani.co.kr/rss/society/",
-      "https://www.hani.co.kr/rss/politics/"
+      "https://www.hani.co.kr/rss/politics/",
+      "https://www.hani.co.kr/rss/culture/",
+      "https://www.hani.co.kr/rss/international/",
+      "https://www.hani.co.kr/rss/sports/",
+      "https://www.hani.co.kr/rss/science/",
+      "https://www.hani.co.kr/rss/opinion/",
+      "https://rss.donga.com/total.xml",
+      "https://rss.donga.com/politics.xml",
+      "https://rss.donga.com/economy.xml",
+      "https://rss.donga.com/national.xml",
+      "https://rss.donga.com/international.xml",
+      "https://rss.donga.com/culture.xml",
+      "https://www.khan.co.kr/rss/rssdata/total_news.xml",
+      "https://www.khan.co.kr/rss/rssdata/politic_news.xml",
+      "https://www.khan.co.kr/rss/rssdata/economy_news.xml",
+      "https://www.khan.co.kr/rss/rssdata/society_news.xml",
+      "https://www.khan.co.kr/rss/rssdata/culture_news.xml"
     ],
-    "target_articles": 200,
-    "target_sentences": 3000
+    "target_articles": 600,
+    "target_sentences": 12000
   },
   "blog": {
     "queries": [
       "여행 후기", "맛집", "취미", "독서", "영화 리뷰",
       "운동", "요리", "육아", "반려동물", "일상",
-      "공부 방법", "직장 생활", "투자", "건강 관리"
+      "공부 방법", "직장 생활", "투자", "건강 관리", "패션",
+      "인테리어", "정원 가꾸기", "스마트폰 후기", "노트북 추천", "캠핑",
+      "등산", "낚시", "사진 촬영", "그림 그리기", "공예",
+      "코딩 공부", "외국어 학습", "자격증", "재테크", "부동산"
     ],
-    "target_posts_per_query": 30,
-    "target_sentences": 8000
+    "pages_per_query": 5,
+    "display_per_page": 100,
+    "target_sentences": 15000
   }
 }

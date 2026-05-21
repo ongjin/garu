@@ -17,8 +17,21 @@ class BlogCrawler:
         self.robots = robots
         self.timeout = timeout
 
-    def search(self, query: str, display: int = 100) -> list[dict]:
-        return self.naver.search_blog(query, display=display)
+    def search(self, query: str, display: int = 100, start: int = 1) -> list[dict]:
+        return self.naver.search_blog(query, display=display, start=start)
+
+    def search_paginated(self, query: str, total_results: int = 500,
+                         display: int = 100) -> list[dict]:
+        """Naver Blog 검색 페이지네이션. start=1, 101, 201, ... 까지."""
+        all_items = []
+        for start in range(1, total_results + 1, display):
+            page = self.naver.search_blog(query, display=display, start=start)
+            if not page:
+                break
+            all_items.extend(page)
+            if len(page) < display:
+                break  # 마지막 페이지
+        return all_items
 
     def descriptions_to_sentences(self, items: list[dict]) -> list[str]:
         out = []
@@ -26,10 +39,9 @@ class BlogCrawler:
             desc = it.get("description", "")
             for s in extract_sentences(desc):
                 out.append(s)
-            # description 자체가 짧으면 통째로 검사
             if is_korean_sentence(desc):
                 out.append(desc)
-        return list(dict.fromkeys(out))  # 순서 보존 dedup
+        return list(dict.fromkeys(out))
 
     def fetch_post_sentences(self, url: str) -> list[str]:
         if self.robots is not None and not self.robots.is_allowed(url):
