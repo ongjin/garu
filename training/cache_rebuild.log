@@ -1,0 +1,41 @@
+Loading NIKL MP eojeol gold (using word_id alignment)...
+  Unique eojeols with gold analysis: 585196
+
+Running Garu on 585196 eojeols (no cache)...
+  Processed 5000/585196
+  Processed 105000/585196
+  Processed 205000/585196
+  Processed 305000/585196
+  Processed 405000/585196
+  Processed 505000/585196
+
+  Eojeols needing correction: 149885
+  Selecting top 10000 by weighted correction value
+
+  SO 자동 보강: 13건
+
+  Top 20 cache entries:
+    그               (freq=15556, cv=2) → 그/MM
+    게               (freq=4985, cv=3) → 거/NNB + 이/JKS
+    수               (freq=14163, cv=1) → 수/NNB
+    전               (freq=5957, cv=2) → 전/MM
+    저는              (freq=2250, cv=4) → 저/NP + 는/JX
+    지금              (freq=4445, cv=2) → 지금/MAG
+    위해              (freq=3485, cv=2) → 위하/VV + 아/EC
+    제가              (freq=3417, cv=2) → 제/NP + 가/JKS
+    대해              (freq=2654, cv=2) → 대하/VV + 아/EC
+    해               (freq=2634, cv=2) → 하/VV + 아/EC
+    통해              (freq=2592, cv=2) → 통하/VV + 아/EC
+    이를              (freq=1286, cv=4) → 이/NP + 를/JKO
+    막               (freq=2482, cv=2) → 막/MAG
+    아니라             (freq=2036, cv=2) → 아니/VCN + 라/EC
+    따라              (freq=1834, cv=2) → 따르/VV + 아/EC
+    있고              (freq=1652, cv=2) → 있/VA + 고/EC
+    거는              (freq= 787, cv=4) → 거/NNB + 는/JX
+    있다”고            (freq=1328, cv=2) → 있/VX + 다/EF + ”/SS + 고/JKQ
+    이어              (freq=1235, cv=2) → 잇/VV + 어/EC
+    제               (freq= 820, cv=3) → 저/NP + 의/JKG
+
+  String table: 5327 unique forms, 39,029 bytes
+
+  Written 10000 entries to /Users/cyj/workspace/personal/kiwi/training/codebook_data/eojeol_cache.bin (297,075 bytes)

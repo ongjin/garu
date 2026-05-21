@@ -34,3 +34,4 @@ training/neural/final_report.py
 training/neural/rerank_simulator.py
 training/neural/train_variants.py
 training/neural/variants.py
+.antigravitycli/

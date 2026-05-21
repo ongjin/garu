@@ -1,0 +1,22 @@
+Running Garu... (norm=False)
+Running Kiwi...
+Quantization is not supported for ArchType::neon. Fall back to non-quantized model.
+Quantization is not supported for ArchType::neon. Fall back to non-quantized model.
+Running Mecab...
+
+=== F1 Score (vs Gold Testset) — norm=False ===
+
+Analyzer    Precision     Recall         F1
+------------------------------------------
+Garu           0.9000     0.9251     0.9123
+Kiwi           0.8858     0.9219     0.9035
+Mecab          0.7646     0.7373     0.7507
+
+=== Domain별 F1 ===
+
+  SNS        Garu=0.9023  Kiwi=0.8950  Δ=+0.0072
+  구어         Garu=0.9023  Kiwi=0.9424  Δ=-0.0400
+  기술         Garu=0.9427  Kiwi=0.8488  Δ=+0.0939
+  뉴스         Garu=0.9065  Kiwi=0.8901  Δ=+0.0164
+  문학         Garu=0.9536  Kiwi=0.9374  Δ=+0.0162
+  일상         Garu=0.9128  Kiwi=0.8868  Δ=+0.0260

@@ -1,0 +1,6 @@
+Total gold sentences: 8000
+Sentences with ~/SO in gold: 209
+
+Result: hit=209/209 (100.0%), miss=0
+
+Decision threshold: hit rate ≥ 90% → skip Task 12. Current: 100.0%
