@@ -37,7 +37,7 @@ export interface LoadOptions {
   modelData?: ArrayBuffer;
   modelUrl?: string;
   /** 분석 결과의 자모 형태소(ETM 'ㄴ' 등)를 U+11xx 결합 자모로 정규화.
-   *  기본값 true (Kiwi 호환). 옛 출력 동작이 필요하면 false로 설정. */
+   *  기본값 false (gold v15k 다수가 호환 자모 U+3130-318F를 사용). canonical 출력이 필요하면 true. */
   normalizeJamo?: boolean;
 }
 

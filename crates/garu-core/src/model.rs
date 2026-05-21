@@ -12,13 +12,13 @@ use crate::types::{AnalyzeResult, Pos, Token};
 pub struct AnalyzerOptions {
     /// 분석 결과의 자모 surface(EC/EF/ETM 등의 단일 자모 형태소)를
     /// U+3130-318F 호환 자모에서 U+11A8-11FF 결합 자모로 변환.
-    /// 기본값 true (Kiwi 호환).
+    /// 기본값 false (gold v15k 다수가 호환 자모를 사용). canonical 출력이 필요하면 true.
     pub normalize_jamo: bool,
 }
 
 impl Default for AnalyzerOptions {
     fn default() -> Self {
-        Self { normalize_jamo: true }
+        Self { normalize_jamo: false }
     }
 }
 
