@@ -94,24 +94,39 @@ def run_layer(cfg: LayerConfig, baseline: dict[str, float],
     added = append_entries_to_dict(candidates, str(DICT_PATH))
     print(f"[{cfg.name}] appended {added} entries")
 
-    print(f"[{cfg.name}] building model...")
-    _run_build()
+    try:
+        print(f"[{cfg.name}] building model...")
+        _run_build()
+        print(f"[{cfg.name}] running F1...")
+        new = _run_f1()
+    except subprocess.CalledProcessError as e:
+        print(f"[{cfg.name}] subprocess failed ({e}) — reverting content_dict")
+        _restore_dict(bak)
+        try:
+            _run_build()  # restore model too
+        except subprocess.CalledProcessError as e2:
+            print(f"[{cfg.name}] revert build also failed: {e2}")
+        decision = f"reject_subprocess_error ({type(e).__name__})"
+        _log_result(cfg.name, baseline, {}, added, decision)
+        return {"layer": cfg.name, "added": 0, "decision": decision,
+                "candidates": len(candidates), "f1": None, "baseline": baseline}
 
-    print(f"[{cfg.name}] running F1...")
-    new = _run_f1()
     print(f"[{cfg.name}] F1: {new}")
-
     decision = _decide(cfg.name, baseline, new, tolerance_per_domain)
     print(f"[{cfg.name}] decision: {decision}")
 
     if not decision.startswith("pass"):
         _restore_dict(bak)
-        _run_build()
-        print(f"[{cfg.name}] reverted content_dict + rebuilt model")
+        try:
+            _run_build()
+            print(f"[{cfg.name}] reverted content_dict + rebuilt model")
+        except subprocess.CalledProcessError as e:
+            print(f"[{cfg.name}] revert build failed: {e} — content_dict reverted but model stale!")
 
     _log_result(cfg.name, baseline, new, added, decision)
-    return {"layer": cfg.name, "added": added, "decision": decision,
-            "candidates": len(candidates), "f1": new, "baseline": baseline}
+    return {"layer": cfg.name, "added": added if decision.startswith("pass") else 0,
+            "decision": decision, "candidates": len(candidates),
+            "f1": new, "baseline": baseline}
 
 
 BASELINE_F1 = {
