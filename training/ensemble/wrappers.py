@@ -23,7 +23,10 @@ class KiwiWrapper:
         self._k = Kiwi()
 
     def analyze(self, text: str) -> list[tuple[str, str]]:
-        r = self._k.analyze(text)
+        try:
+            r = self._k.analyze(text)
+        except Exception:
+            return []
         if not r:
             return []
         return [
@@ -38,7 +41,10 @@ class MecabWrapper:
         self._m = mecab.MeCab()
 
     def analyze(self, text: str) -> list[tuple[str, str]]:
-        return [_norm_token(form, tag, "mecab") for form, tag in self._m.pos(text)]
+        try:
+            return [_norm_token(form, tag, "mecab") for form, tag in self._m.pos(text)]
+        except Exception:
+            return []
 
 
 class KkmaWrapper:
@@ -47,7 +53,10 @@ class KkmaWrapper:
         self._k = Kkma()
 
     def analyze(self, text: str) -> list[tuple[str, str]]:
-        return [_norm_token(form, tag, "kkma") for form, tag in self._k.pos(text)]
+        try:
+            return [_norm_token(form, tag, "kkma") for form, tag in self._k.pos(text)]
+        except Exception:
+            return []
 
 
 class KomoranWrapper:
@@ -56,7 +65,10 @@ class KomoranWrapper:
         self._k = Komoran()
 
     def analyze(self, text: str) -> list[tuple[str, str]]:
-        return [_norm_token(form, tag, "komoran") for form, tag in self._k.pos(text)]
+        try:
+            return [_norm_token(form, tag, "komoran") for form, tag in self._k.pos(text)]
+        except Exception:
+            return []
 
 
 _GARU_BIN = os.path.join(

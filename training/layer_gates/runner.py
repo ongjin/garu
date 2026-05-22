@@ -15,7 +15,10 @@ from filter import LayerConfig, filter_candidates
 from merge import append_entries_to_dict
 
 ROOT = Path(__file__).resolve().parents[2]
-POOL_PATH = ROOT / "training" / "codebook_data" / "candidates_pool.jsonl"
+POOL_PATH = Path(os.environ.get(
+    "GARU_POOL_PATH",
+    str(ROOT / "training" / "codebook_data" / "candidates_pool.jsonl"),
+))
 DICT_PATH = ROOT / "training" / "codebook_data" / "content_dict.txt"
 LOG_PATH = ROOT / "training" / "dict_expansion_log.tsv"
 PYTHON = os.environ.get("GARU_ENSEMBLE_PYTHON", "/opt/homebrew/bin/python3.14")
