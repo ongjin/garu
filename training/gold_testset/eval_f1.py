@@ -1,7 +1,8 @@
-"""4개 분석기 F1 비교: Garu, Kiwi, Claude, Mecab vs Gold
+"""5개 분석기 F1 비교: Garu, Kiwi, Mecab, Kkma, Komoran vs Gold
 
 기본: ep_norm(jamo/모음조화/EP축약/태그 정규화) 적용 후 비교.
 --no-norm 플래그로 끄면 raw 비교.
+--analyzers 로 사용할 분석기 부분 선택 가능 (예: garu,kiwi).
 """
 import argparse, json, os, subprocess, sys
 from kiwipiepy import Kiwi
@@ -11,6 +12,11 @@ BASE = os.path.dirname(__file__)
 ROOT = os.path.join(BASE, "..", "..")
 sys.path.insert(0, os.path.join(BASE, "expand"))
 from ep_norm import normalize_ep_morphemes
+
+# Kkma POS → 세종 매핑 (training/ensemble/pos_normalize.py와 동일)
+KKMA_TO_SEJONG = {
+    "OH": "SH", "OL": "SL", "ON": "SN", "NNM": "NNB",
+}
 
 def load_gold():
     records = []
@@ -45,12 +51,54 @@ def run_mecab(texts):
     mc = mecab.MeCab()
     results = []
     for t in texts:
+        try:
+            raw = mc.pos(t)
+        except Exception:
+            results.append([])
+            continue
         tokens = []
-        for form, tag in mc.pos(t):
+        for form, tag in raw:
             if "+" in tag:
                 tokens.append([form, tag.split("+")[0]])
             else:
                 tokens.append([form, tag])
+        results.append(tokens)
+    return results
+
+
+def run_kkma(texts):
+    from konlpy.tag import Kkma
+    kk = Kkma()
+    results = []
+    for t in texts:
+        try:
+            raw = kk.pos(t)
+        except Exception:
+            results.append([])
+            continue
+        tokens = []
+        for form, tag in raw:
+            base = tag.split("+")[0] if "+" in tag else tag
+            mapped = KKMA_TO_SEJONG.get(base, base)
+            tokens.append([form, mapped])
+        results.append(tokens)
+    return results
+
+
+def run_komoran(texts):
+    from konlpy.tag import Komoran
+    km = Komoran()
+    results = []
+    for t in texts:
+        try:
+            raw = km.pos(t)
+        except Exception:
+            results.append([])
+            continue
+        tokens = []
+        for form, tag in raw:
+            base = tag.split("+")[0] if "+" in tag else tag
+            tokens.append([form, base])
         results.append(tokens)
     return results
 
@@ -84,49 +132,70 @@ def compute_f1(pred, gold):
     f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
     return prec, rec, f1
 
+ALL_ANALYZERS = ["garu", "kiwi", "mecab", "kkma", "komoran"]
+RUNNERS = {
+    "garu": run_garu,
+    "kiwi": run_kiwi,
+    "mecab": run_mecab,
+    "kkma": run_kkma,
+    "komoran": run_komoran,
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-norm", action="store_true", help="ep_norm 비적용 (raw 비교)")
+    ap.add_argument("--analyzers", default=",".join(ALL_ANALYZERS),
+                    help=f"Comma-separated subset of {','.join(ALL_ANALYZERS)}")
     args = ap.parse_args()
     apply_norm = not args.no_norm
+    selected = [a.strip() for a in args.analyzers.split(",") if a.strip()]
+    for a in selected:
+        if a not in RUNNERS:
+            sys.exit(f"Unknown analyzer: {a}")
 
     records = load_gold()
     texts = [r["text"] for r in records]
     gold_raw = [r["morphemes"] for r in records]
 
-    print(f"Running Garu... (norm={apply_norm})", flush=True)
-    garu_raw = run_garu(texts)
-    print("Running Kiwi...", flush=True)
-    kiwi_raw = run_kiwi(texts)
-    print("Running Mecab...", flush=True)
-    mec_raw = run_mecab(texts)
+    preds_raw = {}
+    for a in selected:
+        print(f"Running {a}... (norm={apply_norm})", flush=True)
+        preds_raw[a] = RUNNERS[a](texts)
 
     gold = _maybe_norm(gold_raw, apply_norm)
-    garu = _maybe_norm(garu_raw, apply_norm)
-    kiwi = _maybe_norm(kiwi_raw, apply_norm)
-    mec = _maybe_norm(mec_raw, apply_norm)
+    preds = {a: _maybe_norm(v, apply_norm) for a, v in preds_raw.items()}
 
-    print(f"\n=== F1 Score (vs Gold Testset) — norm={apply_norm} ===\n")
+    print(f"\n=== F1 Score (vs Gold Testset, n={len(texts)}) — norm={apply_norm} ===\n")
     print(f"{'Analyzer':<10} {'Precision':>10} {'Recall':>10} {'F1':>10}")
     print("-" * 42)
-    for name, pred in [("Garu", garu), ("Kiwi", kiwi), ("Mecab", mec)]:
-        p, r, f1 = compute_f1(pred, gold)
-        print(f"{name:<10} {p:>10.4f} {r:>10.4f} {f1:>10.4f}")
+    overall_f1 = {}
+    for a in selected:
+        p, r, f1 = compute_f1(preds[a], gold)
+        overall_f1[a] = f1
+        print(f"{a.capitalize():<10} {p:>10.4f} {r:>10.4f} {f1:>10.4f}")
 
     print("\n=== Domain별 F1 ===\n")
     domains = {}
     for i, rec in enumerate(records):
         d = rec["domain"]
         if d not in domains:
-            domains[d] = {"pred_garu": [], "pred_kiwi": [], "gold": []}
-        domains[d]["pred_garu"].append(garu[i])
-        domains[d]["pred_kiwi"].append(kiwi[i])
+            domains[d] = {"preds": {a: [] for a in selected}, "gold": []}
+        for a in selected:
+            domains[d]["preds"][a].append(preds[a][i])
         domains[d]["gold"].append(gold[i])
+
+    # 헤더
+    header = f"  {'domain':<10}"
+    for a in selected:
+        header += f"  {a:>8}"
+    print(header)
     for d in sorted(domains.keys()):
-        pg, _, fg = compute_f1(domains[d]["pred_garu"], domains[d]["gold"])
-        pk, _, fk = compute_f1(domains[d]["pred_kiwi"], domains[d]["gold"])
-        delta = fg - fk
-        print(f"  {d:<10} Garu={fg:.4f}  Kiwi={fk:.4f}  Δ={delta:+.4f}")
+        row = f"  {d:<10}"
+        for a in selected:
+            _, _, fa = compute_f1(domains[d]["preds"][a], domains[d]["gold"])
+            row += f"  {fa:>8.4f}"
+        print(row)
 
 if __name__ == "__main__":
     main()

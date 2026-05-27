@@ -128,6 +128,72 @@ def run_kiwi_analyzer(sentences):
     return results
 
 
+def run_mecab_analyzer(sentences):
+    """Run Mecab on sentences."""
+    import mecab
+    mc = mecab.MeCab()
+    results = []
+    for text, _ in sentences:
+        try:
+            raw = mc.pos(text)
+        except Exception:
+            results.append([])
+            continue
+        tokens = []
+        for form, tag in raw:
+            base = tag.split("+")[0] if "+" in tag else tag
+            if form.strip():
+                tokens.append((form, normalize_pos(base)))
+        results.append(tokens)
+    return results
+
+
+KKMA_TO_SEJONG = {
+    "OH": "SH", "OL": "SL", "ON": "SN", "NNM": "NNB",
+}
+
+
+def run_kkma_analyzer(sentences):
+    """Run Kkma on sentences."""
+    from konlpy.tag import Kkma
+    kk = Kkma()
+    results = []
+    for text, _ in sentences:
+        try:
+            raw = kk.pos(text)
+        except Exception:
+            results.append([])
+            continue
+        tokens = []
+        for form, tag in raw:
+            base = tag.split("+")[0] if "+" in tag else tag
+            mapped = KKMA_TO_SEJONG.get(base, base)
+            if form.strip():
+                tokens.append((form, normalize_pos(mapped)))
+        results.append(tokens)
+    return results
+
+
+def run_komoran_analyzer(sentences):
+    """Run Komoran on sentences."""
+    from konlpy.tag import Komoran
+    km = Komoran()
+    results = []
+    for text, _ in sentences:
+        try:
+            raw = km.pos(text)
+        except Exception:
+            results.append([])
+            continue
+        tokens = []
+        for form, tag in raw:
+            base = tag.split("+")[0] if "+" in tag else tag
+            if form.strip():
+                tokens.append((form, normalize_pos(base)))
+        results.append(tokens)
+    return results
+
+
 def compute_f1(predictions, gold_sentences):
     """Compute morpheme-level F1."""
     tp = defaultdict(int)
@@ -179,38 +245,54 @@ def print_results(name, P, R, F, tp, fp, fn):
         print(f'{tag:<8}{p:>8.1%}{r:>8.1%}{f:>8.1%}{t:>6}{f_p:>6}{f_n:>6}')
 
 
-def main():
-    n = 2000
-    if len(sys.argv) > 2 and sys.argv[1] == '--n':
-        n = int(sys.argv[2])
+RUNNERS = {
+    "garu":    run_rust_analyzer,
+    "kiwi":    run_kiwi_analyzer,
+    "mecab":   run_mecab_analyzer,
+    "kkma":    run_kkma_analyzer,
+    "komoran": run_komoran_analyzer,
+}
 
-    print(f"Loading NIKL MP sentences (max {n})...")
-    sentences = load_nikl_sentences(n)
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--n", type=int, default=5000)
+    ap.add_argument("--analyzers", default=",".join(RUNNERS.keys()))
+    ap.add_argument("--verbose-pos", action="store_true",
+                    help="POS별 breakdown 출력")
+    args = ap.parse_args()
+
+    selected = [a.strip() for a in args.analyzers.split(",") if a.strip()]
+    for a in selected:
+        if a not in RUNNERS:
+            sys.exit(f"Unknown analyzer: {a}")
+
+    print(f"Loading NIKL MP sentences (max {args.n})...")
+    sentences = load_nikl_sentences(args.n)
     print(f"  Loaded {len(sentences)} sentences")
 
-    # Garu (Rust)
-    print("\nRunning Garu (Rust)...")
-    garu_results = run_rust_analyzer(sentences)
-    if garu_results:
-        P, R, F, tp, fp, fn = compute_f1(garu_results, sentences)
-        print_results(f"Garu vs NIKL MP ({len(sentences)} sentences)", P, R, F, tp, fp, fn)
-        garu_f1 = F
-    else:
-        garu_f1 = 0
+    f1_results = {}
+    for a in selected:
+        print(f"\nRunning {a}...", flush=True)
+        pred = RUNNERS[a](sentences)
+        if pred is None:
+            print(f"  {a}: failed")
+            f1_results[a] = (0, 0, 0, {}, {}, {})
+            continue
+        P, R, F, tp, fp, fn = compute_f1(pred, sentences)
+        f1_results[a] = (P, R, F, tp, fp, fn)
+        if args.verbose_pos:
+            print_results(f"{a.capitalize()} vs NIKL MP ({len(sentences)} sentences)",
+                          P, R, F, tp, fp, fn)
 
-    # Kiwi
-    print("\nRunning Kiwi...")
-    kiwi_results = run_kiwi_analyzer(sentences)
-    P, R, F, tp, fp, fn = compute_f1(kiwi_results, sentences)
-    print_results(f"Kiwi vs NIKL MP ({len(sentences)} sentences)", P, R, F, tp, fp, fn)
-    kiwi_f1 = F
-
-    # Summary
     print(f'\n{"=" * 60}')
     print(f'  SUMMARY (NIKL MP {len(sentences)} sentences)')
-    print(f'  Garu:  F1 = {garu_f1:.1%}')
-    print(f'  Kiwi:  F1 = {kiwi_f1:.1%}')
-    print(f'  Gap:   {(kiwi_f1 - garu_f1)*100:.1f}%p')
+    print(f'  {"analyzer":<10} {"Prec":>8} {"Rec":>8} {"F1":>8}')
+    print(f'  {"-"*36}')
+    for a in selected:
+        P, R, F, *_ = f1_results[a]
+        print(f'  {a:<10} {P:>8.4f} {R:>8.4f} {F:>8.4f}')
     print(f'{"=" * 60}')
 
 
