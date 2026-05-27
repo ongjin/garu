@@ -9,15 +9,14 @@
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
 
-## Comparison
+## Live demos
 
-|  | Kiwi | MeCab-ko | garu-ko |
-|---|---|---|---|
-| Model size | ~40MB | ~50MB | **1MB** |
-| npm package | No | No | **Yes** |
-| F1 (gold v15k, ep_norm) | 95.0% | 75.5% | 93.3% |
-| F1 (NIKL MP) | 87.9% | ~85% | **93.7%** |
-| Browser support | Impractical | No | **Yes** |
+Try it in the browser — every page below runs the analyzer 100% client-side via WASM.
+
+- **[Morphological analyzer](https://garu.zerry.co.kr)** — interactive POS tagging with the full Sejong tagset
+- **[Use cases](https://garu.zerry.co.kr/use-cases)** — copy-paste recipes for search indexing, keyword extraction, chatbot preprocessing, and offline PWAs
+- **[Orama integration](https://garu.zerry.co.kr/orama)** — side-by-side comparison of Orama's default tokenizer vs. `garu-orama-tokenizer`
+- **[MiniSearch integration](https://garu.zerry.co.kr/minisearch)** — same comparison for MiniSearch
 
 ## Quick Start
 

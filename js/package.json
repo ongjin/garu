@@ -1,7 +1,7 @@
 {
   "name": "garu-ko",
   "version": "0.9.1",
-  "description": "Ultra-lightweight Korean morphological analyzer for the web (1.9MB model, WASM, F1 93.9%)",
+  "description": "Ultra-lightweight Korean morphological analyzer for the web (1MB model, WASM, F1 93.7% NIKL MP)",
   "type": "module",
   "main": "dist/node.js",
   "browser": "dist/browser.js",
@@ -38,11 +38,23 @@
   "keywords": [
     "korean",
     "morphological-analysis",
+    "korean-nlp",
+    "pos-tagging",
+    "tokenizer",
     "nlp",
     "wasm",
+    "webassembly",
     "lightweight",
-    "browser"
+    "browser",
+    "offline",
+    "한국어",
+    "형태소-분석",
+    "형태소-분석기"
   ],
+  "homepage": "https://garu.zerry.co.kr",
+  "bugs": {
+    "url": "https://github.com/ongjin/garu/issues"
+  },
   "author": "cyj <dydwls140@naver.com>",
   "repository": {
     "type": "git",
