@@ -62,10 +62,33 @@ def _norm_pos(pos: str) -> str:
     return TAG_NORM.get(pos, pos)
 
 
+def _join_xr_ha(morphemes: list) -> list:
+    """[X, XR] + [하, XSA/XSV] → [X하, VA/VV] 로 결합 (split↔join 컨벤션 통일).
+
+    어근(XR) 분리(kiwi)와 결합(garu/구 골드)이 어휘별로 갈리는 차이를 흡수.
+    XR+하 인접에서만 트리거하므로 대하/위하(bound, VV) 등은 영향 없음.
+    """
+    out = []
+    i = 0
+    n = len(morphemes)
+    while i < n:
+        s, p = morphemes[i]
+        if (p == "XR" and i + 1 < n
+                and morphemes[i + 1][0] == "하"
+                and morphemes[i + 1][1] in ("XSA", "XSV")):
+            joined_pos = "VA" if morphemes[i + 1][1] == "XSA" else "VV"
+            out.append([s + "하", joined_pos])
+            i += 2
+        else:
+            out.append([s, p])
+            i += 1
+    return out
+
+
 def normalize_ep_morphemes(morphemes: list) -> list:
     """비교용 정규화된 morpheme 리스트 반환. 원본 morphemes 변경 안 함."""
     out = []
-    for surface, pos in morphemes:
+    for surface, pos in _join_xr_ha(morphemes):
         key = (surface, pos)
         if key in CONTRACT_MAP:
             for s, p in CONTRACT_MAP[key]:
@@ -117,6 +140,18 @@ if __name__ == "__main__":
     h3 = [["대립하", "VV"], ["아", "EC"]]
     h4 = [["대립하", "VV"], ["여", "EC"]]
     assert normalize_ep_morphemes(h3) == normalize_ep_morphemes(h4)
+
+    # XR 분리(kiwi) ≡ 결합(garu): 첨예/XR+하/XSA == 첨예하/VA
+    x1 = [["첨예", "XR"], ["하", "XSA"], ["게", "EC"]]
+    x2 = [["첨예하", "VA"], ["게", "EC"]]
+    assert normalize_ep_morphemes(x1) == normalize_ep_morphemes(x2)
+    # XSV 버전: 발전/XR+하/XSV == 발전하/VV
+    x3 = [["발전", "XR"], ["하", "XSV"], ["었", "EP"]]
+    x4 = [["발전하", "VV"], ["았", "EP"]]
+    assert normalize_ep_morphemes(x3) == normalize_ep_morphemes(x4)
+    # XR 아닌 NNG+하는 결합 안 함 (중요/NNG+하/XSA는 그대로)
+    x5 = [["중요", "NNG"], ["하", "XSA"], ["다", "EF"]]
+    assert normalize_ep_morphemes(x5) == [["중요", "NNG"], ["하", "XSA"], ["다", "EF"]]
 
     # 태그 하위분류 (SS↔SSC)
     t1 = [["”", "SS"]]
