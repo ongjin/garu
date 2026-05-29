@@ -36,8 +36,11 @@ def _build_analyzers():
     }
 
 
-def process_one_sentence(text: str, analyzers: dict) -> dict:
-    """한 문장을 어절로 쪼개고 어절별 voting 수행. 결과 dict 반환."""
+def process_one_sentence(text: str, analyzers: dict, errors: dict) -> dict:
+    """한 문장을 어절로 쪼개고 어절별 voting 수행. 결과 dict 반환.
+
+    errors: {analyzer_name: count} — 누적 카운트, 첫 3건만 stderr 로그.
+    """
     eojeols = text.split()
     eojeol_votes_normal = []
     suspicious_eojeols = []
@@ -46,8 +49,12 @@ def process_one_sentence(text: str, analyzers: dict) -> dict:
         for name, a in analyzers.items():
             try:
                 analyses[name] = a.analyze(eoj)
-            except Exception:
+            except Exception as e:
                 analyses[name] = []
+                errors[name] = errors.get(name, 0) + 1
+                if errors[name] <= 3:
+                    print(f"  WARN {name} failed on {eoj!r}: {type(e).__name__}: {e}",
+                          file=sys.stderr, flush=True)
         r = vote_eojeol(eoj, analyses)
         if r.status == "normal":
             eojeol_votes_normal.append({
@@ -81,22 +88,39 @@ def process_one_sentence(text: str, analyzers: dict) -> dict:
 
 def process_sentences(input_path: Path, voted_path: Path, suspicious_path: Path) -> dict:
     """jsonl 파일을 처리해 두 출력 파일에 기록. 통계 dict 반환."""
-    print(f"Loading analyzers...", flush=True)
+    if voted_path.exists() or suspicious_path.exists():
+        raise SystemExit(
+            f"Output files already exist:\n"
+            f"  {voted_path}\n  {suspicious_path}\n"
+            f"Delete them and re-run, or choose different paths."
+        )
+    print("Loading analyzers...", flush=True)
     analyzers = _build_analyzers()
 
     stats = {"total": 0, "normal": 0, "suspicious": 0, "by_domain": {}}
+    errors: dict[str, int] = {}
+    bad_lines = 0
     start = time.time()
 
     with open(input_path) as fin, \
          open(voted_path, "w") as fv, \
          open(suspicious_path, "w") as fs:
         for line in fin:
-            d = json.loads(line)
+            try:
+                d = json.loads(line)
+                text = d["text"]
+            except (json.JSONDecodeError, KeyError) as e:
+                bad_lines += 1
+                print(f"  WARN skipping malformed line {stats['total'] + bad_lines}: {type(e).__name__}",
+                      file=sys.stderr, flush=True)
+                continue
             stats["total"] += 1
-            result = process_one_sentence(d["text"], analyzers)
+            result = process_one_sentence(text, analyzers, errors)
 
             # 원본 메타데이터 유지하되 기존 morphemes / source / confidence 제거
-            out = {"text": d["text"], "domain": d.get("domain", "unknown")}
+            out = {"text": text, "domain": d.get("domain", "unknown")}
+            # result keys (vote_status / morphemes / eojeol_votes / suspicious_eojeols) must not
+            # collide with text/domain; see process_one_sentence return shape.
             out.update(result)
 
             domain = out["domain"]
@@ -120,9 +144,15 @@ def process_sentences(input_path: Path, voted_path: Path, suspicious_path: Path)
                     f"suspicious={stats['suspicious']} ({rate:.1f} sent/s)",
                     flush=True,
                 )
+                fv.flush()
+                fs.flush()
 
     elapsed = time.time() - start
     print(f"\nDone in {elapsed:.1f}s. {stats['total']} sentences.")
+    stats["analyzer_errors"] = errors
+    stats["bad_lines"] = bad_lines
+    if errors:
+        print(f"\nAnalyzer error counts: {errors}", file=sys.stderr, flush=True)
     return stats
 
 
