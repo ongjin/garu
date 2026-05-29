@@ -50,41 +50,7 @@ def test_ep_positive_compound_vowel_becomes_at():
     assert unify_ep([["봐","VV"],["었","EP"],["다","EF"]]) == [["봐","VV"],["았","EP"],["다","EF"]]
 
 
-from sejong_normalize import is_merge_of, candidates_converge
-
-
-def test_is_merge_of_jongseong_attach():
-    # fine=[하/VV, ㄴ다/EF] 의 마지막 둘 결합 → "한다" == coarse 마지막
-    fine = [["하","VV"],["ㄴ다","EF"]]
-    coarse = [["한다","VV"]]
-    assert is_merge_of(fine, coarse) is True
-
-
-def test_is_merge_of_with_prefix():
-    # 앞부분 동일 + 마지막 결합. 말+하+ㄴ다 vs 말+한다
-    fine = [["말","NNG"],["하","VV"],["ㄴ다","EF"]]
-    coarse = [["말","NNG"],["한다","VV"]]
-    assert is_merge_of(fine, coarse) is True
-
-
-def test_is_merge_of_rieul_etm():
-    # 하 + ㄹ(ETM) → 할
-    fine = [["하","VV"],["ㄹ","ETM"]]
-    coarse = [["할","VV"]]
-    assert is_merge_of(fine, coarse) is True
-
-
-def test_is_merge_of_false_when_vowel_contraction():
-    # 가+았 → 갔 은 받침결합 아님(모음축약) → False (Claude로 폴백)
-    fine = [["가","VV"],["았","EP"]]
-    coarse = [["갔","VV"]]
-    assert is_merge_of(fine, coarse) is False
-
-
-def test_is_merge_of_false_when_prefix_differs():
-    fine = [["먹","VV"],["ㄴ다","EF"]]
-    coarse = [["한다","VV"]]
-    assert is_merge_of(fine, coarse) is False
+from sejong_normalize import candidates_converge
 
 
 def test_converge_ep_only():
@@ -94,15 +60,6 @@ def test_converge_ep_only():
         {"analyzers": ["garu"], "morphemes": [["하","XSV"],["았","EP"],["다","EF"]]},
     ]
     assert candidates_converge(cands) == [["하","XSV"],["였","EP"],["다","EF"]]
-
-
-def test_converge_granularity():
-    # 한다: 입도 차이 → 최대분해(하+ㄴ다)로 수렴
-    cands = [
-        {"analyzers": ["kiwi"], "morphemes": [["하","VV"],["ㄴ다","EF"]]},
-        {"analyzers": ["mecab"], "morphemes": [["한다","VV"]]},
-    ]
-    assert candidates_converge(cands) == [["하","VV"],["ㄴ다","EF"]]
 
 
 def test_converge_none_on_pos_conflict():
@@ -129,5 +86,14 @@ def test_converge_ep_then_granularity():
     cands = [
         {"analyzers": ["kiwi"], "morphemes": [["하","XSV"],["었","EP"],["ㄴ다","EF"]]},
         {"analyzers": ["mecab"], "morphemes": [["하","XSV"],["였다","EF"]]},
+    ]
+    assert candidates_converge(cands) is None
+
+
+def test_converge_none_on_granularity_difference():
+    # 입도 차이는 더 이상 자동 수렴하지 않음 → None (Claude로). noun↔verb 동형이의 방어.
+    cands = [
+        {"analyzers": ["kiwi"], "morphemes": [["하","VV"],["ㄴ다","EF"]]},
+        {"analyzers": ["mecab"], "morphemes": [["한다","VV"]]},
     ]
     assert candidates_converge(cands) is None
