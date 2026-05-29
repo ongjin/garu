@@ -121,3 +121,13 @@ def test_converge_none_on_vowel_contraction():
         {"analyzers": ["mecab"], "morphemes": [["갔","VV"],["다","EC"]]},
     ]
     assert candidates_converge(cands) is None
+
+
+def test_converge_ep_then_granularity():
+    # EP 통일 후 [하/XSV, 였/EP, ㄴ다/EF] vs [하/XSV, 였다/EF].
+    # 였은 이미 종성(ㅅ)이 있어 ㄴ 결합 불가 → is_merge_of False → None (Claude 폴백)
+    cands = [
+        {"analyzers": ["kiwi"], "morphemes": [["하","XSV"],["었","EP"],["ㄴ다","EF"]]},
+        {"analyzers": ["mecab"], "morphemes": [["하","XSV"],["였다","EF"]]},
+    ]
+    assert candidates_converge(cands) is None
