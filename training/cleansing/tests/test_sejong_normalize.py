@@ -81,8 +81,8 @@ def test_converge_none_on_vowel_contraction():
 
 
 def test_converge_ep_then_granularity():
-    # EP 통일 후 [하/XSV, 였/EP, ㄴ다/EF] vs [하/XSV, 였다/EF].
-    # 였은 이미 종성(ㅅ)이 있어 ㄴ 결합 불가 → is_merge_of False → None (Claude 폴백)
+    # EP 통일 후 [하/XSV, 였/EP, ㄴ다/EF] vs [하/XSV, 였다/EF] — 입도 차이로 불일치.
+    # EP-only 수렴이 아니므로 → None (Claude 폴백)
     cands = [
         {"analyzers": ["kiwi"], "morphemes": [["하","XSV"],["었","EP"],["ㄴ다","EF"]]},
         {"analyzers": ["mecab"], "morphemes": [["하","XSV"],["였다","EF"]]},
