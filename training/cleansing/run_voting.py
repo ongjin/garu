@@ -44,9 +44,25 @@ def process_one_sentence(text: str, analyzers: dict, errors: dict) -> dict:
     eojeols = text.split()
     eojeol_votes_normal = []
     suspicious_eojeols = []
+
+    # Garu만 어절별 subprocess → 문장당 1회 배치로 묶음 (~10x).
+    # 다른 4분석기는 in-process 호출이라 어절별 그대로 유지.
+    garu = analyzers["garu"]
+    try:
+        garu_results = garu.analyze_batch(eojeols)
+    except Exception as e:
+        garu_results = [[] for _ in eojeols]
+        errors["garu"] = errors.get("garu", 0) + 1
+        if errors["garu"] <= 3:
+            print(f"  WARN garu batch failed on sentence: {type(e).__name__}: {e}",
+                  file=sys.stderr, flush=True)
+
     for idx, eoj in enumerate(eojeols):
         analyses = {}
         for name, a in analyzers.items():
+            if name == "garu":
+                analyses["garu"] = garu_results[idx]
+                continue
             try:
                 analyses[name] = a.analyze(eoj)
             except Exception as e:

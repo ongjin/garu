@@ -84,27 +84,51 @@ class GaruWrapper:
     """Garu wrapper. analyze_batch 바이너리 subprocess 호출 (dedup용).
 
     eval_f1.py와 동일 패턴: tempfile에 텍스트 쓰고 path 인자로 전달.
+
+    `analyze_batch(texts)`는 한 subprocess 안에서 N개 텍스트를 한꺼번에 분석.
+    Rust 바이너리가 입력 라인 수만큼 정확히 출력 라인을 내므로 1:1 매핑.
+    어절별 호출 → 문장당 1회로 줄이는 cleansing 파이프라인 최적화에 사용.
     """
-    def analyze(self, text: str) -> list[tuple[str, str]]:
+    def analyze_batch(self, texts: list[str]) -> list[list[tuple[str, str]]]:
+        if not texts:
+            return []
         if not os.path.exists(_GARU_BIN):
             raise FileNotFoundError(
                 f"Garu binary not found at {_GARU_BIN}. "
                 "Run `cargo build --release --examples` first."
             )
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write(text + "\n")
+            # 각 텍스트의 내부 개행은 단일 라인으로 압축 (Rust 쪽이 line-by-line 읽음).
+            # trailing \n 포함 — Rust 쪽 trim().is_empty() 분기가 빈 줄을 []로 받아주므로 안전.
+            for t in texts:
+                f.write(t.replace("\n", " ") + "\n")
             tmp_path = f.name
         try:
             proc = subprocess.run(
                 [_GARU_BIN, tmp_path, "--json"],
                 capture_output=True, text=True,
                 env={**os.environ, "GARU_MODEL": _GARU_MODEL},
-                timeout=30,
+                timeout=60,
             )
         finally:
             os.unlink(tmp_path)
         if proc.returncode != 0:
             raise RuntimeError(f"Garu failed: {proc.stderr[:300]}")
-        line = proc.stdout.strip().split("\n")[0]
-        tokens = json.loads(line)
-        return [_norm_token(t[0], t[1], "garu") for t in tokens]
+        # splitlines()는 trailing newline을 무시. 출력 라인 수 == 입력 라인 수 보장.
+        lines = proc.stdout.splitlines()
+        if len(lines) < len(texts):
+            raise RuntimeError(
+                f"Garu batch output line count mismatch: "
+                f"expected {len(texts)}, got {len(lines)}"
+            )
+        results: list[list[tuple[str, str]]] = []
+        for line in lines[:len(texts)]:
+            tokens = json.loads(line)
+            results.append([_norm_token(t[0], t[1], "garu") for t in tokens])
+        return results
+
+    def analyze(self, text: str) -> list[tuple[str, str]]:
+        # 빈 문자열은 subprocess 우회 (Garu는 빈 입력에도 []만 내지만, 굳이 호출 안 함).
+        if not text:
+            return []
+        return self.analyze_batch([text])[0]
