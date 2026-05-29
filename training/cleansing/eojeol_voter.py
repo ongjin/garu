@@ -4,9 +4,9 @@
 임계값: 3+ 분석기가 같은 시퀀스 → 정상, 그 외 → 의심.
 
 동률(2-2-1, 1-1-1-1-1 등) 케이스도 3/5+ 미달이므로 자동 의심.
-빈 출력은 별도 후보로 취급(다른 분석기와 합쳐지지 않음).
+빈 출력은 빈 시퀀스 키 `()` 로 그룹화 — 실패 분석기끼리 단일 그룹을 형성한다 (downstream 노이즈 식별에 유용).
 
-morpheme 표현은 JSON-friendly한 list[list[str, str]]로 반환.
+morpheme 표현은 JSON-friendly한 list[list[str]]로 반환.
 """
 from collections import defaultdict
 from dataclasses import dataclass
@@ -18,7 +18,7 @@ class EojeolVoteResult:
     surface: str
     status: str           # "normal" | "suspicious"
     agree: int            # 다수파 분석기 수 (1~5)
-    morphemes: Optional[list]  # 정상일 때 채택된 시퀀스 (list[list[str, str]])
+    morphemes: Optional[list]  # 정상일 때 채택된 시퀀스 (list[list[str]])
     candidates: list[dict]  # [{"analyzers": [...], "morphemes": [...]}, ...] (의심일 때 raw 후보)
 
 

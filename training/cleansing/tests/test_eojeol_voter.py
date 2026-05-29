@@ -86,7 +86,7 @@ def test_all_different_1_1_1_1_1():
     assert len(r.candidates) == 5
 
 
-def test_empty_output_treated_as_distinct():
+def test_empty_output_forms_distinct_group_from_non_empty():
     """빈 출력은 별도 후보로 취급 (다른 분석기와 합쳐지지 않음)."""
     seq = [("정상", "NNG")]
     analyses = {
@@ -96,6 +96,7 @@ def test_empty_output_treated_as_distinct():
     r = vote_eojeol("정상", analyses)
     assert r.status == "normal"
     assert r.agree == 4
+    assert r.morphemes == [["정상", "NNG"]]
 
 
 def test_surface_pos_both_must_match():
