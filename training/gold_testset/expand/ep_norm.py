@@ -23,8 +23,10 @@ COMPAT_TO_COMBINING = {
 }
 
 # 모음조화 시작 음절 매핑 (어/었/워/웠 등) — EC/EP/EF 한정
+# 여/였: 하다 여불규칙 (하+여→해, 하+였→했). 하+아/하+았와 동치로 통일.
 VOWEL_HARMONY_PREFIX = {
     "어": "아", "었": "았", "워": "와", "웠": "왔",
+    "여": "아", "였": "았",
 }
 
 # 태그 하위분류 통일
@@ -105,6 +107,16 @@ if __name__ == "__main__":
     v3 = [["통하", "VV"], ["아", "EC"]]
     v4 = [["통하", "VV"], ["어", "EC"]]
     assert normalize_ep_morphemes(v3) == normalize_ep_morphemes(v4)
+
+    # 하다 여불규칙 EP (았↔였): 하+았 == 하+였
+    h1 = [["하", "XSV"], ["았", "EP"], ["다", "EF"]]
+    h2 = [["하", "XSV"], ["였", "EP"], ["다", "EF"]]
+    assert normalize_ep_morphemes(h1) == normalize_ep_morphemes(h2)
+
+    # 하다 여불규칙 EC (아↔여): 하+아 == 하+여
+    h3 = [["대립하", "VV"], ["아", "EC"]]
+    h4 = [["대립하", "VV"], ["여", "EC"]]
+    assert normalize_ep_morphemes(h3) == normalize_ep_morphemes(h4)
 
     # 태그 하위분류 (SS↔SSC)
     t1 = [["”", "SS"]]

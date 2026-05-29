@@ -18,9 +18,10 @@ KKMA_TO_SEJONG = {
     "OH": "SH", "OL": "SL", "ON": "SN", "NNM": "NNB",
 }
 
-def load_gold():
+def load_gold(gold_file="gold_testset.jsonl"):
+    path = gold_file if os.path.isabs(gold_file) else os.path.join(BASE, gold_file)
     records = []
-    with open(os.path.join(BASE, "gold_testset.jsonl")) as f:
+    with open(path) as f:
         for line in f:
             records.append(json.loads(line))
     return records
@@ -145,6 +146,8 @@ RUNNERS = {
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-norm", action="store_true", help="ep_norm 비적용 (raw 비교)")
+    ap.add_argument("--gold", default="gold_testset.jsonl",
+                    help="골드 파일 경로 (BASE 상대 또는 절대). 기본: gold_testset.jsonl")
     ap.add_argument("--analyzers", default=",".join(ALL_ANALYZERS),
                     help=f"Comma-separated subset of {','.join(ALL_ANALYZERS)}")
     args = ap.parse_args()
@@ -154,7 +157,7 @@ def main():
         if a not in RUNNERS:
             sys.exit(f"Unknown analyzer: {a}")
 
-    records = load_gold()
+    records = load_gold(args.gold)
     texts = [r["text"] for r in records]
     gold_raw = [r["morphemes"] for r in records]
 
@@ -166,7 +169,7 @@ def main():
     gold = _maybe_norm(gold_raw, apply_norm)
     preds = {a: _maybe_norm(v, apply_norm) for a, v in preds_raw.items()}
 
-    print(f"\n=== F1 Score (vs Gold Testset, n={len(texts)}) — norm={apply_norm} ===\n")
+    print(f"\n=== F1 Score (vs {args.gold}, n={len(texts)}) — norm={apply_norm} ===\n")
     print(f"{'Analyzer':<10} {'Precision':>10} {'Recall':>10} {'F1':>10}")
     print("-" * 42)
     overall_f1 = {}
