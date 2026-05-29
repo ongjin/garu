@@ -11,7 +11,7 @@ from typing import Optional
 from hangul_jamo import decompose_syllable, attach_jongseong
 
 # 양성모음 (모음조화상 '았' 선택). ㅏ, ㅗ 계열.
-_POSITIVE_VOWELS = set("ㅏㅑㅗㅛ")
+_POSITIVE_VOWELS = set("ㅏㅑㅗㅛㅘㅙ")  # ㅘ/ㅙ = ㅗ 계열 양성 복합모음 (봐→봤)
 
 
 def _last_vowel(surface: str) -> Optional[str]:

@@ -43,3 +43,8 @@ def test_returns_new_list_not_mutate():
     src = [["하","XSV"],["았","EP"]]
     out = unify_ep(src)
     assert src == [["하","XSV"],["았","EP"]]  # 원본 불변
+
+
+def test_ep_positive_compound_vowel_becomes_at():
+    # 봐(ㅘ = ㅗ+ㅏ 양성 복합모음) + EP → 았 (봤다 = 봐+았+다)
+    assert unify_ep([["봐","VV"],["었","EP"],["다","EF"]]) == [["봐","VV"],["았","EP"],["다","EF"]]
