@@ -935,6 +935,65 @@ def augment_contracted_suffixes(codebook: dict) -> dict:
     return codebook
 
 
+def augment_honorific(codebook: dict) -> dict:
+    """Add consonant-stem honorific 으시- contraction surfaces (GitHub follow-up).
+
+    Vowel-stem (가셔서, 오세요) and XSV (공부하셨다) honorific contractions already
+    resolve, but consonant-stem 으- forms with a CONTRACTED tail (셔/셨/십) are
+    absent from the suffix codebook, so eojeols like 편찮으십니다 collapse to a
+    single NNG. Gold decomposes maximally (으시/EP + un-contracted ending), and
+    ep_norm does not touch 시/셔/셨, so morphemes must match literally:
+      으셔서 = 으시/EP + 어서/EC ; 으십니다 = 으시/EP + ㅂ니다/EF ;
+      으셨X  = 으시/EP + 었/EP + X.
+    Only 으- prefixed (≥3 syllable) surfaces are added — they are absent from the
+    content dict, so there is no noun-collision risk (unlike bare 셔/셨/신/실).
+    """
+    EP = ["으시", "EP"]
+    PAST = ["었", "EP"]
+    HONORIFIC = {
+        # 으시 + 어(요/서/야/도) — 셔 contraction
+        "으셔": [[EP, ["어", "EF"]]],
+        "으셔서": [[EP, ["어서", "EC"]]],
+        "으셔요": [[EP, ["어요", "EF"]]],
+        "으셔야": [[EP, ["어야", "EC"]]],
+        "으셔도": [[EP, ["어도", "EC"]]],
+        "으세요": [[EP, ["어요", "EF"]]],
+        # 으시 + ㅂ니다/ㅂ니까 — 십 contraction (jamo-exempt from freq filter)
+        "으십니다": [[EP, ["ㅂ니다", "EF"]]],
+        "으십니까": [[EP, ["ㅂ니까", "EF"]]],
+        # 으시 + 었 + tail — 셨 contraction
+        "으셨": [[EP, PAST]],
+        "으셨다": [[EP, PAST, ["다", "EF"]]],
+        "으셨어": [[EP, PAST, ["어", "EF"]]],
+        "으셨어요": [[EP, PAST, ["어요", "EF"]]],
+        "으셨습니다": [[EP, PAST, ["습니다", "EF"]]],
+        "으셨고": [[EP, PAST, ["고", "EC"]]],
+        "으셨는데": [[EP, PAST, ["는데", "EC"]]],
+        "으셨던": [[EP, PAST, ["던", "ETM"]]],
+    }
+
+    added = 0
+    for surface, analyses_morphs in HONORIFIC.items():
+        analyses = [{"morphemes": [list(m) for m in morphs], "freq": 10000}
+                    for morphs in analyses_morphs]
+        if surface not in codebook:
+            codebook[surface] = analyses
+            added += len(analyses)
+        else:
+            for a in analyses:
+                new_key = tuple(tuple(m) for m in a["morphemes"])
+                found = any(
+                    tuple(tuple(m) for m in e["morphemes"]) == new_key
+                    for e in codebook[surface]
+                )
+                if not found:
+                    codebook[surface].append(a)
+                    added += 1
+
+    print(f"  Honorific 으시- augmentation: {added} entries added")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -965,6 +1024,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Add contracted form suffixes (와=오+아, 건데=것이ㄴ데, etc.)
     codebook = augment_contracted_suffixes(codebook)
+
+    # Add consonant-stem honorific 으시- contractions (으십니다, 으셔서, 으셨다 …)
+    codebook = augment_honorific(codebook)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
