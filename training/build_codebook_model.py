@@ -63,11 +63,12 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                 continue
             word, tag, freq_str = parts[0], parts[1], parts[2]
             freq = int(freq_str)
-            # Floor low-freq verb/adj stems with 3+ syl pure Hangul before filtering,
-            # so rare stems (뒤척이/VV freq=6) survive the MIN_CONTENT_FREQ cutoff
-            # and can compete with the eojeol-span NNG fallback in the analyzer.
+            # Floor low-freq verb/adj stems with 2+ syl pure Hangul before filtering,
+            # so rare stems (뒤척이/VV freq=6, 편찮/VA freq=6) survive the
+            # MIN_CONTENT_FREQ cutoff and can compete with the eojeol-span NNG
+            # fallback (else 편찮으시다 collapses to one NNG — GitHub issue #3).
             VV_FLOOR = 80
-            is_verb_stem = tag in ("VV", "VA", "VX") and len(word) >= 3 and all(
+            is_verb_stem = tag in ("VV", "VA", "VX") and len(word) >= 2 and all(
                 '\uAC00' <= c <= '\uD7A3' for c in word)
             if is_verb_stem and freq < VV_FLOOR:
                 freq = VV_FLOOR
