@@ -970,6 +970,19 @@ def augment_honorific(codebook: dict) -> dict:
         "으셨고": [[EP, PAST, ["고", "EC"]]],
         "으셨는데": [[EP, PAST, ["는데", "EC"]]],
         "으셨던": [[EP, PAST, ["던", "ETM"]]],
+        # 으시 + ㄴ/ㄹ-initial endings — 신/실 jamo merge (시+ㄴ→신, 시+ㄹ→실).
+        # Un-contracted 으시 stays; only the ㄴ/ㄹ merges, so the suffix surface
+        # 으신/으실 cannot be split by the jongseong-split path and otherwise
+        # collapses to a single NNG (잡으신다, 앉으신다, 읽으신다 …).
+        "으신다": [[EP, ["ㄴ다", "EF"]]],
+        "으신": [[EP, ["ㄴ", "ETM"]]],
+        "으실": [[EP, ["ㄹ", "ETM"]]],
+        "으신다고": [[EP, ["ㄴ다고", "EC"]]],
+        "으신다는": [[EP, ["ㄴ다는", "ETM"]]],
+        "으신데": [[EP, ["ㄴ데", "EC"]]],
+        "으신지": [[EP, ["ㄴ지", "EC"]]],
+        "으실까": [[EP, ["ㄹ까", "EF"]]],
+        "으실래": [[EP, ["ㄹ래", "EF"]]],
     }
 
     added = 0

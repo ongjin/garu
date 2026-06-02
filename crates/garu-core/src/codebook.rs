@@ -2930,6 +2930,33 @@ impl CodebookAnalyzer {
     /// Fix "라/EF" after VV/VA/VX: restore vowel-contracted imperative ending.
     /// e.g. 건너+라/EF → 건너+어라/EF, 가+라/EF → 가+아라/EF.
     /// "하+라/EF" is standard (하라체) and should not be changed.
+    /// Decompose the honorific surface 드시 into 들/VV + 시/EP.
+    ///
+    /// Per 표준국어대사전, 드시다 is NOT a headword (unlike the suppletive
+    /// honorifics 주무시다/계시다/잡수시다, whose base forms *주무다/*계다 do not
+    /// exist). It is 들다(먹다의 높임 특수어휘) + 주체높임 선어말어미 -시-, so the
+    /// standard morphological analysis splits it: 드신다 → 들/VV + 시/EP + ㄴ다/EF.
+    /// 드시 has no homonym, so the rewrite is unconditional and context-free.
+    fn fix_deusi_honorific(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i < tokens.len() {
+            if tokens[i].text == "드시" && matches!(tokens[i].pos, Pos::VV | Pos::VX) {
+                let (s, e) = (tokens[i].start, tokens[i].end);
+                tokens[i] = Token {
+                    text: "들".to_string(), pos: Pos::VV,
+                    start: s, end: e, score: None,
+                };
+                tokens.insert(i + 1, Token {
+                    text: "시".to_string(), pos: Pos::EP,
+                    start: s, end: e, score: None,
+                });
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     fn fix_imperative_ra(tokens: &mut [Token]) {
         for i in 1..tokens.len() {
             if tokens[i].pos != Pos::EF || tokens[i].text != "라" {
@@ -3979,6 +4006,7 @@ impl CodebookAnalyzer {
         Self::fix_xpn_standalone(&mut tokens);
         Self::fix_ec_eos(&mut tokens);
         Self::fix_imperative_ra(&mut tokens);
+        Self::fix_deusi_honorific(&mut tokens);
         Self::fix_vcp(&mut tokens);
         Self::fix_noun_inga_copula(&mut tokens);
         Self::fix_colloquial_pronouns(&mut tokens);
@@ -4102,6 +4130,7 @@ impl CodebookAnalyzer {
             Self::fix_ec_eos(&mut tokens);
             Self::fix_imperative_ra(&mut tokens);
             Self::fix_oneora(&mut tokens);
+            Self::fix_deusi_honorific(&mut tokens);
             Self::fix_vcp(&mut tokens);
             Self::fix_noun_inga_copula(&mut tokens);
             Self::fix_vcp_eojeol_start_recovery(&mut tokens);
