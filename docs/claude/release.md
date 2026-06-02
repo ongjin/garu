@@ -1,5 +1,28 @@
 > **언제 읽나**: garu-ko를 X.X.X로 npm 배포할 때, 또는 통합 패키지(orama/minisearch tokenizer)를 garu-ko 마이너 bump에 맞춰 동기화할 때. 순서를 절대 바꾸지 말 것.
 
+# 배포 전 검증 + 수치 동기화 (0단계, 선행 필수)
+
+릴리스 절차 시작 전에 **항상**:
+
+```bash
+# (a) Rust 테스트 + 골드 F1 측정 (회귀 확인 — 직전 배포 대비 떨어지면 중단)
+cargo test
+(cd training/gold_testset && python3 eval_f1.py --analyzers garu)   # norm=True 헤드라인
+(cd training/gold_testset && python3 eval_f1.py --analyzers garu --no-norm)  # raw 참고
+```
+
+F1 또는 모델 크기가 바뀌었으면 **하드코딩된 수치를 전부 손으로 갱신**한다 (자동 연동 아님 — 한 곳만 고치면 불일치 남음). `modelInfo().size`는 로드된 실제 바이트라 동적이지만, `accuracy`와 README/CLAUDE 헤드라인은 수동:
+
+| 위치 | 갱신할 값 |
+|------|-----------|
+| `js/src/core.ts` `modelInfo()` | `accuracy:` (F1, 0~1 소수) |
+| `README.md` | F1 (2곳: 헤드라인 + 정확도 blockquote), 모델 크기 표 |
+| `js/README.md` | F1 (헤드라인) |
+| `CLAUDE.md` 프로젝트 개요 | F1, 모델 크기 |
+| `js/CHANGELOG.md` 해당 X.X.X 섹션 | base.gmdl 바이트 수, F1 |
+
+> ⚠️ 현재 이 수치들이 서로 어긋나 있다 (modelInfo `0.94` / README `93.29%` / CLAUDE.md `93.6%` / 실측 `0.9364`). 다음 배포 때 하나의 canonical 값으로 통일할 것.
+
 # 릴리스 절차 (X.X.X 배포 시 항상 풀세트)
 
 한 단계라도 빠지면 WASM 버전 불일치 / npm-GitHub 불일치 / latest 표시 깨짐 사고가 난다.
