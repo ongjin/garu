@@ -183,6 +183,38 @@ fn compose_hangul(cho: u32, jung: u32, jong: u32) -> Option<char> {
     char::from_u32((cho * 21 + jung) * 28 + jong + 0xAC00)
 }
 
+/// True if the `stem` token is a ㅂ-irregular predicate whose 어/었 ending must
+/// NOT be harmonized to 아/았. ㅂ-irregular conjugation realizes the final ㅂ as
+/// 우, so the ending follows 우 (음성모음 → 어/었 = 워/웠), regardless of the
+/// stem's written last vowel (e.g. 아름답→아름다워, 새롭→새로워). The only
+/// exceptions are the monosyllabic stems 곱/돕, which surface as 와/왔 (아/았).
+///
+/// Regular ㅂ predicates (잡다→잡아, 좁다→좁아) keep the ㅂ, so the eojeol
+/// surface still contains the stem verbatim; irregular ones do not. This surface
+/// test is what distinguishes the two (both are stored canonically as `어`).
+fn is_pieup_irregular_keeps_eo(stem: &Token, chars: &[char]) -> bool {
+    if !matches!(stem.pos, Pos::VV | Pos::VA | Pos::VX) {
+        return false;
+    }
+    if stem.text == "곱" || stem.text == "돕" {
+        return false;
+    }
+    let ends_pieup = stem.text.chars().last().map_or(false, |c| {
+        let code = c as u32;
+        (0xAC00..=0xD7A3).contains(&code) && (code - 0xAC00) % 28 == 17
+    });
+    if !ends_pieup {
+        return false;
+    }
+    let s = stem.start.min(chars.len());
+    let e = stem.end.min(chars.len());
+    if s >= e {
+        return false;
+    }
+    let surface: String = chars[s..e].iter().collect();
+    !surface.starts_with(&stem.text)
+}
+
 // Common Korean typo rules: (index_a, index_b) pairs for bidirectional substitution.
 // Chosung: plain ↔ tense consonant
 const TYPO_CHO: &[(u32, u32)] = &[
@@ -2226,6 +2258,9 @@ impl CodebookAnalyzer {
                 if tokens[i - 1].pos == Pos::EP {
                     continue;
                 }
+                if is_pieup_irregular_keeps_eo(&tokens[i - 1], &chars) {
+                    continue;
+                }
                 let prev_text = &tokens[i - 1].text;
                 if let Some(last_char) = prev_text.chars().last() {
                     let code = last_char as u32;
@@ -2436,6 +2471,9 @@ impl CodebookAnalyzer {
                 }
                 if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF) && tokens[i].text.starts_with("어") {
                     if tokens[i - 1].pos == Pos::EP {
+                        continue;
+                    }
+                    if is_pieup_irregular_keeps_eo(&tokens[i - 1], &chars) {
                         continue;
                     }
                     if let Some(last_char) = tokens[i - 1].text.chars().last() {
