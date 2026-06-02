@@ -12,91 +12,24 @@
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
            → 문장 수준 Trigram N-best Viterbi (top-5)
-           → 후처리 (VCP 분리, MM 관형사 교정 등)
-           → CNN 재순위 (agreement 스코어링으로 최적 후보 선택 + POS 보정)
+           → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
            → 출력
 ```
 
-### 모델 구성 (codebook.gmdl, GMDL v3 포맷)
-| Section | 내용 | 크기 (raw) |
-|---------|------|------|
-| 6 | 내용어 사전 (FST, 다중 POS) | 1,061 KB |
-| 7 | 접미사 코드북 (31K 패턴, string table + u8 freq 양자화) | 847 KB |
-| 8 | 트라이그램 비용 (sparse bitmap + u8 양자화) | 36 KB |
-| 9 | 빈도 메타데이터 | 8 B |
-| 10 | 분석기 파라미터 (mp=0.25, op=4.0, lb=1.5, sc=3.5) | 16 B |
-| 11 | 모호성 테이블 (비활성) | 4 B |
-| 12 | 단어 바이그램 비용 보정 (734 규칙) | 8 KB |
-| 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 246 KB |
-| — | **brotli q=11 압축 후** | **1004 KB** |
-
-### CNN 재순위 모델 (cnn2.bin, int8 양자화)
-js/models/cnn2.bin 기준 (npm 패키지에 번들된 최신 모델, hidden=144).
-| 구성요소 | 파라미터 | int8 크기 |
-|----------|----------|-----------|
-| 임베딩 (3002×48) | 144K | 141 KB |
-| Conv Layer 1 (k=3,5,9, 144ch) | 124K | 115 KB |
-| Conv Layer 2 (k=3,7, 144ch) | 622K | 608 KB |
-| 출력 FC (288→81) | 23K | 23 KB |
-| 바이어스 + 스케일 + vocab | — | 24 KB |
-| **합계** | ~913K | **brotli q=11 압축 후 701 KB** |
-| (참고: models/cnn2.bin — 구버전 hidden=96, 384 KB) | | |
-
 ### 핵심 Rust 코드
-- `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리
-- `crates/garu-core/src/cnn.rs` — 2-layer 1D CNN 추론 엔진 (int8, brotli 지원, 수동 JSON 파서)
-- `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + CNN agreement 스코어링 + POS override)
+- `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리 규칙(`fix_*`)
+- `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + POS override). POS 보정 규칙은 폐기된 CNN의 골드 행동을 distill한 것 (추론은 안 함)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩
 - `crates/garu-tools/src/build_dict.rs` — FST 빌더 (다중 POS 지원)
 
-### 학습 파이프라인 (Python)
-- `training/extract_codebook.py` — Kiwi + kowikitext에서 코드북 추출
-- `training/extract_nikl_codebook.py` — NIKL MP 골드 데이터에서 코드북 추출
-- `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합, 자동 gzip 압축)
-- `training/neural/prepare_data.py` — NIKL MP에서 음절 수준 BIO 학습 데이터 생성
-- `training/neural/experiment_all.py` — CNN 학습 (CNN1/CNN2) 및 앙상블 실험
-- `training/eval_nikl_mp.py` — NIKL MP 벤치마크 (Garu vs Kiwi)
-- `training/gold_testset/eval_f1.py` — 골드 테스트셋 (5K 문장) F1 평가
-
 ### JS/TS (npm 패키지)
-- `js/src/index.ts` — Garu 클래스, load/analyze/tokenize API
+- `js/src/index.ts` — Garu 클래스, `Garu.load()`(static) / `analyze` / `tokenize` API
 - `js/models/base.gmdl` — 번들된 모델
 - `js/pkg/` — wasm-pack 빌드 출력
 
-## 연구 이력
-
-1. **BiLSTM 지식 증류** → 실패 (행렬 연산이 WASM에서 비실용적)
-2. **자소 시퀀스 라벨링** → 실패 (학습 너무 느림, 음절 의미 파괴)
-3. **코드북 + Viterbi** → 채택, 76.1% F1
-4. **NIKL 골드 데이터 학습** → +6%p (가장 큰 브레이크스루)
-5. **파라미터 튜닝** (morpheme_penalty 3.0→0.25) → +2%p
-6. **Wiki NNP 제거** → +0.4%p, 모델 크기 절반
-7. **Multi-POS FST** → +0.3%p (있→VA/VX, 하→VV/XSV)
-8. **Sparse trigram u8** → -270KB, 정밀도 손실 0
-9. **스마트 어절 캐시** → +3%p (Viterbi 오답 10K 어절만 캐시, 328KB)
-10. **문맥 기반 후처리 규칙** → +1.3%p (VX/JC/JKC/NNB/XSN/MM/XSV 교정, 0KB)
-11. **문장 수준 Viterbi** → +0.2%p (캐시를 래티스 아크로 주입, 동형이의어 해소, 0KB)
-12. **종성 분리 전략 (A3)** → 코드북에 없는 활용형 처리 (고친다→고치+ㄴ다, 0KB)
-13. **모음 축약 복원 (A2b)** → 명령형 어미 교정 (건너라→건너+어라, 0KB)
-14. **모델 gzip 압축** → 2.2MB→1.2MB (46% 절감, flate2 rust_backend)
-15. **2-layer 1D CNN 재순위** → int8 526KB, 신뢰도 기반 POS 보정 (NP↔VV, XSV↔XSA 등)
-16. **Word bigram 동형이의어 해소** → "나는" BOS→NP 보너스 강화
-17. **N-best Viterbi + CNN 재순위** → top-5 후보 생성, CNN agreement 스코어링으로 최적 선택 (분절 교체 가능, 0KB)
-18. **오타 강건성 (Strategy D)** → 경음화(ㅆ↔ㅅ), 모음혼동(ㅐ↔ㅔ) 등 11개 자모 규칙, OOV 위치에서 래티스 아크 주입 (0KB)
-19. **VCP 후처리 규칙** → 이다/이고/이며/이라 등 계사 분리 (0KB)
-20. **MM 관형사 후처리** → 전/그런/이런/저런/어떤/새/헌/옛/온 + 명사 → MM 교정 (0KB)
-21. **CNN 노이즈 증강 학습** → 한글 오타+띄어쓰기 변형 데이터 3배 확장, val acc 96.95%→97.51% (CNN 408KB)
-22. **ㅂ불규칙 활용 확장** → "어야" 접미사 추가, 곱다/돕다 모음조화 "와" 구분 (고와야, 도와야)
-23. **WASM 사이즈 최적화** → [profile.release] opt-level=z + lto + codegen-units=1 + panic=abort + strip + wasm-opt -Oz (327KB→266KB raw, -19%)
-24. **serde_json 제거** → cnn2 vocab 파싱을 수동 미니 파서로 교체, 의존성 제거 (raw -30KB)
-25. **gzip → brotli q=11 압축** → base.gmdl 1238→1022KB (-216KB), cnn2.bin 733→718KB (-15KB). WASM에 brotli-decompressor 추가로 +78KB. 순절감 -196KB unpacked (-9%).
-26. **eval_f1.py ep_norm 정합화** → jamo/모음조화/EP축약/태그 정규화의 측정 아티팩트 제거. norm 적용 시 overall +2.06pp (양쪽 분석기 모두 게인). 정규화 후 실제 Kiwi가 5/6 도메인 우위라는 사실 드러남.
-27. **자모 정규화 옵트인** → `normalizeJamo: bool` 옵션 (기본 false). gold v15k가 호환/결합 자모 67:33 혼재라 `project_guuh_weakness.md` 양방향 검증 규칙 적용 → 기본값 false 유지.
-28. **`~/SO` 캐시 자동 보강** → NIKL annotation 누락된 35개 trailing-tilde 캐시 항목에 SO morpheme 추가. 구어 `~/SO` 인식 9.6% → 100% (~0.34pp F1).
-29. **in-place 캐시 패칭 도입** → `build_eojeol_cache.py` 전체 리빌드 대신 `eojeol_cache.bin`을 직접 파싱/수정/재기록. 옛 curated cache의 hand-tuned 가치를 보존 (full rebuild는 -2pp 회귀 위험).
-30. **Phase 1: Averaged Structured Perceptron 시도 → 폐기** (2026-05-21). 8 feature(POS trigram/lex bigram/jongseong/last syl/surface trigram/morph len/cache hit/sent position) + Python POC + Rust integration. 시뮬레이션 F1 (dev 800) +0.85pp 보였으나 Rust 실측(전체 8K gold) +0.03pp에 그침. **핵심 원인**: Python `rescore_topk`는 raw 후보 점수만 비교, Rust `analyze_with_perceptron`는 후처리(`fix_*`) 추가 통과 — 측정 대상 불일치로 0.60pp 갭. 도메인 편차: SNS/구어/일상 +0.6~1.0pp 이득, 뉴스 -0.70pp 회귀(상쇄). 7,200 train 규모로는 뉴스 패턴 학습 부족. **재시도 시 주의**: (a) Python sim에도 동일 후처리 적용해 비교 가능하게, (b) 도메인-balanced sampling 또는 weight 분리, (c) 7,200 → silver corpus 확장 후 재시도가 본질적 해결책. 인프라(dump_for_training API, extract-training 바이너리, perceptron 학습 스크립트)는 폐기 — phase1 branch 삭제. 사용자가 부분 채택도 거부 (regression test 11건 영향).
+모델 포맷(GMDL 섹션 구성)·학습 파이프라인은 [docs/claude/model-build.md](docs/claude/model-build.md) 참조.
 
 ## 빌드
 
@@ -110,82 +43,15 @@ cargo test
 # WASM 빌드
 wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 
+# 골드 F1 평가 (garu만, n=9000 v15k, ep_norm)
+(cd training/gold_testset && python3 eval_f1.py --analyzers garu)
+
 # 벤치마크 (NIKL MP 데이터 필요: ~/Downloads/NIKL_MP(v1.1)/)
 python3 training/eval_nikl_mp.py --n 2000
+
+# 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제
+GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <입력파일>
 ```
-
-## 릴리스 절차 (X.X.X 배포 시 항상 풀세트)
-
-순서를 절대 바꾸지 말 것. 한 단계라도 빠지면 WASM 버전 불일치 / npm-GitHub 불일치 / latest 표시 깨짐 사고가 난다.
-
-```bash
-# 1. Cargo 버전 (core + wasm 동시)
-sed -i '' 's/^version = ".*"/version = "X.X.X"/' crates/garu-core/Cargo.toml crates/garu-wasm/Cargo.toml
-
-# 2. WASM 리빌드 (env!("CARGO_PKG_VERSION") 새 버전 박힘)
-wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
-
-# 3. TypeScript 빌드
-(cd js && npx tsc)
-
-# 4. js/CHANGELOG.md 항목 추가 (## X.X.X 섹션)
-
-# 5. npm version (자동으로 git tag vX.X.X 생성 — --no-git-tag-version 쓰지 말 것)
-(cd js && npm version X.X.X)
-
-# 6. 커밋 + push (코드 + 태그)
-git add -A && git commit -m "feat: ..., bump to X.X.X"
-git push origin main
-git push origin vX.X.X
-
-# 7. npm publish
-(cd js && npm publish)
-
-# 8. GitHub Release 생성 (CHANGELOG.md 해당 섹션 그대로, --latest 명시)
-gh release create vX.X.X --title "vX.X.X" --latest --notes-file <(awk '/^## X.X.X$/{flag=1; next} /^## /{flag=0} flag' js/CHANGELOG.md)
-```
-
-주의:
-- 코드블록은 `cat <<'EOF'` heredoc 안에서 백틱을 그대로 사용. 이스케이프(`\``) 금지 — single-quote heredoc은 `\` 를 문자 그대로 받아 화면에 노출됨.
-- 옛 release를 일괄 추가할 때는 새 버전을 제외한 옛 버전들에 `--latest=false` 명시.
-
-## 통합 패키지 동기화 (garu-ko가 마이너 이상 bump 시 반드시 같이)
-
-`integrations/orama-tokenizer`, `integrations/minisearch-tokenizer`는 garu-ko를 dep로 끌어 씀. SemVer caret(`^x.y.z`)은 같은 마이너 안에서만 매치되므로, **garu-ko 마이너 이상이 올라가면 통합 패키지 dep도 함께 갱신 + minor bump + republish 해야 함.** 안 하면 통합 패키지 신규 사용자가 옛 garu-ko를 받아 모든 인가 픽스/진입점 분리 혜택을 못 받음.
-
-릴리스 절차 8단계 끝난 뒤 이어서:
-
-```bash
-# 9. 두 통합 패키지의 garu-ko dep 동시 업데이트 (정규식으로 caret 부분만 교체)
-sed -i '' 's/"garu-ko": "\^[0-9.]*"/"garu-ko": "^X.X.X"/' \
-  integrations/orama-tokenizer/package.json \
-  integrations/minisearch-tokenizer/package.json
-
-# 10. 워크스페이스 lockfile 재계산
-npm install
-
-# 11. 통합 패키지 자체 minor bump (e.g. 0.1.0 → 0.2.0)
-#     package.json의 "version" 필드 직접 수정 (npm version 명령은 워크스페이스에서
-#     태그 생성 동작이 헷갈리므로 사용 안 함). garu-ko의 X.X.X와 별개 버전임에 주의.
-
-# 12. 두 통합 패키지 클린 리빌드 + 테스트
-(cd integrations/orama-tokenizer && rm -rf dist && npx tsc && npx vitest run)
-(cd integrations/minisearch-tokenizer && rm -rf dist && npx tsc && npx vitest run)
-
-# 13. 커밋 + push
-git add integrations/*/package.json package-lock.json
-git commit -m "chore: 통합 패키지 garu-ko dep 동기화 + Y.Y.Y bump"
-git push origin main
-
-# 14. npm publish 두 번
-(cd integrations/orama-tokenizer && npm publish)
-(cd integrations/minisearch-tokenizer && npm publish)
-```
-
-주의:
-- 통합 패키지는 별도 버전 트랙(0.1, 0.2, …). garu-ko의 X.X.X와 일치시킬 필요 없음.
-- npm 태그(`vX.X.X` 같은)는 garu-ko 본체만 만듦. 통합 패키지에는 별도 git 태그 안 만들어도 무방 (혹시 추적 필요하면 `garu-orama-tokenizer@Y.Y.Y` 형태로 수동 부여).
-- patch 수준 bump(예: 0.6.11 → 0.6.12)에선 `^0.6.x`가 자동 매치되므로 통합 패키지 republish 불필요. **마이너 이상 bump일 때만** 본 절차 실행.
 
 ## 규칙
 
@@ -193,3 +59,17 @@ git push origin main
 - git email: dydwls140@naver.com
 - 설계/계획 문서를 repo에 올리지 않음
 - push / 배포 / GitHub Release 생성은 사용자 허락 필수 (커밋은 자유)
+
+## 추가 문서 (docs/claude/)
+
+위의 CLAUDE.md 본문에는 매 세션 필요한 공통 컨텍스트만 둔다. 특정 작업 들어갈 때 아래 문서를 직접 읽어와서 참고할 것.
+
+**문서화 규칙** (다음 세션이 lean한 CLAUDE.md를 유지하도록):
+- **CLAUDE.md는 lean 유지**. 매 세션 자동 로드되므로 high-signal만 — 개요, 아키텍처, 빌드, 규칙. 그 외는 `docs/claude/`로.
+- **분할 기준**: 한 주제로 30줄 넘게 쌓이는데 그 내용이 *특정 작업 시에만* 필요하면 `docs/claude/<topic>.md`로 옮긴다. 본문에서 그 섹션을 제거하고 아래 인덱스에 한 줄만 추가.
+- **각 doc 첫 줄은 `> **언제 읽나**: ...` blockquote로 trigger 명시**. 인덱스 hook 보고 doc을 열었을 때 첫 줄만으로 자기 작업에 맞는지 즉시 판단 가능하도록.
+- **기존 doc 갱신**: 가능하면 같은 doc 안에서 끝낸다. 인덱스 hook이 더 이상 정확하지 않으면 그 hook도 같이 고친다.
+
+- [docs/claude/release.md](docs/claude/release.md) — **npm 배포 풀세트**. Cargo→wasm-pack→tsc→CHANGELOG→npm version→commit/push→publish→gh release 8단계 + 통합 패키지(orama/minisearch) 동기화. X.X.X 배포하거나 통합 패키지 sync할 때.
+- [docs/claude/model-build.md](docs/claude/model-build.md) — **모델/학습 빌드**. GMDL v3 섹션 구성(사전/코드북/트라이그램/캐시), build_codebook_model.py의 캐시 보존 동작, 학습 파이프라인 스크립트. 모델·사전·코드북 리빌드하거나 학습 스크립트 만질 때.
+- [docs/claude/research-history.md](docs/claude/research-history.md) — **연구 이력 30항목 + 폐기된 CNN**. 무엇을 왜 채택/폐기했는지, 같은 실패 반복 방지. 과거 맥락이 필요하거나 폐기 접근(CNN·perceptron) 재도입 검토 시.
