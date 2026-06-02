@@ -25,7 +25,9 @@
 - `crates/garu-tools/src/build_dict.rs` — FST 빌더 (다중 POS 지원)
 
 ### JS/TS (npm 패키지)
-- `js/src/index.ts` — Garu 클래스, `Garu.load()`(static) / `analyze` / `tokenize` API
+- `js/src/core.ts` — `GaruBase` 클래스 (`analyze` / `tokenize` / `nouns` / `modelInfo`)
+- `js/src/{browser,node}.ts` — `Garu extends GaruBase` + static `load()` (browser=WASM fetch / node=fs)
+- `js/src/normalize.ts` — `normalizeText` / `splitSentences`
 - `js/models/base.gmdl` — 번들된 모델
 - `js/pkg/` — wasm-pack 빌드 출력
 
