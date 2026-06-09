@@ -87,9 +87,9 @@ const garu = await Garu.load({ modelData });
 ## 아키텍처
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/light.png">
-  <img alt="Garu 아키텍처 다이어그램" src="docs/light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/paper-1-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/paper-1-light.png">
+  <img alt="Garu 아키텍처 다이어그램" src="docs/paper-1-light.png">
 </picture>
 
 코드북 + 어절 캐시 + 문장 수준 N-best Trigram Viterbi 구조에 결정적 후처리 규칙을 결합한 경량 분석기입니다.
