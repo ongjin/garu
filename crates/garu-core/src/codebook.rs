@@ -1675,6 +1675,72 @@ impl CodebookAnalyzer {
                 }
             }
 
+            // Strategy A3v: Vowel-contraction uncontraction for multi-syllable
+            // predicate stems. A3 (jongseong split) leaves the contracted vowel
+            // intact (했→해, 렸→려), so the true stem (하, 리) is never looked up
+            // and the eojeol collapses to an NNG span. Restore the stem vowel and
+            // look up the merged stem:
+            //   했 → 하 + 았   (X하다 past: 권했다 → 권하/VV + 았 + 다)
+            //   ㅕ+ㅆ → ㅣ + 었 (렸→리, 쳤→치, 졌→지, 였→이: 비쳤다 → 비치/VV + 었 + 다)
+            // Dict-gated to VV/VA/VX so only real predicate lemmas fire. Past only
+            // (jongseong ㅆ) for now — present/연결형(려/쳐) is left to A/codebook.
+            {
+                let max_prefix = (n - i).min(8);
+                for prefix_len in 1..=max_prefix {
+                    let j = i + prefix_len;
+                    if j > n { break; }
+                    let c = chars[j - 1] as u32;
+                    if !(0xAC00..=0xD7A3).contains(&c) { continue; }
+                    let off = c - 0xAC00;
+                    let cho = off / (21 * 28);
+                    let jung = (off % (21 * 28)) / 28;
+                    let jong = off % 28;
+                    // (restored stem syllable, ending base) — past forms (ㅆ) only
+                    let restore: Option<(char, &str)> = if jong == 20 && jung == 1 && cho == 18 {
+                        char::from_u32(0xAC00 + 18 * 21 * 28).map(|h| (h, "았")) // 했 → 하 + 았
+                    } else if jong == 20 && jung == 6 {
+                        char::from_u32(0xAC00 + cho * 21 * 28 + 20 * 28).map(|s| (s, "었")) // ㅕ → ㅣ
+                    } else {
+                        None
+                    };
+                    let Some((stem_syl, ending_base)) = restore else { continue };
+                    let mut lookup: String = chars[i..j - 1].iter().collect();
+                    lookup.push(stem_syl);
+                    let lookup_matches = self.content_dict.lookup(&lookup);
+                    for entry in &lookup_matches {
+                        if entry.morphemes.is_empty() { continue; }
+                        let first_pos = entry.morphemes[0].pos;
+                        if !matches!(first_pos, Pos::VV | Pos::VA | Pos::VX) { continue; }
+                        let freq = self.freq_from_score(entry.score);
+                        let word_cost = self.get_word_cost(&lookup, first_pos, freq);
+                        let morphemes: Vec<(String, Pos)> = entry.morphemes.iter()
+                            .map(|m| (m.text.clone(), m.pos)).collect();
+                        let remaining_after = n - j;
+                        let max_suf_tail = self.max_suffix_len.saturating_sub(1).min(remaining_after);
+                        for tail_len in 0..=max_suf_tail {
+                            let mut suf_key = ending_base.to_string();
+                            for k in 0..tail_len { suf_key.push(chars[j + k]); }
+                            if let Some(&suf_idx) = self.suffix_map.get(&suf_key) {
+                                let suf_entry = &self.suffix_entries[suf_idx];
+                                for analysis in &suf_entry.analyses {
+                                    let suf_cost = self.get_suffix_cost(&suf_key, analysis);
+                                    let mut combined = morphemes.clone();
+                                    for m in &analysis.morphemes {
+                                        combined.push((m.form.clone(), m.pos));
+                                    }
+                                    arcs.push(LatticeArc {
+                                        start: i,
+                                        end: j + tail_len,
+                                        morphemes: combined,
+                                        cost: word_cost + suf_cost,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Strategy A4: ㄹ-irregular drop reconstruction.
             // e.g. "무니" → 물/VV + 니/EC, "사세요" → 살/VV + 세요/EF
             // When stem ends with ㄹ jongseong followed by suffix starting
