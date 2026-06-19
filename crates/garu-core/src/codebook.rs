@@ -1682,8 +1682,10 @@ impl CodebookAnalyzer {
             // look up the merged stem:
             //   했 → 하 + 았   (X하다 past: 권했다 → 권하/VV + 았 + 다)
             //   ㅕ+ㅆ → ㅣ + 었 (렸→리, 쳤→치, 졌→지, 였→이: 비쳤다 → 비치/VV + 었 + 다)
-            // Dict-gated to VV/VA/VX so only real predicate lemmas fire. Past only
-            // (jongseong ㅆ) for now — present/연결형(려/쳐) is left to A/codebook.
+            //   해 → 하 + 아 / ㅕ → ㅣ + 어 (present·연결형: 권해서→권하+아서, 비쳐서→비치+어서)
+            // Dict-gated to VV/VA/VX so only real predicate lemmas fire. Present
+            // forms (jongseong 0) are restricted to multi-syllable stems
+            // (prefix_len>=2) to avoid single-char noise (해→하/VV, 펴→피/VV).
             {
                 let max_prefix = (n - i).min(8);
                 for prefix_len in 1..=max_prefix {
@@ -1695,11 +1697,15 @@ impl CodebookAnalyzer {
                     let cho = off / (21 * 28);
                     let jung = (off % (21 * 28)) / 28;
                     let jong = off % 28;
-                    // (restored stem syllable, ending base) — past forms (ㅆ) only
+                    // (restored stem syllable, ending base). 하 = ㅎ(18)+ㅏ(0); ㅕ(6)→ㅣ(20).
                     let restore: Option<(char, &str)> = if jong == 20 && jung == 1 && cho == 18 {
                         char::from_u32(0xAC00 + 18 * 21 * 28).map(|h| (h, "았")) // 했 → 하 + 았
                     } else if jong == 20 && jung == 6 {
-                        char::from_u32(0xAC00 + cho * 21 * 28 + 20 * 28).map(|s| (s, "었")) // ㅕ → ㅣ
+                        char::from_u32(0xAC00 + cho * 21 * 28 + 20 * 28).map(|s| (s, "었")) // ㅕㅆ → ㅣ + 었
+                    } else if jong == 0 && jung == 1 && cho == 18 && prefix_len >= 2 {
+                        char::from_u32(0xAC00 + 18 * 21 * 28).map(|h| (h, "아")) // 해 → 하 + 아
+                    } else if jong == 0 && jung == 6 && prefix_len >= 2 {
+                        char::from_u32(0xAC00 + cho * 21 * 28 + 20 * 28).map(|s| (s, "어")) // ㅕ → ㅣ + 어
                     } else {
                         None
                     };
