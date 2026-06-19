@@ -198,11 +198,43 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         "절": ("VV", 1200),  # 절다 (to limp)
     }
 
+    # Predicate stems hidden behind a dominant noun/proper-noun homograph: the
+    # content dict only carries the NNG/NNP/NNB reading, so the verb/adjective
+    # reading is never generated and the eojeol collapses to an NNG span or a
+    # nonsensical NNP+ending split (e.g. 박았다→박았다/NNG, 빌어줄→빌어줄/NNG).
+    # Forced as a secondary POS (noun primary preserved) with a MODERATE freq so
+    # the verb arc merely competes — POS-trigram naturally segregates 조사-after-
+    # noun from 어미-after-stem, so noun+particle cases do not regress.
+    # Curated from training/find_missing_verb_stems.py; excludes RIEUL_DUAL stems,
+    # 의존명사/관형사 homographs (차/세/대/두/새/식), and 감기 (cold dominates).
+    # NOTE: high-freq single-syllable Sino/native noun homographs (주/사/서/자/적/비)
+    # and contraction-only forms (재→쟀다, 조이→조였다, 뿌리→뿌렸다) are excluded:
+    # the former regress noun readings, the latter need vowel-contraction
+    # reconstruction (a separate gap) so the bare stem does not help.
+    HOMOGRAPH_VERB_DUAL = {
+        "박": ("VV", 3000),   # 박다 (to hammer/drive in)
+        "파": ("VV", 1500),   # 파다 (to dig)
+        "추": ("VV", 1500),   # 추다 (to dance)
+        "패": ("VV", 1200),   # 패다 (to split/chop)
+        "젖": ("VV", 1500),   # 젖다 (to get wet)
+        "빌": ("VV", 2000),   # 빌다 (to pray/beg)
+        "널": ("VV", 1000),   # 널다 (to hang out)
+        "팔": ("VV", 2000),   # 팔다 (to sell)
+        "번지": ("VV", 1500), # 번지다 (to spread)
+        "비치": ("VV", 1500), # 비치다 (to shine through)
+        "반기": ("VV", 1200), # 반기다 (to welcome)
+        "내치": ("VV", 1000), # 내치다 (to cast out)
+        "망치": ("VV", 1500), # 망치다 (to ruin)
+        "우기": ("VV", 1200), # 우기다 (to insist)
+        "배우": ("VV", 2500), # 배우다 (to learn)
+    }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = Path(tmpdir) / "dict_input.txt"
         output_path = Path(tmpdir) / "dict_output.bin"
 
         rieul_added = 0
+        homograph_added = 0
         with open(input_path, "w", encoding="utf-8") as f:
             for word in sorted_words:
                 tag, freq = best[word]
@@ -219,6 +251,14 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                         secondary_written = True
                         rieul_added += 1
 
+                # Forced homograph verb/adjective dual-POS override
+                if not secondary_written and word in HOMOGRAPH_VERB_DUAL:
+                    alt_tag, alt_freq = HOMOGRAPH_VERB_DUAL[word]
+                    if alt_tag != tag:
+                        f.write(f"{word}\t{pos_byte(alt_tag)}\t{alt_freq}\n")
+                        secondary_written = True
+                        homograph_added += 1
+
                 # Add secondary POS from NIKL if significantly different
                 if not secondary_written and word in nikl_word_pos:
                     total = sum(nikl_word_pos[word].values())
@@ -232,7 +272,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                                 f.write(f"{word}\t{alt_pb}\t{alt_freq}\n")
                                 dual_count += 1
                                 break  # only 1 secondary
-        print(f"  Dual-POS words: {dual_count} (NIKL) + {rieul_added} (ㄹ-irregular forced)")
+        print(f"  Dual-POS words: {dual_count} (NIKL) + {rieul_added} (ㄹ-irregular forced) + {homograph_added} (homograph verb forced)")
 
         # Run build-dict from repo root
         result = subprocess.run(

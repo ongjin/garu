@@ -16,6 +16,8 @@
 
 `build_codebook_model.py`는 Section 13(어절 캐시)을 **기존 `eojeol_cache.bin`을 그대로 기록** — 캐시를 리빌드하지 않는다(curated 캐시 보존, full rebuild는 -2pp 회귀 위험). 출력은 `models/codebook.gmdl` → `js/models/base.gmdl`로 복사. 소스가 동기화돼 있으면 무변경 리빌드는 byte-identical(재현성 보장).
 
+**dual-POS 강제 override** (Section 6, 사전은 단어당 POS 2개만 pack): content_dict가 명사 POS 하나만 가져 동사 읽기가 누락되는 어간을 build에서 secondary POS로 주입. 두 상수 — `RIEUL_DUAL`(ㄹ불규칙 어간, A4 발동용), `HOMOGRAPH_VERB_DUAL`(NNP/NNG 동형이의에 가린 동사 어간 박/팔/추 등 15개). 명사 primary는 보존하고 freq를 보수적으로 줘 trigram이 결정(POS-trigram이 어미-뒤-어간 vs 조사-뒤-명사를 자연 분리하므로 명사+조사는 거의 회귀 안 함). 단 **축약 과거형**(쟀다/뿌렸다=재/뿌리+었)은 어간만 추가해도 모음축약 재구성 갭 때문에 안 고쳐져 제외. 후보는 `find_missing_verb_stems.py`로 조사. **사전 변경은 반드시 골드 F1 무회귀 게이트** 통과 확인.
+
 # 학습 파이프라인 (Python)
 
 - `training/extract_codebook.py` — Kiwi + kowikitext에서 코드북 추출
@@ -23,4 +25,5 @@
 - `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합, 자동 brotli q=11 압축)
 - `training/eval_nikl_mp.py` — NIKL MP 벤치마크 (Garu vs Kiwi)
 - `training/gold_testset/eval_f1.py` — 골드 테스트셋 (9,000문장 v15k, ep_norm) F1 평가
+- `training/find_missing_verb_stems.py` — NNP/NNG 동형이의에 가려 동사 읽기가 누락된 어간 조사 (Garu collapse vs Kiwi VV/VA, `HOMOGRAPH_VERB_DUAL` 후보 추출)
 - `training/neural/prepare_data.py`, `training/neural/experiment_all.py` — *(폐기된 CNN 학습용. 현재 분석기는 CNN 미사용 — `research-history.md` 참조)*
