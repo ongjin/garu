@@ -62,11 +62,7 @@ Phase 1의 교훈을 반영하여, 한국어를 자소(ㄱ, ㅏ, ㄴ 등)로 분
 Garu의 분석 파이프라인은 다음과 같다:
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="paper-1-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="paper-1-light.png">
-    <img alt="Garu 분석 파이프라인" src="paper-1-light.png" width="640">
-  </picture>
+  <img alt="Garu 분석 파이프라인" src="paper-1.png" width="680">
 </p>
 
 전체 문장에 대해 단일 래티스를 구축하고, 어절 캐시 항목을 저비용 후보 아크로 주입한 뒤 문장 수준 Viterbi를 top-5 N-best로 디코딩한다. 컨텍스트 rerank 보너스로 N-best 후보 중 최적을 선택하고, 마지막으로 결정적 후처리 규칙(`fix_*`)을 적용한다. 추론 전 과정에 부동소수점 행렬 연산이 전혀 없다.

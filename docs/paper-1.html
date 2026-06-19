@@ -25,7 +25,7 @@
 </head>
 <body>
 <!-- ============ CONFIG: adjust only the canvas size here ============ -->
-<svg id="c" width="1080" height="920" viewBox="0 0 1080 920" xmlns="http://www.w3.org/2000/svg"></svg>
+<svg id="c" width="1280" height="1010" viewBox="0 0 1280 1010" xmlns="http://www.w3.org/2000/svg"></svg>
 <div id="flag" style="font-family:'Nanum Pen Script';position:absolute;left:-9999px;">loading</div>
 <script>
 const svgns="http://www.w3.org/2000/svg";
@@ -140,49 +140,39 @@ function draw(){
   /* ======================================================== *
    *  replace below — the rest is a helper demo (delete it, draw your own)  *
    * ======================================================== */
-  const NOTE="#8a8a8a";                 // side-note gray (양쪽 모드에서 읽힘)
-  const bul=(y,s)=>{ svg.appendChild(rc.circle(146,y-7,6,{fill:INK,stroke:INK,fillStyle:"solid",roughness:0.8})); txt(160,y,s,{size:21,anchor:"start"}); };
-  // solid 채움 + 고정 어두운 라벨 → 라이트/다크 양쪽에서 읽힘 (hachure는 다크에서 대비 약함)
-  const pill=(x,y,w,h,label)=>{ svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.7,stroke:STROKE,strokeWidth:2,fill:PALETTE.yellow,fillStyle:"solid"})); txt(x+w/2,y+h/2+8,label,{size:23,color:"#1e1e1e"}); };
+  const NOTE = "#7a7a7a";
 
-  // --- 입력 ---
-  pill(300,40,220,54,"입력 텍스트");
-  arrow(410,98,410,148);
+  // ===== 제목 =====
+  txt(640,72,"Garu 분석 파이프라인",{size:40});
+  txt(640,116,"코드북 · N-best Viterbi · 어절 캐시 · 후처리 규칙    —    1 MB · 신경망 없음",{size:23,color:NOTE});
 
-  // --- 1단계: 래티스 구축 ---
-  frame(130,150,560,234,{});
-  txt(150,184,"전체 문장 래티스 구축  (Multi-POS FST)",{size:24,anchor:"start"});
-  bul(220,"FST 사전 (내용어 검색)");
-  bul(249,"접미사 코드북 (기능어 패턴)");
-  bul(278,"어절 캐시 → 저비용 아크 주입");
-  bul(307,"활용형 재구성 (축약·불규칙·높임)");
-  bul(336,"오타 교정 아크 (자모 혼동)");
-  bul(365,"OOV 폴백 (SL · SN · SH · NNG …)");
-  txt(720,250,"캐시 항목은 강한 prior로 작용,",{size:19,anchor:"start",color:NOTE});
-  txt(720,275,"전이비용 우수 시 override 가능",{size:19,anchor:"start",color:NOTE});
-  arrow(410,388,410,430);
+  // ===== 입력 =====
+  box(740,180,340,86,PALETTE.yellow,["입력 텍스트"],{labelSize:26});
+  arrow(910,266,910,330);
 
-  // --- 2단계: Viterbi ---
-  frame(130,432,560,162,{});
-  txt(150,466,"문장 수준 N-best Trigram Viterbi  (top-5)",{size:24,anchor:"start"});
-  bul(502,"트라이그램 비용 테이블");
-  bul(531,"단어 바이그램 비용");
-  bul(560,"컨텍스트 rerank → 최적 1개 선택");
-  txt(720,508,"top-5 후보 중",{size:19,anchor:"start",color:NOTE});
-  txt(720,533,"rerank로 최적 1개 선택",{size:19,anchor:"start",color:NOTE});
-  arrow(410,598,410,640);
+  // ===== 어휘 자원(저장소) → 래티스에 아크 주입 =====
+  cylinder(140,300,280,150,PALETTE.blue,["FST 사전","내용어 · 다중 POS"],{labelSize:23});
+  cylinder(140,510,280,150,PALETTE.green,["어절 캐시","저비용 아크"],{labelSize:23});
+  txt(470,360,"아크 주입",{size:21,color:NOTE,anchor:"start"});
+  arrow(420,378,685,400);
+  arrow(420,582,685,432);
 
-  // --- 3단계: 후처리 ---
-  frame(130,642,560,132,{});
-  txt(150,676,"후처리 (결정적 규칙)",{size:24,anchor:"start"});
-  bul(712,"fix_* : VCP 분리 · MM 교정 · POS 보정");
-  bul(741,"NNG-hint 사전 (225개)");
-  txt(720,712,"추가 모델 용량 0KB",{size:19,anchor:"start",color:NOTE});
-  txt(720,737,"(코드 변경만)",{size:19,anchor:"start",color:NOTE});
-  arrow(410,778,410,824);
+  // ===== 1. 래티스 구축 =====
+  box(690,330,440,160,PALETTE.blue,["전체 문장 래티스 구축","Multi-POS 아크 · 캐시 주입 · 오타 교정","접미사 코드북 · 활용형 재구성 · OOV"],{labelSize:23});
+  arrow(910,490,910,540);
+  txt(926,522,"문장 단위",{size:20,color:NOTE,anchor:"start"});
 
-  // --- 출력 ---
-  pill(300,826,220,54,"형태소 시퀀스 출력");
+  // ===== 2. Viterbi =====
+  box(690,540,440,120,PALETTE.green,["N-best Trigram Viterbi (top-5)","컨텍스트 rerank → 1-best"],{labelSize:24});
+  arrow(910,660,910,710);
+  txt(926,692,"rerank 선택",{size:20,color:NOTE,anchor:"start"});
+
+  // ===== 3. 후처리 =====
+  box(690,710,440,120,PALETTE.orange,["후처리 (결정적 규칙)","fix_* VCP·MM·POS · NNG-hint 225"],{labelSize:23});
+  arrow(910,830,910,880);
+
+  // ===== 출력 =====
+  box(740,880,340,86,PALETTE.yellow,["형태소 시퀀스 출력"],{labelSize:26});
   /* ======================== end replace ======================== */
 
   document.getElementById("flag").textContent="DIAGRAM-READY";
