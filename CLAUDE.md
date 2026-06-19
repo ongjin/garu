@@ -3,7 +3,7 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙로 동작 (CNN 폐기).
-- **F1 93.6%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / NIKL MP 93.7%
+- **F1 93.7%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / NIKL MP 93.7%
 - **모델 1.0 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요)
 - **WASM** — 브라우저에서 실행 (raw 337KB / gzip 155KB, opt-level=z + wasm-opt -Oz + brotli decoder)
 
