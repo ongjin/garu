@@ -135,6 +135,18 @@ interface Token {
 }
 ```
 
+### `garu.nouns(text, options?): string[]`
+
+텍스트에서 명사(NNG, NNP)만 추출합니다. `options.includeSL`을 켜면 `"AI"`, `"BM25"` 같은 외래어 토큰(SL)도 함께 포함합니다.
+
+```typescript
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공", "지능", "기술", "발전"]
+
+garu.nouns('AI 기술이 발전했다', { includeSL: true });
+// ["AI", "기술", "발전"]
+```
+
 ### `garu.tokenize(text): string[]`
 
 표면형 문자열 배열을 반환합니다. 분절된 텍스트만 필요할 때 `analyze()`의 경량 대안으로 사용합니다.

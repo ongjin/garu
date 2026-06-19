@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<!--
+  Handdrawn (Excalidraw) diagram template.  Usage:
+    1) Copy:    cp template.html mydiagram.html
+    2) Canvas:  adjust the <svg> below — width/height/viewBox — to fit your diagram
+    3) Draw:    redraw only the "replace below" block inside draw() — don't touch KIT/PALETTE/font-wait
+    4) Render:  node render.mjs mydiagram.html        (dark: node render.mjs mydiagram.html --dark)
+  Helper API:  box · frame · cylinder(DB) · diamond(branch) · ellipse(node) · arrow · biArrow · curveArrow · line · txt · xmark · crossOut
+  Palette:     use the PALETTE.{yellow,blue,green,orange,red} presets, or pass any hex directly.
+  Dark mode:   --dark (?mode=dark) → switches free text · arrows · frames · background to dark (box pastels & labels are shared). Only when you need both light/dark sheets.
+  Layout refs (copy-paste):  before/after split = examples/before-after.html,  layered architecture = examples/layered-arch.html
+  Note: Korean / CJK labels render fine — the handwriting font (Nanum Pen Script) covers them. Just type them in draw().
+-->
+<style>
+  html,body{margin:0;padding:0;}
+  svg{display:block;}
+</style>
+</head>
+<body>
+<!-- ============ CONFIG: adjust only the canvas size here ============ -->
+<svg id="c" width="1080" height="920" viewBox="0 0 1080 920" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="flag" style="font-family:'Nanum Pen Script';position:absolute;left:-9999px;">loading</div>
+<script>
+const svgns="http://www.w3.org/2000/svg";
+const svg=document.getElementById("c");
+let rc;
+
+/* ============ PALETTE (Excalidraw feel — default presets. For a custom color, pass a hex directly) ============ */
+const PALETTE={ yellow:"#ffec99", blue:"#d0ebff", green:"#b2f2bb", orange:"#ffd8a8", red:"#ffc9c9" };
+// Dark mode: ?mode=dark → ink (outline/label/arrow/text) and background switch. Box pastel fills are shared across both modes.
+// Note: a hachure fill shows the background color between strokes, so labels & outlines must switch with the background to stay readable. In light mode everything is #1e1e1e, so the output is identical.
+const DARK = new URLSearchParams(location.search).get('mode')==='dark';
+const INK   = DARK ? "#ececec" : "#1e1e1e";   // outline/label/arrow/text (switches with mode)
+const STROKE= INK, LABEL = INK;               // (outline/label = ink)
+const RED   = DARK ? "#ff8787" : "#e03131";
+const BG    = DARK ? "#1b1b1f" : "#fffdf7";
+
+/* ============ KIT: helpers — usually don't touch ============ */
+function txt(x,y,s,o={}){
+  const {size=24,color=INK,anchor="middle",rot=0}=o;
+  const t=document.createElementNS(svgns,"text");
+  t.setAttribute("x",x);t.setAttribute("y",y);
+  t.setAttribute("font-family","'Nanum Pen Script', cursive");
+  t.setAttribute("font-size",size);t.setAttribute("fill",color);
+  t.setAttribute("text-anchor",anchor);
+  if(rot)t.setAttribute("transform",`rotate(${rot} ${x} ${y})`);
+  t.textContent=s;svg.appendChild(t);
+}
+function boxLabel(cx,cy,lines,o={}){
+  const {size=23,color=LABEL}=o;const lh=size*0.95;
+  const startY=cy-((lines.length-1)*lh)/2+size*0.30;
+  lines.forEach((ln,i)=>txt(cx,startY+i*lh,ln,{size,color}));
+}
+// box(x,y,w,h, fill, ["line1","line2",...], {labelSize, labelColor, stroke})
+function box(x,y,w,h,fill,lines,o={}){
+  svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.7,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.35,hachureGap:6}));
+  boxLabel(x+w/2,y+h/2,lines,{size:o.labelSize||23,color:o.labelColor||LABEL});
+}
+// frame(x,y,w,h, {dash:[8,7], stroke, sw}) — unfilled group border
+function frame(x,y,w,h,o={}){
+  svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined}));
+}
+// cylinder(x,y,w,h, fill, lines, {labelSize, stroke}) — DB / storage
+function cylinder(x,y,w,h,fill,lines,o={}){
+  const cx=x+w/2, ry=Math.min(h*0.16,20), stroke=o.stroke||STROKE, rx=w/2;
+  const fillO={roughness:1.5,stroke:"none",fill,fillStyle:"hachure",fillWeight:1.2,hachureGap:6};
+  // single silhouette polygon → one continuous hachure fill (no overlapping cap bands)
+  const sil=[], segs=28;
+  for(let i=0;i<=segs;i++){const t=Math.PI+Math.PI*(i/segs);sil.push([cx+rx*Math.cos(t),(y+ry)+ry*Math.sin(t)]);}   // top ellipse upper arc: left→top→right
+  for(let i=0;i<=segs;i++){const t=Math.PI*(i/segs);sil.push([cx+rx*Math.cos(t),(y+h-ry)+ry*Math.sin(t)]);}         // bottom ellipse lower arc: right→bottom→left
+  svg.appendChild(rc.polygon(sil,fillO));                                              // whole body — filled once
+  svg.appendChild(rc.ellipse(cx,y+ry,w,2*ry,{roughness:1.5,stroke,strokeWidth:2}));    // top face rim (stroke only)
+  svg.appendChild(rc.line(x,y+ry,x,y+h-ry,{roughness:1.3,stroke,strokeWidth:2}));     // left side
+  svg.appendChild(rc.line(x+w,y+ry,x+w,y+h-ry,{roughness:1.3,stroke,strokeWidth:2})); // right side
+  svg.appendChild(rc.arc(cx,y+h-ry,w,2*ry,0,Math.PI,false,{roughness:1.3,stroke,strokeWidth:2})); // bottom curve
+  boxLabel(cx,y+h*0.56,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+// diamond(cx,cy,w,h, fill, lines, {labelSize, stroke}) — branch / decision
+function diamond(cx,cy,w,h,fill,lines,o={}){
+  svg.appendChild(rc.polygon([[cx,cy-h/2],[cx+w/2,cy],[cx,cy+h/2],[cx-w/2,cy]],{roughness:1.6,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.3,hachureGap:6}));
+  boxLabel(cx,cy,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+// ellipse(cx,cy,w,h, fill, lines?, {labelSize, stroke}) — node / circle
+function ellipse(cx,cy,w,h,fill,lines,o={}){
+  svg.appendChild(rc.ellipse(cx,cy,w,h,{roughness:1.6,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.3,hachureGap:6}));
+  if(lines) boxLabel(cx,cy,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+function aHead(x2,y2,ang,opt){
+  const len=13,sp=0.45;
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI-sp),y2+len*Math.sin(ang+Math.PI-sp),opt));
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI+sp),y2+len*Math.sin(ang+Math.PI+sp),opt));
+}
+// line(x1,y1,x2,y2, {stroke, sw, dash:[6,7]}) — connector / divider, no arrowhead
+function line(x1,y1,x2,y2,o={}){
+  svg.appendChild(rc.line(x1,y1,x2,y2,{roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined}));
+}
+// arrow(x1,y1,x2,y2, {stroke, sw, dash:[6,7]}) — one-way arrow
+function arrow(x1,y1,x2,y2,o={}){
+  const opt={roughness:1.5,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined};
+  svg.appendChild(rc.line(x1,y1,x2,y2,opt));
+  aHead(x2,y2,Math.atan2(y2-y1,x2-x1),opt);
+}
+// biArrow(...) — two-way
+function biArrow(x1,y1,x2,y2,o={}){
+  const opt={roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||3};
+  svg.appendChild(rc.line(x1,y1,x2,y2,opt));
+  aHead(x2,y2,Math.atan2(y2-y1,x2-x1),opt);
+  aHead(x1,y1,Math.atan2(y1-y2,x1-x2),opt);
+}
+// curveArrow([[x,y],[x,y],...], {stroke, sw, dash}) — curved arrow through points (self-loop / detour edge); arrowhead at the last point.
+function curveArrow(pts,o={}){
+  const opt={roughness:1.3,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined};
+  svg.appendChild(rc.curve(pts,opt));
+  const n=pts.length, a=Math.atan2(pts[n-1][1]-pts[n-2][1],pts[n-1][0]-pts[n-2][0]);
+  aHead(pts[n-1][0],pts[n-1][1],a,opt);
+}
+// xmark(cx,cy,r, {stroke, sw}) — small X at a point (mark a cut link)
+function xmark(cx,cy,r,o={}){
+  const opt={roughness:1.8,stroke:o.stroke||RED,strokeWidth:o.sw||4};
+  svg.appendChild(rc.line(cx-r,cy-r,cx+r,cy+r,opt));
+  svg.appendChild(rc.line(cx+r,cy-r,cx-r,cy+r,opt));
+}
+// crossOut(x,y,w,h, {stroke, sw, pad}) — big X over a whole region (the "removed" in before/after)
+function crossOut(x,y,w,h,o={}){
+  const p=o.pad??10, opt={roughness:2.3,stroke:o.stroke||RED,strokeWidth:o.sw||5};
+  svg.appendChild(rc.line(x-p,y-p,x+w+p,y+h+p,opt));
+  svg.appendChild(rc.line(x+w+p,y-p,x-p,y+h+p,opt));
+}
+
+function draw(){
+  rc=rough.svg(svg);
+
+  /* ======================================================== *
+   *  replace below — the rest is a helper demo (delete it, draw your own)  *
+   * ======================================================== */
+  const NOTE="#8a8a8a";                 // side-note gray (양쪽 모드에서 읽힘)
+  const bul=(y,s)=>{ svg.appendChild(rc.circle(146,y-7,6,{fill:INK,stroke:INK,fillStyle:"solid",roughness:0.8})); txt(160,y,s,{size:21,anchor:"start"}); };
+  // solid 채움 + 고정 어두운 라벨 → 라이트/다크 양쪽에서 읽힘 (hachure는 다크에서 대비 약함)
+  const pill=(x,y,w,h,label)=>{ svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.7,stroke:STROKE,strokeWidth:2,fill:PALETTE.yellow,fillStyle:"solid"})); txt(x+w/2,y+h/2+8,label,{size:23,color:"#1e1e1e"}); };
+
+  // --- 입력 ---
+  pill(300,40,220,54,"입력 텍스트");
+  arrow(410,98,410,148);
+
+  // --- 1단계: 래티스 구축 ---
+  frame(130,150,560,234,{});
+  txt(150,184,"전체 문장 래티스 구축  (Multi-POS FST)",{size:24,anchor:"start"});
+  bul(220,"FST 사전 (내용어 검색)");
+  bul(249,"접미사 코드북 (기능어 패턴)");
+  bul(278,"어절 캐시 → 저비용 아크 주입");
+  bul(307,"활용형 재구성 (축약·불규칙·높임)");
+  bul(336,"오타 교정 아크 (자모 혼동)");
+  bul(365,"OOV 폴백 (SL · SN · SH · NNG …)");
+  txt(720,250,"캐시 항목은 강한 prior로 작용,",{size:19,anchor:"start",color:NOTE});
+  txt(720,275,"전이비용 우수 시 override 가능",{size:19,anchor:"start",color:NOTE});
+  arrow(410,388,410,430);
+
+  // --- 2단계: Viterbi ---
+  frame(130,432,560,162,{});
+  txt(150,466,"문장 수준 N-best Trigram Viterbi  (top-5)",{size:24,anchor:"start"});
+  bul(502,"트라이그램 비용 테이블");
+  bul(531,"단어 바이그램 비용");
+  bul(560,"컨텍스트 rerank → 최적 1개 선택");
+  txt(720,508,"top-5 후보 중",{size:19,anchor:"start",color:NOTE});
+  txt(720,533,"rerank로 최적 1개 선택",{size:19,anchor:"start",color:NOTE});
+  arrow(410,598,410,640);
+
+  // --- 3단계: 후처리 ---
+  frame(130,642,560,132,{});
+  txt(150,676,"후처리 (결정적 규칙)",{size:24,anchor:"start"});
+  bul(712,"fix_* : VCP 분리 · MM 교정 · POS 보정");
+  bul(741,"NNG-hint 사전 (225개)");
+  txt(720,712,"추가 모델 용량 0KB",{size:19,anchor:"start",color:NOTE});
+  txt(720,737,"(코드 변경만)",{size:19,anchor:"start",color:NOTE});
+  arrow(410,778,410,824);
+
+  // --- 출력 ---
+  pill(300,826,220,54,"형태소 시퀀스 출력");
+  /* ======================== end replace ======================== */
+
+  document.getElementById("flag").textContent="DIAGRAM-READY";
+}
+
+window.addEventListener("load",async()=>{
+  try{
+    // wait for fonts — without this you capture the fallback (flat sans). If draw() uses text over 40px, add that size too.
+    await document.fonts.load("24px 'Nanum Pen Script'");
+    await document.fonts.load("40px 'Nanum Pen Script'");
+    await document.fonts.ready;
+  }catch(e){}
+  document.body.style.background=BG; svg.style.background=BG;   // dark-mode background
+  draw();
+});
+</script>
+</body>
+</html>
