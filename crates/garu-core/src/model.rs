@@ -143,21 +143,17 @@ impl Analyzer {
             let next2 = tokens.get(i + 2).map(|t| t.pos);
             let prev = if i > 0 { Some(tokens[i - 1].pos) } else { None };
 
-            // R1: 오늘/지금 NNG → MAG before content/verb/adj — time adverb pattern
-            if matches!(form, "오늘" | "지금") && cur == Pos::NNG {
-                if let Some(np) = next {
-                    if matches!(
-                        np,
-                        Pos::NNG | Pos::NNP | Pos::NP | Pos::VV | Pos::VA
-                        | Pos::VX | Pos::VCP | Pos::MAG | Pos::JKS | Pos::JKB | Pos::XSV
-                    ) {
-                        tokens[i].pos = Pos::MAG;
-                    }
-                }
+            // R1: 시간명사 오늘/어제/지금 — 조사 앞이면 NNG(명사 "오늘이/오늘은"),
+            //     그 외(용언·부사·명사 수식·문장끝)는 MAG(부사). 골드 다수·표준국어대사전 「부사」.
+            if matches!(form, "오늘" | "어제" | "지금") && matches!(cur, Pos::NNG | Pos::MAG) {
+                let is_josa = matches!(next, Some(Pos::JKS) | Some(Pos::JKC) | Some(Pos::JKG)
+                    | Some(Pos::JKO) | Some(Pos::JKB) | Some(Pos::JKV) | Some(Pos::JKQ)
+                    | Some(Pos::JX) | Some(Pos::JC));
+                tokens[i].pos = if is_josa { Pos::NNG } else { Pos::MAG };
             }
 
-            // R2: 어제/내일 MAG → NNG — NIKL convention treats these as time nouns
-            if matches!(form, "어제" | "내일") && cur == Pos::MAG {
+            // R2: 내일 MAG → NNG — 내일은 단독에서도 명사 우세(골드·Kiwi)
+            if form == "내일" && cur == Pos::MAG {
                 tokens[i].pos = Pos::NNG;
             }
 
