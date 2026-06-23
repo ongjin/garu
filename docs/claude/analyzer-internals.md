@@ -53,7 +53,7 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 - `어→아` 모음조화 — **canonical `어`를 양성어간 뒤에서 `아`로 realize하는 일반 메커니즘**. ㅂ불규칙은 `is_pieup_irregular_keeps_eo`로 가드(표면형 검사: 정규 `잡아`⊃`잡`, 불규칙 `아름다워`⊅`아름답`). 곱/돕만 예외.
 - EP 뒤 `아→어` 역정규화, `merge_ec_ef_vowel`, `fix_xsv_xsa`
 
-**(2) `fix_*` 체인** — ⚠️ **`analyze()`(21개)와 `analyze_topn()`(31개)가 다르다.** analyze_topn에만 있는 것: `fix_oneora, fix_haeyo_endings, fix_yo_jx_merge, fix_extra_endings, fix_mag_copula_ya, fix_myeoch_si_ya, fix_sn_counter_copula, fix_han_standalone_mm, fix_lge_endings, fix_iri_mag`. **새 fix_ 규칙 추가 시 두 곳 다 등록**할지 판단할 것 (issue #4 `fix_deusi_honorific`는 양쪽 등록).
+**(2) `fix_*` 체인** — ⚠️ **`analyze()`(22개)와 `analyze_topn()`(32개)가 다르다.** analyze_topn에만 있는 것: `fix_oneora, fix_haeyo_endings, fix_yo_jx_merge, fix_extra_endings, fix_mag_copula_ya, fix_myeoch_si_ya, fix_sn_counter_copula, fix_han_standalone_mm, fix_lge_endings, fix_iri_mag`. **새 fix_ 규칙 추가 시 두 곳 다 등록**할지 판단할 것 (issue #4 `fix_deusi_honorific`, `fix_geuraeseo_maj`는 양쪽 등록).
 
 ## 디버깅 방법
 
