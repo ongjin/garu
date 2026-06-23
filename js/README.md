@@ -4,7 +4,7 @@
 
 - **1MB model** bundled in npm package (no CDN needed)
 - **337KB WASM** engine (155KB gzipped) -- runs in any modern browser
-- **F1 93.7%** on 9k human-verified gold testset (ep_norm), **F1 93.7%** on NIKL MP
+- **F1 95.0%** on 9k human-verified gold testset (ep_norm), **F1 93.7%** on NIKL MP
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser

@@ -37,3 +37,6 @@ training/neural/rerank_simulator.py
 training/neural/train_variants.py
 training/neural/variants.py
 .antigravitycli/
+
+# gold 복원 1회성 백업
+training/gold_testset/gold_testset.pre_restore148.jsonl.bak

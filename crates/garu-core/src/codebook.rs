@@ -3821,6 +3821,37 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Lexicalize conjunctive adverbs the lattice over-decomposed in colloquial
+    /// contexts: 그래서/그래도 (그렇/VA + 아서|어서/아도|어도/EC) → single MAJ.
+    /// Gold is overwhelmingly single-token (그래서 94:5, 그래도 10:1 vs decomposed),
+    /// yet garu splits these under noisy spoken-language trigram context.
+    /// 그렇게/이렇게/그래 are deliberately NOT merged — gold prefers their decomposition.
+    fn fix_geuraeseo_maj(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            if tokens[i].text == "그렇" && tokens[i].pos == Pos::VA
+                && tokens[i + 1].pos == Pos::EC
+                && tokens[i].start == tokens[i + 1].start
+            {
+                let merged = match tokens[i + 1].text.as_str() {
+                    "아서" | "어서" => Some("그래서"),
+                    "아도" | "어도" => Some("그래도"),
+                    _ => None,
+                };
+                if let Some(text) = merged {
+                    let s = tokens[i].start;
+                    let e = tokens[i + 1].end;
+                    tokens.splice(i..=i + 1, vec![
+                        Token { text: text.to_string(), pos: Pos::MAJ, start: s, end: e, score: None },
+                    ]);
+                    i += 1;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+
     /// Fix 가/JKS → 가/VV when it's the last morpheme of an eojeol
     /// preceded by MAG (directional adverb). "저리가" → 저리/MAG + 가/VV.
     fn fix_mag_ga_vv(tokens: &mut [Token]) {
@@ -4088,6 +4119,7 @@ impl CodebookAnalyzer {
         Self::fix_mag_wa_vv(&mut tokens);
         Self::fix_bwa_auxiliary(&mut tokens);
         Self::fix_mm_determiners(&mut tokens);
+        Self::fix_geuraeseo_maj(&mut tokens);
 
         AnalyzeResult {
             tokens,
@@ -4221,6 +4253,7 @@ impl CodebookAnalyzer {
             Self::fix_bwa_auxiliary(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
             Self::fix_colloquial_pronouns(&mut tokens);
+            Self::fix_geuraeseo_maj(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
         }).collect()

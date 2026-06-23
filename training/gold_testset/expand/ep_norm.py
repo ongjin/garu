@@ -5,6 +5,7 @@
 - Jamo 통일: 호환 자모 → 결합 자모 (ㄴ→ᆫ 등)
 - 모음조화 통일 EC/EP: 었→았, 어→아 등 (음성 → 양성으로 통일)
 - 태그 하위분류 통일: SSO/SSC → SS 등
+- 따옴표 통일: 곡선(‘ ’ “ ”) → 직선(' ") (SS 계열)
 """
 
 CONTRACT_MAP = {
@@ -35,6 +36,14 @@ TAG_NORM = {
     "SS": "SS",
 }
 
+# 따옴표 표기 통일: 곡선↔직선 혼재 → 직선 (SS 계열 한정)
+# 입력 텍스트는 곡선(‘ ’ “ ”)인데 골드 라벨은 일부만 직선(' ")으로 정규화돼
+# 혼재 → 같은 따옴표를 form 불일치로 오판하는 측정 갭 보정.
+QUOTE_NORM = {
+    "‘": "'", "’": "'",    # ‘ ’
+    "“": '"', "”": '"',    # “ ”
+}
+
 
 def _convert_leading_jamo(surface: str) -> str:
     """첫 글자가 호환 자모면 결합 자모로 치환."""
@@ -52,9 +61,17 @@ def _apply_vowel_harmony(surface: str, pos: str) -> str:
     return surface
 
 
+def _norm_quote(surface: str, pos: str) -> str:
+    """SS 계열 따옴표 곡선→직선 통일."""
+    if pos in ("SS", "SSO", "SSC"):
+        return QUOTE_NORM.get(surface, surface)
+    return surface
+
+
 def _norm_surface(surface: str, pos: str) -> str:
     surface = _convert_leading_jamo(surface)
     surface = _apply_vowel_harmony(surface, pos)
+    surface = _norm_quote(surface, pos)
     return surface
 
 
@@ -184,5 +201,16 @@ if __name__ == "__main__":
     so1 = [["“", "SS"]]
     so2 = [["“", "SSO"]]
     assert normalize_ep_morphemes(so1) == normalize_ep_morphemes(so2)
+
+    # 곡선↔직선 따옴표 통일 (SS 계열)
+    q1 = [["‘", "SS"], ["기자", "NNG"], ["’", "SSC"]]
+    q2 = [["'", "SS"], ["기자", "NNG"], ["'", "SS"]]
+    assert normalize_ep_morphemes(q1) == normalize_ep_morphemes(q2)
+    q3 = [["“", "SSO"], ["말", "NNG"], ["”", "SS"]]
+    q4 = [['"', "SS"], ["말", "NNG"], ['"', "SS"]]
+    assert normalize_ep_morphemes(q3) == normalize_ep_morphemes(q4)
+    # SS 아닌 곳의 동일 문자는 보존 (안전장치)
+    q5 = [["'", "SY"]]
+    assert normalize_ep_morphemes(q5) == [["'", "SY"]]
 
     print("OK")
