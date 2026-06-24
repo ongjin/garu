@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.6
+
+문서·메타데이터 패치 (분석 로직·모델 데이터 변경 없음 — F1 0.9514 동일, WASM은 버전 문자열만 갱신).
+
+- README에 FAQ 섹션 추가 — LLM·검색 노출용 자기완결 Q&A.
+- npm `keywords`에 `korean-tokenizer`, `hangul` 추가.
+- 통합 패키지(orama/minisearch) description 수치 정정(1.9MB → 1MB).
+- `base.gmdl` 1,030,352 bytes (모델 데이터 변경 없음).
+
 ## 0.9.5
 
 골드 테스트셋 정정 + 문맥 의존 POS 규칙으로 분석 정확도 향상. F1 측정도 정직하게 보정.

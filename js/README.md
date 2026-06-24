@@ -130,6 +130,29 @@ await insert(db, { title: '학교에서 점심을 먹었다' })
 await search(db, { term: '먹다' })  // ← matches
 ```
 
+## FAQ
+
+**What is garu-ko?**
+garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1MB model and a 337KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
+
+**Does it need a server or API?**
+No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
+
+**How accurate is it?**
+F1 95.1% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 93.7% on the NIKL Modu morpheme-tagged corpus.
+
+**Which POS tagset does it use?**
+The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.
+
+**Does it use a neural network?**
+No. It combines a codebook, an eojeol cache, sentence-level N-best trigram Viterbi, and deterministic post-processing rules, so output is deterministic and reproducible.
+
+**Where does it run besides the browser?**
+The same `npm install garu-ko` works in browser ESM, Node.js 18+, Bun, and Deno with one API.
+
+**Is it free for commercial use?**
+Yes. garu-ko is open source under the MIT license with no usage fees.
+
 ## Acknowledgments
 
 The morphological analysis model is trained on the **NIKL Morpheme-Tagged Corpus (v1.1)** provided by the National Institute of Korean Language (국립국어원). The model contains only derived frequency statistics, not original text.
