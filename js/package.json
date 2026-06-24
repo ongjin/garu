@@ -41,6 +41,8 @@
     "korean-nlp",
     "pos-tagging",
     "tokenizer",
+    "korean-tokenizer",
+    "hangul",
     "nlp",
     "wasm",
     "webassembly",
