@@ -1,6 +1,6 @@
 {
   "name": "garu-orama-tokenizer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Korean tokenizer for Orama search, powered by garu-ko (1MB browser-native Korean morphological analyzer)",
   "type": "module",
   "main": "dist/index.js",
