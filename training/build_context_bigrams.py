@@ -9,13 +9,14 @@ like "한" (MM vs VV+ETM) and "나는" (NP+JX vs VV+ETM).
 Output: training/codebook_data/word_bigrams.bin (appends to existing)
 """
 import json
+import os
 import struct
 from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "training" / "codebook_data"
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 
 POS_TAGS = [
     "NNG", "NNP", "NNB", "NR", "NP",
@@ -43,15 +44,13 @@ def main():
     # eojeol → all analyses
     eojeol_analyses = defaultdict(Counter)
 
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        p = NIKL_DIR / fname
-        if not p.exists(): continue
+    for p in sorted(NIKL_DIR.glob("*.json")):
         d = json.load(open(p))
         for doc in d["document"]:
             if not doc: continue
             for sent in (doc.get("sentence") or []):
                 words = {w["id"]: w["form"] for w in (sent.get("word") or [])}
-                morphemes = sent.get("morpheme") or []
+                morphemes = sent.get("MP") or sent.get("morpheme") or []
                 word_morphs = defaultdict(list)
                 for m in morphemes:
                     wid = m.get("word_id")

@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "training" / "codebook_data"
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 CACHE_BIN = DATA_DIR / "eojeol_cache.bin"
 SOURCE_GMDL = ROOT / "models" / "codebook.gmdl"
 OUTPUT_CSV = DATA_DIR / "cache_analysis.csv"
@@ -100,11 +100,7 @@ def parse_cache_bin(path: Path):
 def load_eojeol_frequencies():
     freq = Counter()
     gold_analyses = defaultdict(Counter)
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            print(f"  WARN: {path} missing", file=sys.stderr)
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             doc_json = json.load(f)
         for doc in doc_json["document"]:
@@ -113,7 +109,7 @@ def load_eojeol_frequencies():
             for sent in (doc.get("sentence") or []):
                 words = {w["id"]: w["form"] for w in (sent.get("word") or [])}
                 wmorphs = defaultdict(list)
-                for m in (sent.get("morpheme") or []):
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     wid = m.get("word_id")
                     form = m.get("form", "").strip()
                     label = normalize_pos(m.get("label", ""))

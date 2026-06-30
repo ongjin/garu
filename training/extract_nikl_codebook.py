@@ -12,11 +12,12 @@ Usage:
 
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 OUT_DIR = Path(__file__).parent / "codebook_data"
 
 POS_TAGS = [
@@ -50,11 +51,7 @@ def normalize_pos(tag):
 def load_nikl_sentences():
     """Load ALL sentences from NIKL MP."""
     sentences = []
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            print(f"  Warning: {path} not found")
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             data = json.load(f)
         count = 0
@@ -64,7 +61,7 @@ def load_nikl_sentences():
                 text = sent.get("form", "")
                 if not text: continue
                 morphemes = []
-                for m in (sent.get("morpheme") or []):
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     form = m.get("form", "").strip()
                     label = normalize_pos(m.get("label", ""))
                     if form and label:

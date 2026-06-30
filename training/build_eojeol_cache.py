@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "training" / "codebook_data"
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 
 POS_TAGS = [
     "NNG", "NNP", "NNB", "NR", "NP",
@@ -54,10 +54,7 @@ def load_eojeol_gold():
     """Load eojeol→morphemes mapping using word_id alignment from NIKL MP."""
     eojeol_analyses = defaultdict(Counter)  # eojeol_form → Counter of analysis tuples
 
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             data = json.load(f)
 
@@ -66,7 +63,7 @@ def load_eojeol_gold():
                 continue
             for sent in (doc.get("sentence") or []):
                 words = {w["id"]: w["form"] for w in (sent.get("word") or [])}
-                morphemes = sent.get("morpheme") or []
+                morphemes = sent.get("MP") or sent.get("morpheme") or []
 
                 # Group morphemes by word_id
                 word_morphs = defaultdict(list)

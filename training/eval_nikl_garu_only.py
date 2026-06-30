@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NIKL_DIR = Path.home() / "workspace" / "data" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 MODEL = ROOT / "js" / "models" / "base.gmdl"
 CNN = ROOT / "js" / "models" / "cnn2.bin"
 
@@ -34,10 +34,7 @@ def normalize_pos(tag):
 
 def load_nikl(max_n=2000):
     sentences = []
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            print(f"Warning: {path} not found", file=sys.stderr); continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             data = json.load(f)
         for doc in data["document"]:
@@ -45,7 +42,7 @@ def load_nikl(max_n=2000):
                 text = sent["form"]
                 if not text or len(text) < 5 or len(text) > 200: continue
                 morphs = []
-                for m in sent["morpheme"]:
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     if m["form"].strip():
                         morphs.append((m["form"], normalize_pos(m["label"])))
                 if morphs:

@@ -15,7 +15,7 @@ import tempfile
 from collections import defaultdict, Counter
 from pathlib import Path
 
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 
 POS_TAGS = [
     "NNG", "NNP", "NNB", "NR", "NP",
@@ -54,20 +54,18 @@ def normalize_pos(tag):
 def load_nikl_sentences(max_n=2000):
     """Load sentences with gold morpheme annotations from NIKL MP."""
     sentences = []
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            print(f"Warning: {path} not found")
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             data = json.load(f)
         for doc in data["document"]:
             for sent in doc["sentence"]:
-                text = sent["form"]
+                # 2025 marks intra-token spaces of joined compounds with '_'
+                # (사업_분야); feed natural text so analyzers don't emit '_/SW'.
+                text = sent["form"].replace("_", " ")
                 if not text or len(text) < 5 or len(text) > 200:
                     continue
                 morphemes = []
-                for m in sent["morpheme"]:
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     form = m["form"]
                     label = normalize_pos(m["label"])
                     if form.strip():
@@ -194,7 +192,44 @@ def run_komoran_analyzer(sentences):
     return results
 
 
-def compute_f1(predictions, gold_sentences):
+def normalize_for_2025(morphs):
+    """Reconcile NIKL 형태분석 2025's coarser segmentation convention.
+
+    2025 merges productive 명사/어근 + 파생접미사(XSV/XSA) into a single 용언
+    (방문/NNG + 하/XSV → 방문하/VV), whereas 2021/Sejong (and Garu/Kiwi) split them.
+    2025 also joins spaced compound nouns into one token via '_' (사업_분야/NNG);
+    we un-join those so granularity matches the split analyzers.
+    Applied symmetrically to both gold and prediction so the comparison is
+    convention-neutral: on 2021 both sides split→both merge identically (수치 불변),
+    on 2025 it lifts Garu's split output to match the merged gold.
+    """
+    # 0) un-join 2025's '_'-joined compounds (사업_분야/NNG → 사업/NNG + 분야/NNG).
+    #    Garu is fed '_'-free text so never produces these → no-op on predictions.
+    expanded = []
+    for f, p in morphs:
+        if "_" in f:
+            expanded.extend((part, p) for part in f.split("_") if part)
+        else:
+            expanded.append((f, p))
+    morphs = expanded
+
+    out = []
+    i = 0
+    n = len(morphs)
+    while i < n:
+        if i + 1 < n:
+            f0, p0 = morphs[i]
+            f1, p1 = morphs[i + 1]
+            if p0 in ("NNG", "NNP", "XR") and p1 in ("XSV", "XSA"):
+                out.append((f0 + f1, "VV" if p1 == "XSV" else "VA"))
+                i += 2
+                continue
+        out.append(morphs[i])
+        i += 1
+    return out
+
+
+def compute_f1(predictions, gold_sentences, normalize=None):
     """Compute morpheme-level F1."""
     tp = defaultdict(int)
     fp = defaultdict(int)
@@ -204,8 +239,13 @@ def compute_f1(predictions, gold_sentences):
     total_gold = 0
 
     for i in range(min(len(predictions), len(gold_sentences))):
-        pred_set = set((f, t) for f, t in predictions[i] if f.strip())
-        gold_set = set((f, t) for f, t in gold_sentences[i][1] if f.strip())
+        pred_list = predictions[i]
+        gold_list = gold_sentences[i][1]
+        if normalize is not None:
+            pred_list = normalize(pred_list)
+            gold_list = normalize(gold_list)
+        pred_set = set((f, t) for f, t in pred_list if f.strip())
+        gold_set = set((f, t) for f, t in gold_list if f.strip())
 
         matched = pred_set & gold_set
         total_match += len(matched)
@@ -261,7 +301,10 @@ def main():
     ap.add_argument("--analyzers", default=",".join(RUNNERS.keys()))
     ap.add_argument("--verbose-pos", action="store_true",
                     help="POS별 breakdown 출력")
+    ap.add_argument("--norm-2025", action="store_true",
+                    help="2025 분절 컨벤션 정규화(명사+XSV/XSA 병합)를 채점에 적용")
     args = ap.parse_args()
+    normalize = normalize_for_2025 if args.norm_2025 else None
 
     selected = [a.strip() for a in args.analyzers.split(",") if a.strip()]
     for a in selected:
@@ -280,14 +323,14 @@ def main():
             print(f"  {a}: failed")
             f1_results[a] = (0, 0, 0, {}, {}, {})
             continue
-        P, R, F, tp, fp, fn = compute_f1(pred, sentences)
+        P, R, F, tp, fp, fn = compute_f1(pred, sentences, normalize=normalize)
         f1_results[a] = (P, R, F, tp, fp, fn)
         if args.verbose_pos:
             print_results(f"{a.capitalize()} vs NIKL MP ({len(sentences)} sentences)",
                           P, R, F, tp, fp, fn)
 
     print(f'\n{"=" * 60}')
-    print(f'  SUMMARY (NIKL MP {len(sentences)} sentences)')
+    print(f'  SUMMARY (NIKL MP {len(sentences)} sentences{", norm-2025" if normalize else ""})')
     print(f'  {"analyzer":<10} {"Prec":>8} {"Rec":>8} {"F1":>8}')
     print(f'  {"-"*36}')
     for a in selected:

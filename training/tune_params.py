@@ -24,7 +24,7 @@ POS_TAGS = [
     "SF", "SP", "SS", "SE", "SO", "SW", "SH", "SL", "SN",
 ]
 POS_SET = set(POS_TAGS)
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 
 
 def normalize_pos(tag):
@@ -44,10 +44,7 @@ def normalize_pos(tag):
 
 def load_nikl_sentences(max_n=2000):
     sentences = []
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         with open(path) as f:
             data = json.load(f)
         for doc in data["document"]:
@@ -56,7 +53,7 @@ def load_nikl_sentences(max_n=2000):
                 if not text or len(text) < 5 or len(text) > 200:
                     continue
                 morphemes = []
-                for m in sent["morpheme"]:
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     form = m["form"]
                     label = normalize_pos(m["label"])
                     if form.strip():

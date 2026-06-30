@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = Path(__file__).parent
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 
 POS_TAGS = ["NNG","NNP","NNB","NR","NP","VV","VA","VX","VCP","VCN","MAG","MAJ","MM","IC",
@@ -24,15 +24,13 @@ def np_(t):
 
 def load_nikl(n=2000):
     ss = []
-    for fn in ["NXMP1902008040.json","SXMP1902008031.json"]:
-        p = NIKL_DIR/fn
-        if not p.exists(): continue
+    for p in sorted(NIKL_DIR.glob("*.json")):
         d = json.load(open(p))
         for doc in d["document"]:
             for s in doc["sentence"]:
                 t = s["form"]
                 if not t or len(t)<5 or len(t)>200: continue
-                ms = [(m["form"],np_(m["label"])) for m in s["morpheme"] if m["form"].strip()]
+                ms = [(m["form"],np_(m["label"])) for m in (s.get("MP") or s.get("morpheme") or []) if m["form"].strip()]
                 if ms: ss.append((t,ms))
     random.seed(42); return random.sample(ss, min(n,len(ss)))
 

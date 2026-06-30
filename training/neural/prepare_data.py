@@ -13,11 +13,12 @@ Example:
 Output: JSON lines with {syllables: [...], labels: [...]}
 """
 import json
+import os
 import random
 from collections import Counter, defaultdict
 from pathlib import Path
 
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 OUT_DIR = Path(__file__).parent
 
 POS_TAGS = [
@@ -92,11 +93,7 @@ def morphemes_to_syllable_labels(eojeol_text, morphemes):
 def main():
     all_sentences = []
 
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        path = NIKL_DIR / fname
-        if not path.exists():
-            print(f"Warning: {path} not found")
-            continue
+    for path in sorted(NIKL_DIR.glob("*.json")):
         data = json.load(open(path))
 
         for doc in data["document"]:
@@ -108,7 +105,7 @@ def main():
                     continue
 
                 words = {w["id"]: w["form"] for w in (sent.get("word") or [])}
-                morphemes = sent.get("morpheme") or []
+                morphemes = sent.get("MP") or sent.get("morpheme") or []
 
                 # Group morphemes by word_id
                 word_morphs = defaultdict(list)

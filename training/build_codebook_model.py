@@ -8,6 +8,7 @@ Usage:
 import gzip
 import json
 import math
+import os
 import struct
 import subprocess
 import tempfile
@@ -150,7 +151,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
     # Build multi-POS content dict: for ambiguous words, include top 2 POS
     # Load NIKL word→POS distribution for secondary POS
     nikl_word_pos = {}
-    nikl_dir = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+    nikl_dir = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
     NIKL_MAP_LOCAL = {'MMD':'MM','MMN':'MM','MMA':'MM','NA':'NNG','NAP':'NNG','NF':'NNG','NV':'VV'}
     POS_SET_LOCAL = set(POS_TAGS)
     def np_local(t):
@@ -158,15 +159,13 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         if t in NIKL_MAP_LOCAL: return NIKL_MAP_LOCAL[t]
         b = t.split('-')[0]
         return b if b in POS_SET_LOCAL else 'SW'
-    for fname in ["NXMP1902008040.json", "SXMP1902008031.json"]:
-        npath = nikl_dir / fname
-        if not npath.exists(): continue
+    for npath in sorted(nikl_dir.glob("*.json")):
         with open(npath) as nf:
             ndata = json.load(nf)
         for doc in ndata["document"]:
             if doc is None: continue
             for sent in (doc.get("sentence") or []):
-                for m in (sent.get("morpheme") or []):
+                for m in (sent.get("MP") or sent.get("morpheme") or []):
                     form = m.get("form", "").strip()
                     label = np_local(m.get("label", ""))
                     if form and label:

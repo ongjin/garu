@@ -1,9 +1,10 @@
 """NIKL NXMP/SXMP 코퍼스에서 raw 문장만 추출. gold 미사용."""
 import json
+import os
 import random
 from pathlib import Path
 
-NIKL_DIR = Path.home() / "Downloads" / "NIKL_MP(v1.1)"
+NIKL_DIR = Path(os.environ.get("NIKL_MP_DIR", str(Path.home() / "workspace" / "data" / "nikl_mp_2021")))
 FILES = {"NXMP": "NXMP1902008040.json", "SXMP": "SXMP1902008031.json"}
 
 
