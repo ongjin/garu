@@ -3340,6 +3340,31 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// 잇/VV → 이/VCP: a noun-attached, same-eojeol 잇/VV followed by 었/EP is the
+    /// copula 이었다 (형이었다 = 형 + 이/VCP + 었 + 다) misread as 잇다(연결).
+    /// The two share the surface 이었; the copula attaches directly to a preceding
+    /// noun in the same eojeol, whereas 잇다(연결) starts its own eojeol
+    /// (실을 이었다). Guard: 잇/VV + EP-next + noun-like prev in the same eojeol.
+    /// Gold has 0 잇/VV+EP vs 89 이/VCP+EP, so this pattern is unambiguously copula.
+    fn fix_it_copula(tokens: &mut [Token]) {
+        for i in 1..tokens.len() {
+            if tokens[i].text != "잇" || tokens[i].pos != Pos::VV {
+                continue;
+            }
+            if i + 1 >= tokens.len() || tokens[i + 1].pos != Pos::EP {
+                continue;
+            }
+            let prev = &tokens[i - 1];
+            let same_eojeol = prev.start == tokens[i].start;
+            let noun_like = matches!(prev.pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP | Pos::XSN);
+            if same_eojeol && noun_like {
+                tokens[i].text = "이".to_string();
+                tokens[i].pos = Pos::VCP;
+            }
+        }
+    }
+
     /// Recover NNG nouns wrongly decomposed at eojeol start. The codebook
     /// sometimes prefers a copula+ending split (`이/VCP + ㄴX/EC`) or a
     /// determiner+noun split (`이/MM + X/NNG`) for words that should be a
@@ -4214,6 +4239,7 @@ impl CodebookAnalyzer {
         Self::fix_deusi_honorific(&mut tokens);
         Self::fix_vcp(&mut tokens);
         Self::fix_noun_inga_copula(&mut tokens);
+        Self::fix_it_copula(&mut tokens);
         Self::fix_colloquial_pronouns(&mut tokens);
         Self::fix_vcp_eojeol_start_recovery(&mut tokens);
         Self::fix_nde_merge(&mut tokens);
@@ -4341,6 +4367,7 @@ impl CodebookAnalyzer {
             Self::fix_deusi_honorific(&mut tokens);
             Self::fix_vcp(&mut tokens);
             Self::fix_noun_inga_copula(&mut tokens);
+            Self::fix_it_copula(&mut tokens);
             Self::fix_vcp_eojeol_start_recovery(&mut tokens);
             Self::fix_nde_merge(&mut tokens);
             Self::fix_haeyo_endings(&mut tokens);
@@ -4486,6 +4513,39 @@ mod tests {
         let mut toks = vec![tok("3", Pos::SN, 0, 1), tok("대", Pos::NNG, 1, 2)];
         CodebookAnalyzer::fix_nnb(&mut toks);
         assert_eq!(toks[1].pos, Pos::NNG);
+    }
+
+    #[test]
+    fn test_fix_it_copula_after_noun() {
+        // 형이었다 (한 어절): 명사 뒤 같은 어절 잇/VV+EP → 이/VCP (계사).
+        let mut toks = vec![
+            tok("형", Pos::XSN, 0, 4), tok("잇", Pos::VV, 0, 4),
+            tok("었", Pos::EP, 0, 4), tok("다", Pos::EF, 0, 4),
+        ];
+        CodebookAnalyzer::fix_it_copula(&mut toks);
+        assert_eq!(toks[1].text, "이");
+        assert_eq!(toks[1].pos, Pos::VCP);
+    }
+
+    #[test]
+    fn test_fix_it_copula_not_across_eojeol() {
+        // 실을 이었다: 잇/VV는 별도 어절(연결동사)이라 유지.
+        let mut toks = vec![
+            tok("실", Pos::NNG, 0, 2), tok("을", Pos::JKO, 0, 2),
+            tok("잇", Pos::VV, 2, 5), tok("었", Pos::EP, 2, 5), tok("다", Pos::EF, 2, 5),
+        ];
+        CodebookAnalyzer::fix_it_copula(&mut toks);
+        assert_eq!(toks[2].pos, Pos::VV);
+    }
+
+    #[test]
+    fn test_fix_it_copula_not_when_ec() {
+        // 맛잇어 (맛있어): 잇/VV+EC는 계사 아님 → 유지.
+        let mut toks = vec![
+            tok("맛", Pos::NNG, 0, 3), tok("잇", Pos::VV, 0, 3), tok("어", Pos::EC, 0, 3),
+        ];
+        CodebookAnalyzer::fix_it_copula(&mut toks);
+        assert_eq!(toks[1].pos, Pos::VV);
     }
 
     #[test]
