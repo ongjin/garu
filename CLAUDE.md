@@ -53,10 +53,12 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi   # garu F1 0.937
 # 다른 코퍼스는 NIKL_MP_DIR로 override. 단 2025판은 분절 컨벤션이 거칠어져
 #   (명사+하 병합, _복합어 결합) raw F1 비교불가 → --norm-2025 정규화 필요
-#   (XSV/XSA·적/XSN 병합, _un-join, 인용 EF+고·며·는 병합, 직접인용 JKQ canonical,
-#    되/VX→VV canonical까지 구현. norm 후 2021 garu 0.9357 불변 / 2025 garu 0.8760.
-#    단위테스트 training/test_nikl_norm_2025.py. 되/VX는 2021/gold=VV·2025만 VX인
-#    컨벤션차라 정규화(2025 되/VX ~48% vs 2021 ×4). 하/VX·구어 그/IC는 진짜 차이라 미정규화)
+#   (XSV/XSA 병합, 파생접미사 XSN 병합(적·성·화·권 등 16종 화이트리스트), _un-join,
+#    인용 EF+고·며·는 병합, 직접인용 JKQ canonical, 되/VX→VV canonical까지 구현.
+#    norm 후 2021 garu 0.9363 / 2025 garu 0.8806. 단위테스트 training/test_nikl_norm_2025.py.
+#    되/VX는 2021/gold=VV·2025만 VX인 컨벤션차라 정규화(2025 되/VX ~48% vs 2021 ×4).
+#    2025 잔여격차(~5.5pp)는 대부분 복합명사 분절(FN 28%)·태그컨벤션(있VA/하VX/와JKB)이라
+#    분석기 결함 아닌 분절 컨벤션 문제. 하/VX·구어 그/IC는 진짜 차이라 미정규화)
 NIKL_MP_DIR=~/workspace/data/nikl_mp_2025 python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi --norm-2025
 
 # 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제

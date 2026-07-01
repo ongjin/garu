@@ -39,6 +39,23 @@ def test_jeok_lexical_noun_untouched():
     # 목적/NNG 같은 어휘명사(적/XSN 분리 아님)는 손대지 않음.
     assert N([("목적", "NNG"), ("이", "JKS")]) == [("목적", "NNG"), ("이", "JKS")]
 
+def test_xsn_seong_merge():
+    # 성/XSN 파생접미사: 화제/NNG + 성/XSN → 화제성/NNG (2025 병합)
+    assert N([("화제", "NNG"), ("성", "XSN")]) == [("화제성", "NNG")]
+
+def test_xsn_hwa_gwon_merge():
+    # 화/권도 2025 병합(현대화·투표권) — 화이트리스트 파생접미사.
+    assert N([("현대", "NNG"), ("화", "XSN")]) == [("현대화", "NNG")]
+    assert N([("투표", "NNG"), ("권", "XSN")]) == [("투표권", "NNG")]
+
+def test_xsn_nnp_base_becomes_nng():
+    # NNP 어기 + 접미사도 병합형은 gold 95%가 NNG (호남권/NNG).
+    assert N([("호남", "NNP"), ("권", "XSN")]) == [("호남권", "NNG")]
+
+def test_xsn_non_whitelist_untouched():
+    # 들/XSN(복수)은 파생접미사 화이트리스트 아님 — 분리 유지.
+    assert N([("사람", "NNG"), ("들", "XSN")]) == [("사람", "NNG"), ("들", "XSN")]
+
 
 # ── 3) EF + 인용 clitic → 병합 (④A 다고/다며/다는) ────────────────────────
 def test_indirect_go_merge():

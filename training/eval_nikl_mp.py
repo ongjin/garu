@@ -192,6 +192,13 @@ def run_komoran_analyzer(sentences):
     return results
 
 
+# 2025가 어기명사에 병합하는 파생접미사(XSN) — 병합률 ≥0.9 또는 표준 파생접미사.
+# 굴절/복수 XSN(들 등)이나 비접미 XSN은 제외.
+_XSN_MERGE_SUFFIXES = frozenset(
+    "적 성 화 권 율 률 치 급 층 력 계 생 상 형 님 별".split()
+)
+
+
 def normalize_for_2025(morphs):
     """Reconcile NIKL 형태분석 2025's coarser segmentation convention.
 
@@ -203,9 +210,11 @@ def normalize_for_2025(morphs):
 
       0) '_'-joined compound nouns → un-join (사업_분야/NNG → 사업/NNG + 분야/NNG).
       1) 명사/어근 + XSV/XSA → 용언 (방문/NNG + 하/XSV → 방문하/VV).
-      2) 명사/어근 + 적/XSN → X적/NNG. 2025 merges the 파생접미사 적 into the base
-         noun (사회적/NNG ×2063; separate 적/XSN ×6), while 2021/Garu split it
-         (2021: 적/XSN ×5885). Gold merged POS is overwhelmingly NNG.
+      2) 명사/어근 + 파생접미사/XSN → X접미사/NNG. 2025 merges 파생접미사 (적·성·화·
+         권·율·률·치·급·층·력·계·생·상·형·님·별) into the base noun (적: 사회적/NNG
+         ×2063 vs 적/XSN ×6), while 2021/Garu split them (2021 적/XSN ×5885).
+         WL = 2025 병합률 ≥0.9 접미사만 (_XSN_MERGE_SUFFIXES; 굴절 XSN 들/이 등 제외).
+         Merged POS is overwhelmingly NNG (gold ×1589 vs NNP ×74).
       3) EF + 인용 particle → 병합 (간접인용). 2025 splits the reportative ending
          off as a clitic (가/VV + ㄴ다/EF + 고/JKQ), whereas 2021 and Garu keep it
          as one 연결/관형 어미: 고/JKQ→ㄴ다고/EC, 며/EC→ㄴ다며/EC, 는/ETM→ㄴ다는/ETM.
@@ -252,9 +261,12 @@ def normalize_for_2025(morphs):
             i += 1
             continue
 
-        # 2) 명사/어근 + 적/XSN → X적/NNG
-        if p0 in ("NNG", "NNP", "XR") and f1 == "적" and p1 == "XSN":
-            out.append((f0 + "적", "NNG"))
+        # 2) 명사/어근 + 파생접미사/XSN → X접미사/NNG. 2025는 파생접미사(적·성·화·권
+        #    …)를 어기명사에 병합(적: 사회적/NNG ×2063 vs 적/XSN ×6), 2021/Garu는 분리
+        #    (2021 적/XSN ×5885). WL은 2025 병합률 ≥0.9 저빈도 오차 접미사만(들/이/가
+        #    같은 굴절·비접미 XSN은 제외). 병합형 POS는 gold 95.5%가 NNG(×1589 vs NNP ×74).
+        if p0 in ("NNG", "NNP", "XR") and p1 == "XSN" and f1 in _XSN_MERGE_SUFFIXES:
+            out.append((f0 + f1, "NNG"))
             i += 2
             continue
 
