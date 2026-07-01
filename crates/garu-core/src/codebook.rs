@@ -63,10 +63,11 @@ fn classify_oov_char(ch: char) -> Pos {
         c if c.is_ascii_alphabetic() => Pos::SL,
         c if c.is_ascii_digit() => Pos::SN,
         c if ('\u{AC00}'..='\u{D7A3}').contains(&c) => Pos::NNG,
-        // CJK Ideographs: treat as NNG (Kiwi convention — Hanja in Korean text is usually NNG)
+        // CJK Ideographs → SH (Hanja). Gold tags hanja SH (89 SH tokens vs 1 NNG-hanja);
+        // contiguous hanja runs merge into one SH span (see merge_sl_sn_tokens).
         c if ('\u{4E00}'..='\u{9FFF}').contains(&c) ||
              ('\u{3400}'..='\u{4DBF}').contains(&c) ||
-             ('\u{F900}'..='\u{FAFF}').contains(&c) => Pos::NNG,
+             ('\u{F900}'..='\u{FAFF}').contains(&c) => Pos::SH,
         _ => Pos::SW,
     }
 }
@@ -4047,7 +4048,7 @@ impl CodebookAnalyzer {
         for token in tokens {
             if let Some(last) = merged.last_mut() {
                 if last.pos == token.pos
-                    && (last.pos == Pos::SL || last.pos == Pos::SN)
+                    && (last.pos == Pos::SL || last.pos == Pos::SN || last.pos == Pos::SH)
                     && last.end == token.start
                     && (last.text.chars().count() == 1 || token.text.chars().count() == 1)
                 {
@@ -4363,6 +4364,55 @@ mod tests {
         assert_eq!(classify_oov_char('('), Pos::SS);
         assert_eq!(classify_oov_char('가'), Pos::NNG);
         assert_eq!(classify_oov_char('@'), Pos::SW);
+    }
+
+    #[test]
+    fn test_classify_oov_hanja_sh() {
+        // OOV Chinese ideographs → SH (gold convention: 89 SH tokens vs 1 NNG-hanja).
+        assert_eq!(classify_oov_char('公'), Pos::SH);
+        assert_eq!(classify_oov_char('海'), Pos::SH);
+        assert_eq!(classify_oov_char('列'), Pos::SH); // CJK Ext handled via ranges below
+        assert_eq!(classify_oov_char('湯'), Pos::SH);
+        // Hangul syllables remain NNG.
+        assert_eq!(classify_oov_char('가'), Pos::NNG);
+    }
+
+    #[test]
+    fn test_merge_contiguous_sh() {
+        // Contiguous OOV hanja merge into one SH span (gold: 公海, 大國往事 as single tokens).
+        let toks = vec![
+            Token { text: "公".into(), pos: Pos::SH, start: 0, end: 1, score: None },
+            Token { text: "海".into(), pos: Pos::SH, start: 1, end: 2, score: None },
+        ];
+        let merged = CodebookAnalyzer::merge_sl_sn_tokens(toks);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "公海");
+        assert_eq!(merged[0].pos, Pos::SH);
+        assert_eq!((merged[0].start, merged[0].end), (0, 2));
+    }
+
+    #[test]
+    fn test_merge_sh_run_three() {
+        // Runs longer than 2 fully merge (gold: 湯問篇 3-char SH).
+        let toks = vec![
+            Token { text: "湯".into(), pos: Pos::SH, start: 0, end: 1, score: None },
+            Token { text: "問".into(), pos: Pos::SH, start: 1, end: 2, score: None },
+            Token { text: "篇".into(), pos: Pos::SH, start: 2, end: 3, score: None },
+        ];
+        let merged = CodebookAnalyzer::merge_sl_sn_tokens(toks);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "湯問篇");
+    }
+
+    #[test]
+    fn test_merge_sh_not_across_gap() {
+        // Non-adjacent SH (hyphen/space between) must NOT merge (gold: 韓-中 separate).
+        let toks = vec![
+            Token { text: "韓".into(), pos: Pos::SH, start: 0, end: 1, score: None },
+            Token { text: "中".into(), pos: Pos::SH, start: 2, end: 3, score: None },
+        ];
+        let merged = CodebookAnalyzer::merge_sl_sn_tokens(toks);
+        assert_eq!(merged.len(), 2);
     }
 
     #[test]
