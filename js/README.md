@@ -4,7 +4,7 @@
 
 - **1MB model** bundled in npm package (no CDN needed)
 - **337KB WASM** engine (155KB gzipped) -- runs in any modern browser
-- **F1 95.1%** on 9k human-verified gold testset (ep_norm), **F1 93.7%** on NIKL MP
+- **F1 95.3%** on 9k human-verified gold testset (ep_norm), **F1 93.9%** on NIKL MP
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -139,7 +139,7 @@ garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1MB m
 No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
 
 **How accurate is it?**
-F1 95.1% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 93.7% on the NIKL Modu morpheme-tagged corpus.
+F1 95.3% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 93.9% on the NIKL Modu morpheme-tagged corpus.
 
 **Which POS tagset does it use?**
 The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.
