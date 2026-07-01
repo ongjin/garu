@@ -38,7 +38,7 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 | **B / C** | 순수 기능 접미사 standalone / 내용어+기능 contracted | |
 | — | `입니다/입니까` VCP+EF 아크 강제 주입 | 진입/NNG에 안 지도록 |
 
-⚠️ ㅂ불규칙 현재형(아름다워)은 **전용 재구성 코드가 없다** — 접미사 코드북이 `[아름답/VA, 어/EF]`로 통째 저장한 걸 쓴다. 과거형(아름다웠다)은 코드북에도 없어 NNG로 떨어짐 (미해결).
+⚠️ ㅂ불규칙 현재형(아름다워)은 **전용 재구성 코드가 없다** — 접미사 코드북이 `[아름답/VA, 어/EF]`로 통째 저장한 걸 쓴다. 과거형(아름다웠다/추웠다)·불규칙 존댓말(고우시다/걸으신다/저으신다)은 `build_codebook_model.py`의 `augment_irregular_conjugations`(ㅂ `었` 분기 + ㅅ불규칙 분기 `IRREG_SIOT_STEMS` + ㅡ탈락 `았/었` ㅆ-병합 버그수정)와 `augment_irregular_honorific`(ㅂ/ㄷ/ㅅ 어간 + `으시/EP` 어절 주입)로 코드북에 넣어 복원됨. 회귀 가드 `training/test_irregular_restore.py`.
 
 ## 디코더: viterbi() vs viterbi_nbest()
 

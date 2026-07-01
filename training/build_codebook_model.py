@@ -321,6 +321,9 @@ L_RIEUL = 5
 
 # Known irregular ㄷ stems
 IRREG_DIGEUT_STEMS = {"걷", "듣", "묻", "싣", "깨닫", "일컫", "걷잡"}
+# Known irregular ㅅ stems (ㅅ drops before vowel; regular 벗/씻/웃/솟 excluded).
+# 잇 excluded on purpose: its 이어/이었다 forms collide with 계사 이/VCP + 었.
+IRREG_SIOT_STEMS = {"짓", "젓", "긋", "낫", "붓"}
 # Known irregular ㅎ stems (VA only)
 IRREG_HIEUT_STEMS = {"빨갛", "파랗", "노랗", "하얗", "까맣", "그렇", "이렇",
                       "저렇", "어떻", "아무렇", "누렇", "허옇", "시뻘겋",
@@ -455,6 +458,12 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
                     rest = suffix_str[1:]
                     surface = stem_base + "우" + rest
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "었":
+                    # ㅂ -> 우 + 어 + ㅆ -> 웠 (곱/돕만 왔). 추웠다/무거웠다/고왔다
+                    conj_char = "왔" if stem in ("곱", "돕") else "웠"
+                    rest = suffix_str[1:]
+                    surface = stem_base + conj_char + rest
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
 
         # === ㄷ불규칙 (known irregular ㄷ stems) ===
         elif tail == TAIL_DIGEUT and stem in IRREG_DIGEUT_STEMS:
@@ -473,6 +482,26 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
                 elif first_suffix_ch == "으":
                     # ㄹ tail + 으 -> ㄹ contracts: 걸으니 -> valid
                     surface = stem_with_rieul + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+
+        # === ㅅ불규칙 (known irregular ㅅ stems; ㅅ 탈락, 축약 없음) ===
+        elif tail == TAIL_SIOT and stem in IRREG_SIOT_STEMS:
+            stem_base = stem[:-1] + compose_hangul(lead, vowel, TAIL_NONE)  # ㅅ 탈락
+            stem_form = stem
+            use_a = is_bright_vowel(vowel)
+            for suffix_str, suffix_tags in SUFFIX_COMBOS:
+                first_suffix_ch = suffix_str[0]
+                if first_suffix_ch in ("어", "아"):
+                    # 젓+어→저어, 낫+아→나아 (hiatus 유지, 축약 없음)
+                    surface = stem_base + ("아" if use_a else "어") + suffix_str[1:]
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "었":
+                    # 젓+었다→저었다, 낫+았다→나았다
+                    surface = stem_base + ("았" if use_a else "었") + suffix_str[1:]
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch in ("은", "을", "으"):
+                    # ㅅ drops before 으-suffixes too: 짓+으니→지으니, 낫+은→나은
+                    surface = stem_base + suffix_str
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
 
         # === 르불규칙 (stem ends in 르) ===
@@ -531,13 +560,13 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
                 elif first_suffix_ch == "었":
                     attach_vowel = V_A if use_a else V_EO
-                    # 았/었 merges: lead + 아/어 + ㅆ tail
-                    new_ch = compose_hangul(lead, attach_vowel, TAIL_NONE)
+                    # ㅡ 탈락 후 아/어 + ㅆ 병합: 아프+었다 → 아팠다 (기존 버그: 아파었다)
+                    new_ch = compose_hangul(lead, attach_vowel, 20)  # ㅆ tail
                     rest = suffix_str[1:]
                     if len(stem) >= 2:
-                        surface = stem[:-1] + new_ch + suffix_str
+                        surface = stem[:-1] + new_ch + rest
                     else:
-                        surface = new_ch + suffix_str
+                        surface = new_ch + rest
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
                 elif first_suffix_ch in ("은", "을", "으"):
                     surface = stem + suffix_str
@@ -1046,6 +1075,78 @@ def augment_honorific(codebook: dict) -> dict:
     return codebook
 
 
+def augment_irregular_honorific(codebook: dict, content_dict_path: Path) -> dict:
+    """불규칙 어간(ㅂ/ㄷ/ㅅ) + 으시- 존댓말 어절을 복원형으로 주입.
+
+    augment_honorific은 자음어간 접미사 표면(으신다/으셨다…)만 다룬다. 그래서 불규칙
+    어간의 존댓말(고우시다/걸으신다/저으시다)은 FST가 surface prefix(고우/걸/저)를 못
+    잡아 NNG로 붕괴한다. 여기서 어간 복원형 전체 어절을 [어간, 으시/EP, 어미]로 넣는다.
+    ㅂ불규칙은 ㅂ→우가 으를 흡수(곱→고우+시다), ㄷ/ㅅ는 으 유지(걷→걸/젓→저 +으시다).
+    """
+    EP = ["으시", "EP"]; PAST = ["었", "EP"]
+    # 으-prefixed surface tail -> morphemes following the stem (으시/EP …)
+    TAILS = {
+        "으시다":    [EP, ["다", "EF"]],
+        "으신다":    [EP, ["ㄴ다", "EF"]],
+        "으신":      [EP, ["ㄴ", "ETM"]],
+        "으실":      [EP, ["ㄹ", "ETM"]],
+        "으시는":    [EP, ["는", "ETM"]],
+        "으시면":    [EP, ["면", "EC"]],
+        "으시고":    [EP, ["고", "EC"]],
+        "으셔":      [EP, ["어", "EF"]],
+        "으셔서":    [EP, ["어서", "EC"]],
+        "으세요":    [EP, ["어요", "EF"]],
+        "으십니다":  [EP, ["ㅂ니다", "EF"]],
+        "으십니까":  [EP, ["ㅂ니까", "EF"]],
+        "으셨다":    [EP, PAST, ["다", "EF"]],
+        "으셨어요":  [EP, PAST, ["어요", "EF"]],
+        "으셨습니다": [EP, PAST, ["습니다", "EF"]],
+    }
+
+    stems = {}  # {stem: (pos, freq)} — same source as augment_irregular_conjugations
+    with open(content_dict_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3 or parts[1] not in ("VA", "VV"):
+                continue
+            word, freq = parts[0], int(parts[2])
+            if word not in stems or freq > stems[word][1]:
+                stems[word] = (parts[1], freq)
+
+    def restore(stem, pos):
+        """(surface_prefix, elide_eu) for an irregular stem, else None."""
+        dec = decompose_hangul(stem[-1])
+        if dec is None:
+            return None
+        lead, vowel, tail = dec
+        if pos == "VA" and tail == TAIL_BIEUP:                    # ㅂ: 곱→고우, 으 흡수
+            return stem[:-1] + compose_hangul(lead, vowel, TAIL_NONE) + "우", True
+        if tail == TAIL_DIGEUT and stem in IRREG_DIGEUT_STEMS:    # ㄷ: 걷→걸, 으 유지
+            return stem[:-1] + compose_hangul(lead, vowel, TAIL_RIEUL), False
+        if tail == TAIL_SIOT and stem in IRREG_SIOT_STEMS:        # ㅅ: 젓→저, 으 유지
+            return stem[:-1] + compose_hangul(lead, vowel, TAIL_NONE), False
+        return None
+
+    added = 0
+    for stem, (pos, freq) in stems.items():
+        r = restore(stem, pos)
+        if r is None:
+            continue
+        prefix, elide_eu = r
+        for tail_surface, tail_morphs in TAILS.items():
+            surface = prefix + (tail_surface[1:] if elide_eu else tail_surface)
+            morphemes = [[stem, pos]] + [list(m) for m in tail_morphs]
+            new_key = tuple(tuple(m) for m in morphemes)
+            entry = {"morphemes": morphemes, "freq": max(freq, 100)}
+            if surface not in codebook:
+                codebook[surface] = [entry]; added += 1
+            elif not any(tuple(tuple(m) for m in a["morphemes"]) == new_key
+                         for a in codebook[surface]):
+                codebook[surface].append(entry); added += 1
+    print(f"  Irregular honorific 으시- augmentation: {added} entries added")
+    return codebook
+
+
 def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) -> tuple[bytes, int]:
     """Build Section 7: Suffix Codebook.
 
@@ -1079,6 +1180,9 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Add consonant-stem honorific 으시- contractions (으십니다, 으셔서, 으셨다 …)
     codebook = augment_honorific(codebook)
+
+    # Add irregular-stem honorific forms (고우시다=곱+으시+다, 걸으신다, 저으시다 …)
+    codebook = augment_irregular_honorific(codebook, content_dict_path)
 
     # Count total entries before filtering
     total_before = sum(len(analyses) for analyses in codebook.values())
