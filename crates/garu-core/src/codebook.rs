@@ -1957,6 +1957,24 @@ impl CodebookAnalyzer {
                             && !Self::is_pure_functional(&analysis.morphemes)
                             && !analysis.morphemes.iter().all(|m| is_content_pos(m.pos))
                         {
+                            // Guard against truncated codebook keys (배→[배우,었],
+                            // 표→[표,하,었], 확대→[확대,되,었]): the stem prefix — every
+                            // morpheme before the first inflectional ending (content +
+                            // 하/되 XSV·XSA + 계사 이) — bears surface that can only
+                            // contract *into* a following ending, never expand. So its
+                            // total surface length can never exceed the span it covers.
+                            // Entries that violate this reconstruct to a surface longer
+                            // than the input (surface hallucination), so skip them.
+                            let stem_len: usize = analysis.morphemes.iter()
+                                .take_while(|m| !matches!(m.pos,
+                                    Pos::EP | Pos::EF | Pos::EC | Pos::ETM | Pos::ETN
+                                    | Pos::JKS | Pos::JKC | Pos::JKG | Pos::JKO | Pos::JKB
+                                    | Pos::JKV | Pos::JKQ | Pos::JX | Pos::JC))
+                                .map(|m| m.form.chars().count())
+                                .sum();
+                            if stem_len > suf_len {
+                                continue;
+                            }
                             // Mixed content+functional
                             let suf_cost = self.get_suffix_cost(&suf_surface, analysis);
                             let morphemes: Vec<(String, Pos)> = analysis.morphemes.iter()

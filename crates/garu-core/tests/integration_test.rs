@@ -761,3 +761,28 @@ fn test_vcp_eojeol_start_recovery_imyon() {
         "학생이면: 이면/NNG으로 잘못 병합되면 안 됨: {:?}", pairs
     );
 }
+
+#[test]
+fn test_no_truncated_codebook_hallucination() {
+    // 접미사 코드북의 절단된 키(배→[배우,었], 조→[조사,되,었])가 span을 넘는
+    // 표면을 주입해 "출력 표면 ≠ 입력"을 만드는 정합성 버그 방지.
+    // "2.2배다."는 2.2/SN + 배/NNG (+다) 여야 하며, 입력에 없는 배출/조사 등을
+    // 절대 만들면 안 된다.
+    let analyzer = load_analyzer();
+    for (input, forbidden) in [
+        ("2.2배다.", "배출"),
+        ("3배다.", "배출"),
+    ] {
+        let r = analyzer.analyze(input);
+        let pairs: Vec<(&str, Pos)> = r.tokens.iter()
+            .map(|t| (t.text.as_str(), t.pos)).collect();
+        assert!(
+            !r.tokens.iter().any(|t| t.text == forbidden),
+            "{input}: 절단 코드북 키로 인한 환각 '{forbidden}' 발생: {:?}", pairs
+        );
+        assert!(
+            r.tokens.iter().any(|t| t.text == "배" && t.pos == Pos::NNG),
+            "{input}: 올바른 배/NNG 있어야 함: {:?}", pairs
+        );
+    }
+}
