@@ -2777,6 +2777,31 @@ impl CodebookAnalyzer {
                 }
             }
         }
+
+        // Numeral classifiers → NNB after a numeral (SN 숫자 / NR 수사 / 수관형사).
+        // Gold: these forms are ≥90% NNB after a numeral (년 117/117, 원 49/49,
+        // 시 18/18, 권 4/4). Ambiguous forms (대·점·세·조·시간) are excluded.
+        // Numeral 수관형사 must be an actual numeral word, not a generic MM (새/그/각).
+        const NNB_AFTER_NUM: &[&str] = &[
+            "년", "일", "명", "원", "월", "개", "위", "시", "번", "분",
+            "개월", "달러", "차", "회", "퍼센트", "석", "주년", "권", "건",
+            "호선", "프로", "박", "년대",
+        ];
+        const NUM_MM: &[&str] = &[
+            "한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉",
+            "열", "스물", "몇", "여러",
+        ];
+        for i in 1..tokens.len() {
+            if !matches!(tokens[i].pos, Pos::NNG | Pos::XSN | Pos::NNP) {
+                continue;
+            }
+            let prev = &tokens[i - 1];
+            let prev_is_num = matches!(prev.pos, Pos::SN | Pos::NR)
+                || (prev.pos == Pos::MM && NUM_MM.iter().any(|&w| w == prev.text));
+            if prev_is_num && NNB_AFTER_NUM.iter().any(|&w| w == tokens[i].text) {
+                tokens[i].pos = Pos::NNB;
+            }
+        }
     }
 
     /// Fix NNG → XSN/XPN for common suffix/prefix morphemes.
@@ -4413,6 +4438,54 @@ mod tests {
         ];
         let merged = CodebookAnalyzer::merge_sl_sn_tokens(toks);
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_fix_nnb_classifier_after_sn() {
+        // 1시 → 시/NNB (gold: 시 18/18 NNB after numeral).
+        let mut toks = vec![tok("1", Pos::SN, 0, 1), tok("시", Pos::NNG, 1, 2)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNB);
+    }
+
+    #[test]
+    fn test_fix_nnb_classifier_after_nr() {
+        // 십 박 → 박/NNB (gold: 박 3/3 NNB); NNP→NNB.
+        let mut toks = vec![tok("십", Pos::NR, 0, 1), tok("박", Pos::NNP, 2, 3)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNB);
+    }
+
+    #[test]
+    fn test_fix_nnb_classifier_xsn_after_sn() {
+        // 50권 → 권/NNB (gold: 권 4/4 NNB); XSN→NNB.
+        let mut toks = vec![tok("50", Pos::SN, 0, 2), tok("권", Pos::XSN, 2, 3)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNB);
+    }
+
+    #[test]
+    fn test_fix_nnb_classifier_after_mm_numeral() {
+        // 세 시 → 시/NNB (수관형사 뒤). prev MM must be a numeral word.
+        let mut toks = vec![tok("세", Pos::MM, 0, 1), tok("시", Pos::NNG, 2, 3)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNB);
+    }
+
+    #[test]
+    fn test_fix_nnb_not_after_generic_mm() {
+        // 새 개 → 개 stays NNG (새 is not a numeral determiner).
+        let mut toks = vec![tok("새", Pos::MM, 0, 1), tok("개", Pos::NNG, 2, 3)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNG);
+    }
+
+    #[test]
+    fn test_fix_nnb_ambiguous_form_not_converted() {
+        // 대 is ambiguous (gold 21 NNB / 4 NNG after num) → NOT in whitelist, stays NNG.
+        let mut toks = vec![tok("3", Pos::SN, 0, 1), tok("대", Pos::NNG, 1, 2)];
+        CodebookAnalyzer::fix_nnb(&mut toks);
+        assert_eq!(toks[1].pos, Pos::NNG);
     }
 
     #[test]
