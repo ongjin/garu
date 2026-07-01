@@ -3872,6 +3872,39 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// 닫는 따옴표(SS) 직후의 인용격조사 고/라고/이라고를 JKQ로 교정.
+    /// 직접인용에서 저빈도 인용동사 문맥이면 트라이그램이 고/EC로 오분석하는데,
+    /// 닫는 따옴표에 붙은(같은 어절) 고/라고/이라고는 인용격조사(JKQ)가 확실하다.
+    /// 골드 반례 0 (SS+고/라고/이라고은 항상 JKQ). copula-split(이/VCP+라고/EC)도 병합.
+    fn fix_quote_jkq(tokens: &mut Vec<Token>) {
+        // (1) copula-split: SS + 이/VCP + 라고/EC → 이라고/JKQ (같은 어절)
+        let mut i = 1;
+        while i + 1 < tokens.len() {
+            if tokens[i - 1].pos == Pos::SS
+                && tokens[i].text == "이" && tokens[i].pos == Pos::VCP
+                && tokens[i + 1].text == "라고" && tokens[i + 1].pos == Pos::EC
+                && tokens[i - 1].start == tokens[i].start
+                && tokens[i].start == tokens[i + 1].start
+            {
+                let s = tokens[i].start;
+                let e = tokens[i + 1].end;
+                tokens.splice(i..=i + 1, vec![
+                    Token { text: "이라고".into(), pos: Pos::JKQ, start: s, end: e, score: None },
+                ]);
+            }
+            i += 1;
+        }
+        // (2) form-match: SS 직후 고/라고/이라고 → JKQ (같은 어절)
+        for i in 1..tokens.len() {
+            if tokens[i - 1].pos == Pos::SS
+                && tokens[i - 1].start == tokens[i].start
+                && matches!(tokens[i].text.as_str(), "고" | "라고" | "이라고")
+            {
+                tokens[i].pos = Pos::JKQ;
+            }
+        }
+    }
+
     /// Fix 가/JKS → 가/VV when it's the last morpheme of an eojeol
     /// preceded by MAG (directional adverb). "저리가" → 저리/MAG + 가/VV.
     fn fix_mag_ga_vv(tokens: &mut [Token]) {
@@ -4141,6 +4174,7 @@ impl CodebookAnalyzer {
         Self::fix_mm_determiners(&mut tokens);
         Self::fix_geuraeseo_maj(&mut tokens);
         Self::fix_si_dependent_noun(&mut tokens);
+        Self::fix_quote_jkq(&mut tokens);
 
         AnalyzeResult {
             tokens,
@@ -4276,6 +4310,7 @@ impl CodebookAnalyzer {
             Self::fix_colloquial_pronouns(&mut tokens);
             Self::fix_geuraeseo_maj(&mut tokens);
             Self::fix_si_dependent_noun(&mut tokens);
+            Self::fix_quote_jkq(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
         }).collect()
@@ -4490,5 +4525,70 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].text, "Hi");
         assert_eq!(merged[1].text, "3");
+    }
+
+    #[test]
+    fn test_fix_quote_jkq_go_after_closing_quote() {
+        // ...있다”/SS + 고/EC → 고/JKQ (같은 어절, 저빈도 인용동사 문맥)
+        let mut tokens = vec![
+            tok("있", Pos::VA, 0, 4),
+            tok("다", Pos::EF, 0, 4),
+            tok("”", Pos::SS, 0, 4),
+            tok("고", Pos::EC, 0, 4),
+            tok("압박", Pos::NNG, 5, 7),
+        ];
+        CodebookAnalyzer::fix_quote_jkq(&mut tokens);
+        assert_eq!(tokens[3].pos, Pos::JKQ);
+    }
+
+    #[test]
+    fn test_fix_quote_jkq_rago_after_closing_quote() {
+        // 것”/SS + 라고/EC → 라고/JKQ
+        let mut tokens = vec![
+            tok("것", Pos::NNB, 0, 4),
+            tok("”", Pos::SS, 0, 4),
+            tok("라고", Pos::EC, 0, 4),
+        ];
+        CodebookAnalyzer::fix_quote_jkq(&mut tokens);
+        assert_eq!(tokens[2].pos, Pos::JKQ);
+    }
+
+    #[test]
+    fn test_fix_quote_jkq_copula_split_merge() {
+        // ’/SS + 이/VCP + 라고/EC → 이라고/JKQ (한 토큰으로 병합)
+        let mut tokens = vec![
+            tok("상한", Pos::NNG, 0, 8),
+            tok("’", Pos::SS, 0, 8),
+            tok("이", Pos::VCP, 0, 8),
+            tok("라고", Pos::EC, 0, 8),
+            tok("한글", Pos::NNG, 9, 11),
+        ];
+        CodebookAnalyzer::fix_quote_jkq(&mut tokens);
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[2].text, "이라고");
+        assert_eq!(tokens[2].pos, Pos::JKQ);
+        assert_eq!(tokens[3].text, "한글");
+    }
+
+    #[test]
+    fn test_fix_quote_jkq_skips_non_quote_go() {
+        // 두/VV + 고/EC (앞이 SS 아님) → 그대로 EC (연결어미)
+        let mut tokens = vec![
+            tok("두", Pos::VV, 0, 2),
+            tok("고", Pos::EC, 0, 2),
+        ];
+        CodebookAnalyzer::fix_quote_jkq(&mut tokens);
+        assert_eq!(tokens[1].pos, Pos::EC);
+    }
+
+    #[test]
+    fn test_fix_quote_jkq_skips_cross_eojeol() {
+        // ”/SS (한 어절) + 고/EC (다른 어절) → 그대로 (붙어있지 않으면 인용격조사 아님)
+        let mut tokens = vec![
+            tok("”", Pos::SS, 0, 1),
+            tok("고", Pos::EC, 2, 3),
+        ];
+        CodebookAnalyzer::fix_quote_jkq(&mut tokens);
+        assert_eq!(tokens[1].pos, Pos::EC);
     }
 }
