@@ -217,6 +217,9 @@ def normalize_for_2025(morphs):
          2025 emits 라고/이라고/JKQ (or 라/이라/JKQ + 며/EC·는/ETM) where Garu emits
          a single 라고/EC(라며/EC, 라는/ETM) after the closing SS. Those JKQ forms
          are mapped to the same canonical token so the two conventions agree.
+      5) 되/VX → 되/VV. 2025 splits the 보조용언 되(게 되다) as VX (~48% of 되),
+         while 2021/gold collapse it into VV (2021 되/VX ×4 ≈ 0, gold ×0). A pure
+         convention shift, not a real analysis error → canonicalize to VV both sides.
     """
     # 0) un-join 2025's '_'-joined compounds. Garu is fed '_'-free text so never
     #    produces these → no-op on predictions.
@@ -239,6 +242,14 @@ def normalize_for_2025(morphs):
         if p0 in ("NNG", "NNP", "XR") and p1 in ("XSV", "XSA"):
             out.append((f0 + f1, "VV" if p1 == "XSV" else "VA"))
             i += 2
+            continue
+
+        # 5) 되/VX → 되/VV. 2025는 보조용언 되(게 되다)를 VX로 구분(VX ~48%)하나
+        #    2021/gold는 VV로 병합(2021 되/VX ×4 ≈ 0, gold ×0). 컨벤션 시프트이지
+        #    분석 오류가 아니므로 양쪽 canonical(VV)로.
+        if f0 == "되" and p0 == "VX":
+            out.append(("되", "VV"))
+            i += 1
             continue
 
         # 2) 명사/어근 + 적/XSN → X적/NNG

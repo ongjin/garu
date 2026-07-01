@@ -124,6 +124,29 @@ def test_copula_rado_untouched():
         [("학생", "NNG"), ("이", "VCP"), ("라도", "EC")]
 
 
+# ── 5) 되/VX → 되/VV: 2025는 보조용언 되(게 되다)를 VX(~48%)로 구분, 2021/gold는
+#      VV로 병합(2021 VX ×4 ≈ 0). 컨벤션 시프트라 양쪽 canonical화 ────────────
+def test_dwe_vx_to_vv():
+    # 2025 gold의 되/VX → 되/VV canonical
+    assert N([("되", "VX")]) == [("되", "VV")]
+
+def test_dwe_vx_symmetric_match():
+    # gold(2025) 게/EC + 되/VX  ↔  Garu 게/EC + 되/VV → 정규화 후 동일
+    gold = [("하", "VV"), ("게", "EC"), ("되", "VX"), ("었", "EP"), ("다", "EF")]
+    garu = [("하", "VV"), ("게", "EC"), ("되", "VV"), ("었", "EP"), ("다", "EF")]
+    assert N(gold) == N(garu)
+
+def test_dwe_vv_untouched():
+    # 되/VV(본동사 "되다")는 그대로.
+    assert N([("되", "VV"), ("었", "EP"), ("다", "EF")]) == \
+        [("되", "VV"), ("었", "EP"), ("다", "EF")]
+
+def test_other_vx_untouched():
+    # 되 외 보조용언(있/VX 등)의 VX는 손대지 않음 — 되/VX에만 적용.
+    assert N([("먹", "VV"), ("고", "EC"), ("있", "VX")]) == \
+        [("먹", "VV"), ("고", "EC"), ("있", "VX")]
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 if __name__ == "__main__":
