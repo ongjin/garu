@@ -53,7 +53,9 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi   # garu F1 0.937
 # 다른 코퍼스는 NIKL_MP_DIR로 override. 단 2025판은 분절 컨벤션이 거칠어져
 #   (명사+하 병합, _복합어 결합) raw F1 비교불가 → --norm-2025 정규화 필요
-#   (하-병합·_un-join까지 구현, 적/XSN·인용 고/JKQ 정규화는 미완)
+#   (XSV/XSA·적/XSN 병합, _un-join, 인용 EF+고·며·는 병합, 직접인용 JKQ canonical
+#    까지 구현. norm 후 2021 garu 0.9354 불변 / 2025 garu 0.8741. 단위테스트
+#    training/test_nikl_norm_2025.py. 되/하 VX↔VV·구어 그/IC는 진짜 차이라 미정규화)
 NIKL_MP_DIR=~/workspace/data/nikl_mp_2025 python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi --norm-2025
 
 # 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제

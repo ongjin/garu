@@ -195,16 +195,31 @@ def run_komoran_analyzer(sentences):
 def normalize_for_2025(morphs):
     """Reconcile NIKL 형태분석 2025's coarser segmentation convention.
 
-    2025 merges productive 명사/어근 + 파생접미사(XSV/XSA) into a single 용언
-    (방문/NNG + 하/XSV → 방문하/VV), whereas 2021/Sejong (and Garu/Kiwi) split them.
-    2025 also joins spaced compound nouns into one token via '_' (사업_분야/NNG);
-    we un-join those so granularity matches the split analyzers.
-    Applied symmetrically to both gold and prediction so the comparison is
-    convention-neutral: on 2021 both sides split→both merge identically (수치 불변),
-    on 2025 it lifts Garu's split output to match the merged gold.
+    2025 uses a coarser segmentation than 2021/Sejong (and Garu/Kiwi). Each rule
+    below is applied *symmetrically* to both gold and prediction, so the compare
+    is convention-neutral: where 2021 already agrees with Garu the rule fires
+    identically on both sides (수치 불변), and where 2025 gold is coarser the rule
+    lifts Garu's finer output to match. Rules (all verified against 2025 gold):
+
+      0) '_'-joined compound nouns → un-join (사업_분야/NNG → 사업/NNG + 분야/NNG).
+      1) 명사/어근 + XSV/XSA → 용언 (방문/NNG + 하/XSV → 방문하/VV).
+      2) 명사/어근 + 적/XSN → X적/NNG. 2025 merges the 파생접미사 적 into the base
+         noun (사회적/NNG ×2063; separate 적/XSN ×6), while 2021/Garu split it
+         (2021: 적/XSN ×5885). Gold merged POS is overwhelmingly NNG.
+      3) EF + 인용 particle → 병합 (간접인용). 2025 splits the reportative ending
+         off as a clitic (가/VV + ㄴ다/EF + 고/JKQ), whereas 2021 and Garu keep it
+         as one 연결/관형 어미: 고/JKQ→ㄴ다고/EC, 며/EC→ㄴ다며/EC, 는/ETM→ㄴ다는/ETM.
+         On 2021 there is essentially no EF+clitic adjacency → near no-op.
+      4) 계사 인용 (복사문). Indirect X이라고/이라며/이라는 is segmented by 2025 as
+         계사 이/VCP + 라/EF + 고/JKQ(는/ETM, 며/EC) — i.e. the 이/VCP already
+         matches Garu and rule 3 merges the 라/EF+clitic tail, so no extra work is
+         needed there. Only the direct-quote / noun-direct 인용격조사 forms differ:
+         2025 emits 라고/이라고/JKQ (or 라/이라/JKQ + 며/EC·는/ETM) where Garu emits
+         a single 라고/EC(라며/EC, 라는/ETM) after the closing SS. Those JKQ forms
+         are mapped to the same canonical token so the two conventions agree.
     """
-    # 0) un-join 2025's '_'-joined compounds (사업_분야/NNG → 사업/NNG + 분야/NNG).
-    #    Garu is fed '_'-free text so never produces these → no-op on predictions.
+    # 0) un-join 2025's '_'-joined compounds. Garu is fed '_'-free text so never
+    #    produces these → no-op on predictions.
     expanded = []
     for f, p in morphs:
         if "_" in f:
@@ -217,13 +232,47 @@ def normalize_for_2025(morphs):
     i = 0
     n = len(morphs)
     while i < n:
-        if i + 1 < n:
-            f0, p0 = morphs[i]
-            f1, p1 = morphs[i + 1]
-            if p0 in ("NNG", "NNP", "XR") and p1 in ("XSV", "XSA"):
-                out.append((f0 + f1, "VV" if p1 == "XSV" else "VA"))
+        f0, p0 = morphs[i]
+        f1, p1 = morphs[i + 1] if i + 1 < n else (None, None)
+
+        # 1) 명사/어근 + XSV/XSA → 용언
+        if p0 in ("NNG", "NNP", "XR") and p1 in ("XSV", "XSA"):
+            out.append((f0 + f1, "VV" if p1 == "XSV" else "VA"))
+            i += 2
+            continue
+
+        # 2) 명사/어근 + 적/XSN → X적/NNG
+        if p0 in ("NNG", "NNP", "XR") and f1 == "적" and p1 == "XSN":
+            out.append((f0 + "적", "NNG"))
+            i += 2
+            continue
+
+        # 3) EF + 인용 clitic → 병합 (간접인용 다고/다며/다는)
+        if p0 == "EF" and (f1, p1) in (("고", "JKQ"), ("며", "EC"), ("는", "ETM")):
+            out.append((f0 + f1, "ETM" if p1 == "ETM" else "EC"))
+            i += 2
+            continue
+
+        # 4) 2025 인용격조사 라/이라/JKQ (직접인용·명사직결) → Garu의 라고/EC와 동일
+        #    canonical로. (간접 복사문 이/VCP+라/EF+…는 3번이 이미 처리 — 계사 유지.)
+        if p0 == "JKQ" and f0 in ("라고", "이라고"):
+            out.append(("라고", "EC"))
+            i += 1
+            continue
+        if p0 == "JKQ" and f0 in ("라", "이라"):
+            if (f1, p1) == ("며", "EC"):
+                out.append(("라며", "EC"))
                 i += 2
                 continue
+            if (f1, p1) == ("는", "ETM"):
+                out.append(("라는", "ETM"))
+                i += 2
+                continue
+            if (f1, p1) == ("고", "EC"):
+                out.append(("라고", "EC"))
+                i += 2
+                continue
+
         out.append(morphs[i])
         i += 1
     return out
