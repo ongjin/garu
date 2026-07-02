@@ -1,6 +1,36 @@
 //! Codebook-based morphological analyzer (lattice + Viterbi).
 
-use std::collections::HashMap;
+use std::collections::HashMap as StdHashMap;
+
+/// Module-local map alias using a fast non-cryptographic hasher (FxHash-style).
+/// The default SipHash dominates hot-path lookups (word bigrams, DP states);
+/// this keeps the same API and results while removing that cost.
+type HashMap<K, V> = StdHashMap<K, V, core::hash::BuildHasherDefault<FxHasher>>;
+
+#[derive(Default)]
+struct FxHasher {
+    hash: u64,
+}
+
+impl core::hash::Hasher for FxHasher {
+    fn write(&mut self, mut bytes: &[u8]) {
+        const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+        let mut h = self.hash;
+        while bytes.len() >= 8 {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&bytes[..8]);
+            h = (h.rotate_left(5) ^ u64::from_le_bytes(b)).wrapping_mul(K);
+            bytes = &bytes[8..];
+        }
+        for &b in bytes {
+            h = (h.rotate_left(5) ^ (b as u64)).wrapping_mul(K);
+        }
+        self.hash = h;
+    }
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
 use crate::trie::Dict;
 use crate::types::{AnalyzeResult, Pos, Token};
 
@@ -602,7 +632,7 @@ impl CodebookAnalyzer {
         ) as usize;
 
         let mut entries = Vec::with_capacity(num_entries);
-        let mut map = HashMap::with_capacity(num_entries);
+        let mut map = HashMap::default();
         let mut max_suffix_len: usize = 0;
         let mut pos = 4;
 
@@ -739,7 +769,7 @@ impl CodebookAnalyzer {
         pos += 4;
 
         let mut entries = Vec::with_capacity(num_entries);
-        let mut map = HashMap::with_capacity(num_entries);
+        let mut map = HashMap::default();
         let mut max_suffix_len: usize = 0;
 
         for i in 0..num_entries {
@@ -897,7 +927,7 @@ impl CodebookAnalyzer {
     // -----------------------------------------------------------------------
 
     fn parse_ambiguity_table(data: Option<&[u8]>, max_freq: f32) -> Result<HashMap<String, Vec<(Pos, f32)>>, String> {
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         let data = match data {
             Some(d) => d,
             None => return Ok(map),
@@ -938,7 +968,7 @@ impl CodebookAnalyzer {
     }
 
     fn parse_word_bigrams(data: Option<&[u8]>) -> Result<HashMap<String, Vec<(u8, u8, f32)>>, String> {
-        let mut map: HashMap<String, Vec<(u8, u8, f32)>> = HashMap::new();
+        let mut map: HashMap<String, Vec<(u8, u8, f32)>> = HashMap::default();
         let data = match data {
             Some(d) if d.len() >= 4 => d,
             _ => return Ok(map),
@@ -963,23 +993,10 @@ impl CodebookAnalyzer {
         Ok(map)
     }
 
-    /// Get word-bigram cost bonus for (word, prev_pos, target_pos).
-    /// Returns a negative bonus (cheaper) if context strongly favors target_pos.
-    fn get_word_bigram_bonus(&self, word: &str, prev_pos: u8, target_pos: u8) -> f32 {
-        if let Some(entries) = self.word_bigrams.get(word) {
-            for &(pp, tp, bonus) in entries {
-                if pp == prev_pos && tp == target_pos {
-                    return bonus;
-                }
-            }
-        }
-        0.0
-    }
-
     fn parse_eojeol_cache(data: Option<&[u8]>) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
         let data = match data {
             Some(d) if d.len() >= 4 => d,
-            _ => return Ok(HashMap::new()),
+            _ => return Ok(HashMap::default()),
         };
         let marker = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad header")?);
         if marker == 0xFFFFFFFF {
@@ -989,7 +1006,7 @@ impl CodebookAnalyzer {
     }
 
     fn parse_eojeol_cache_legacy(data: &[u8]) -> Result<HashMap<String, Vec<(String, Pos)>>, String> {
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         let num = u32::from_le_bytes(data[0..4].try_into().map_err(|_| "Bad ecache count")?) as usize;
         let mut pos = 4;
         for _ in 0..num {
@@ -1076,7 +1093,7 @@ impl CodebookAnalyzer {
         ) as usize;
         pos += 4;
 
-        let mut map = HashMap::with_capacity(num);
+        let mut map = HashMap::default();
         for _ in 0..num {
             if pos >= data.len() { break; }
             let elen = data[pos] as usize;
@@ -2177,7 +2194,7 @@ impl CodebookAnalyzer {
         // DP states: dp[position] maps (prev_pos, prev_prev_pos) -> (cost, backpointer)
         let mut dp: Vec<HashMap<(u8, u8), (f32, Option<Backpointer>)>> = Vec::with_capacity(n + 1);
         for _ in 0..=n {
-            dp.push(HashMap::new());
+            dp.push(HashMap::default());
         }
 
         // Initial state at position 0
@@ -2192,6 +2209,11 @@ impl CodebookAnalyzer {
                 // Last morpheme POS of this arc determines new state
                 let last_pos = arc.morphemes.last().map(|(_, p)| *p as u8).unwrap_or(BOS);
 
+                // Word-bigram lookup depends only on the arc's first morpheme,
+                // so hoist the (hashed) map lookup out of the per-state loop.
+                let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
+                let wb_entries = self.word_bigrams.get(arc.morphemes[0].0.as_str());
+
                 // Look at all states at arc.start
                 let start_states: Vec<((u8, u8), f32)> = dp[arc.start].iter()
                     .map(|(&state, &(cost, _))| (state, cost))
@@ -2199,12 +2221,14 @@ impl CodebookAnalyzer {
 
                 for ((prev_pos, prev_prev_pos), prev_cost) in start_states {
                     // Transition cost: trigram(prev_prev_pos, prev_pos, first_morpheme_pos)
-                    let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
                     let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos, first_pos);
 
                     // Word-bigram bonus: context-dependent cost adjustment
-                    let first_form = &arc.morphemes[0].0;
-                    let wb_bonus = self.get_word_bigram_bonus(first_form, prev_pos, first_pos);
+                    let wb_bonus = wb_entries.map_or(0.0, |entries| {
+                        entries.iter()
+                            .find(|&&(pp, tp, _)| pp == prev_pos && tp == first_pos)
+                            .map_or(0.0, |&(_, _, b)| b)
+                    });
 
                     // Internal morpheme transitions (if arc has multiple morphemes)
                     let mut internal_cost = 0.0;
@@ -2406,7 +2430,7 @@ impl CodebookAnalyzer {
         // DP: each state → Vec<(cost, backpointer)>, sorted ascending, max top_k
         let mut dp: Vec<HashMap<(u8, u8), Vec<(f32, Backpointer)>>> = Vec::with_capacity(n + 1);
         for _ in 0..=n {
-            dp.push(HashMap::new());
+            dp.push(HashMap::default());
         }
         dp[0].entry((BOS, BOS)).or_default().push((0.0, Backpointer {
             prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
@@ -2417,6 +2441,11 @@ impl CodebookAnalyzer {
                 let arc = &arcs[arc_idx];
                 let last_pos = arc.morphemes.last().map(|(_, p)| *p as u8).unwrap_or(BOS);
 
+                // Word-bigram lookup depends only on the arc's first morpheme,
+                // so hoist the (hashed) map lookup out of the per-state loop.
+                let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
+                let wb_entries = self.word_bigrams.get(arc.morphemes[0].0.as_str());
+
                 let start_entries: Vec<((u8, u8), usize, f32)> = dp[arc.start].iter()
                     .flat_map(|(&state, entries)| {
                         entries.iter().enumerate().map(move |(rank, &(cost, _))| (state, rank, cost))
@@ -2424,10 +2453,12 @@ impl CodebookAnalyzer {
                     .collect();
 
                 for ((prev_pos_tag, prev_prev_pos), rank, prev_cost) in start_entries {
-                    let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
                     let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos_tag, first_pos);
-                    let first_form = &arc.morphemes[0].0;
-                    let wb_bonus = self.get_word_bigram_bonus(first_form, prev_pos_tag, first_pos);
+                    let wb_bonus = wb_entries.map_or(0.0, |entries| {
+                        entries.iter()
+                            .find(|&&(pp, tp, _)| pp == prev_pos_tag && tp == first_pos)
+                            .map_or(0.0, |&(_, _, b)| b)
+                    });
 
                     let mut internal_cost = 0.0;
                     if arc.morphemes.len() > 1 {
