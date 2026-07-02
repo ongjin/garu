@@ -4124,6 +4124,34 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Merge a same-eojeol 시/으시(EP) + 아요/어요(EF) back into the fused polite
+    /// ending 세요/으세요(EF). The lattice splits the contracted polite ending
+    /// (주세요 = 주/VV + 시/EP + 어요/EF) but the gold keeps it as a single EF
+    /// (세요/으세요 47건, 분리형 0건). Distinct from the -시- separation principle
+    /// (드시=들+시), which applies to lexical honorifics, not this fused ending.
+    fn fix_seyo_merge(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let ep_ok = tokens[i].pos == Pos::EP
+                && matches!(tokens[i].text.as_str(), "시" | "으시");
+            let ef_ok = tokens[i + 1].pos == Pos::EF
+                && matches!(tokens[i + 1].text.as_str(), "아요" | "어요");
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            if ep_ok && ef_ok && same_eojeol {
+                let surface = if tokens[i].text == "시" { "세요" } else { "으세요" };
+                let (s, e) = (tokens[i].start, tokens[i + 1].end);
+                tokens[i] = Token {
+                    text: surface.to_string(), pos: Pos::EF,
+                    start: s, end: e, score: None,
+                };
+                tokens.remove(i + 1);
+                i += 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Merge consecutive single-char SL or SN tokens that are adjacent.
     fn merge_sl_sn_tokens(tokens: Vec<Token>) -> Vec<Token> {
         if tokens.is_empty() {
@@ -4283,6 +4311,7 @@ impl CodebookAnalyzer {
         Self::fix_bwa_auxiliary(&mut tokens);
         Self::fix_mm_determiners(&mut tokens);
         Self::fix_geureon_mm(&mut tokens);
+        Self::fix_seyo_merge(&mut tokens);
         Self::fix_geuraeseo_maj(&mut tokens);
         Self::fix_si_dependent_noun(&mut tokens);
         Self::fix_quote_jkq(&mut tokens);
@@ -4420,6 +4449,7 @@ impl CodebookAnalyzer {
             Self::fix_bwa_auxiliary(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
             Self::fix_geureon_mm(&mut tokens);
+            Self::fix_seyo_merge(&mut tokens);
             Self::fix_colloquial_pronouns(&mut tokens);
             Self::fix_geuraeseo_maj(&mut tokens);
             Self::fix_si_dependent_noun(&mut tokens);
@@ -4879,6 +4909,38 @@ mod tests {
         // 다른 어절이면 병합하지 않음 (start 불일치).
         let mut toks = vec![tok("그렇", Pos::VA, 0, 2), tok("은", Pos::ETM, 3, 4)];
         CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 2);
+    }
+
+    #[test]
+    fn test_fix_seyo_merge_vowel_stem() {
+        // 주세요: 주/VV + 시/EP + 아요/EF → 주/VV + 세요/EF
+        let mut toks = vec![
+            tok("주", Pos::VV, 0, 3), tok("시", Pos::EP, 0, 3),
+            tok("아요", Pos::EF, 0, 3),
+        ];
+        CodebookAnalyzer::fix_seyo_merge(&mut toks);
+        assert_eq!(toks.len(), 2);
+        assert_eq!((toks[1].text.as_str(), toks[1].pos), ("세요", Pos::EF));
+    }
+
+    #[test]
+    fn test_fix_seyo_merge_consonant_stem() {
+        // 넣으세요: 넣/VV + 으시/EP + 어요/EF → 넣/VV + 으세요/EF
+        let mut toks = vec![
+            tok("넣", Pos::VV, 0, 4), tok("으시", Pos::EP, 0, 4),
+            tok("어요", Pos::EF, 0, 4),
+        ];
+        CodebookAnalyzer::fix_seyo_merge(&mut toks);
+        assert_eq!(toks.len(), 2);
+        assert_eq!((toks[1].text.as_str(), toks[1].pos), ("으세요", Pos::EF));
+    }
+
+    #[test]
+    fn test_fix_seyo_merge_skips_non_yo_ef() {
+        // 시/EP + 다/EF (세요 아님) → 병합하지 않음
+        let mut toks = vec![tok("시", Pos::EP, 0, 2), tok("다", Pos::EF, 0, 2)];
+        CodebookAnalyzer::fix_seyo_merge(&mut toks);
         assert_eq!(toks.len(), 2);
     }
 }
