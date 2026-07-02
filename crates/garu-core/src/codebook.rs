@@ -3340,6 +3340,41 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Insert the zero-realised present copula for `<noun> + 다(JX)` at the end
+    /// of an eojeol (최고다 = 최고/NNG + 다/JX → 최고/NNG + 이/VCP + 다/EF). After a
+    /// vowel-final noun the copula 이 is dropped in the surface, and the lattice
+    /// leaves 다 as a bare particle. Guarded to eojeol-final so it does not touch
+    /// mid-eojeol 다, and to a directly-attached noun in the same eojeol.
+    /// `야`는 계사(최고야)와 호격(철수야)이 명사+야/JX로 동형이라 제외.
+    fn fix_present_copula(tokens: &mut Vec<Token>) {
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let prev_noun = matches!(tokens[i].pos,
+                Pos::NNG | Pos::NNP | Pos::NNB | Pos::NR | Pos::NP
+                | Pos::SN | Pos::SL | Pos::XSN);
+            let cur_ok = tokens[i + 1].pos == Pos::JX
+                && tokens[i + 1].text == "다";
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let eojeol_end = i + 2 == tokens.len()
+                || tokens[i + 2].start != tokens[i + 1].start;
+            if prev_noun && cur_ok && same_eojeol && eojeol_end {
+                let (s, e) = (tokens[i + 1].start, tokens[i + 1].end);
+                let ending = tokens[i + 1].text.clone();
+                tokens[i + 1] = Token {
+                    text: "이".to_string(), pos: Pos::VCP,
+                    start: s, end: e, score: None,
+                };
+                tokens.insert(i + 2, Token {
+                    text: ending, pos: Pos::EF,
+                    start: s, end: e, score: None,
+                });
+                i += 3;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// 잇/VV → 이/VCP: a noun-attached, same-eojeol 잇/VV followed by 었/EP is the
     /// copula 이었다 (형이었다 = 형 + 이/VCP + 었 + 다) misread as 잇다(연결).
     /// The two share the surface 이었; the copula attaches directly to a preceding
@@ -4327,6 +4362,7 @@ impl CodebookAnalyzer {
         Self::fix_deusi_honorific(&mut tokens);
         Self::fix_vcp(&mut tokens);
         Self::fix_noun_inga_copula(&mut tokens);
+        Self::fix_present_copula(&mut tokens);
         Self::fix_it_copula(&mut tokens);
         Self::fix_colloquial_pronouns(&mut tokens);
         Self::fix_jeoneun_np(&mut tokens);
@@ -4458,6 +4494,7 @@ impl CodebookAnalyzer {
             Self::fix_deusi_honorific(&mut tokens);
             Self::fix_vcp(&mut tokens);
             Self::fix_noun_inga_copula(&mut tokens);
+            Self::fix_present_copula(&mut tokens);
             Self::fix_it_copula(&mut tokens);
             Self::fix_vcp_eojeol_start_recovery(&mut tokens);
             Self::fix_nde_merge(&mut tokens);
@@ -4992,6 +5029,28 @@ mod tests {
         let mut toks = vec![tok("절", Pos::VV, 0, 2), tok("는", Pos::ETM, 0, 2)];
         CodebookAnalyzer::fix_jeoneun_np(&mut toks);
         assert_eq!((toks[0].text.as_str(), toks[0].pos), ("저", Pos::NP));
+        assert_eq!(toks[1].pos, Pos::JX);
+    }
+
+    #[test]
+    fn test_fix_present_copula_inserts_vcp() {
+        // 최고다 (한 어절): 최고/NNG + 다/JX → 최고/NNG + 이/VCP + 다/EF
+        let mut toks = vec![tok("최고", Pos::NNG, 0, 3), tok("다", Pos::JX, 0, 3)];
+        CodebookAnalyzer::fix_present_copula(&mut toks);
+        assert_eq!(toks.len(), 3);
+        assert_eq!((toks[1].text.as_str(), toks[1].pos), ("이", Pos::VCP));
+        assert_eq!((toks[2].text.as_str(), toks[2].pos), ("다", Pos::EF));
+    }
+
+    #[test]
+    fn test_fix_present_copula_skips_mid_eojeol() {
+        // 다/JX 뒤에 같은 어절 토큰이 있으면(어절 끝 아님) 미변환.
+        let mut toks = vec![
+            tok("최고", Pos::NNG, 0, 3), tok("다", Pos::JX, 0, 3),
+            tok("고", Pos::EC, 0, 3),
+        ];
+        CodebookAnalyzer::fix_present_copula(&mut toks);
+        assert_eq!(toks.len(), 3);
         assert_eq!(toks[1].pos, Pos::JX);
     }
 
