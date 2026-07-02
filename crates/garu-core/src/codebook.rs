@@ -4089,6 +4089,41 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Merge a same-eojeol 그렇/이렇/저렇/어떻(VA)·그러/이러/저러/어떠(VV) + ㄴ/은(ETM)
+    /// decomposition back into the determiner 그런/이런/저런/어떤/MM. The lattice
+    /// splits these determiners into an adjective/verb + adnominal ending (그렇/VA
+    /// + 은/ETM), but the gold labels them as single MM (그런 103·이런 98·어떤 39건).
+    /// Guard: ETM must be ㄴ/ᆫ/은 only — `ㄹ`(그럴) and `는`(그러는) are genuine
+    /// verb forms, not determiners. `한`(하/VV+ㄴ) and 색채형용사(하얀/빨간)는 골드가
+    /// 양방향이라 제외.
+    fn fix_geureon_mm(tokens: &mut Vec<Token>) {
+        const DET: &[(&str, Pos, &str)] = &[
+            ("그렇", Pos::VA, "그런"), ("그러", Pos::VV, "그런"),
+            ("이렇", Pos::VA, "이런"), ("이러", Pos::VV, "이런"),
+            ("저렇", Pos::VA, "저런"), ("저러", Pos::VV, "저런"),
+            ("어떻", Pos::VA, "어떤"), ("어떠", Pos::VV, "어떤"),
+        ];
+        let mut i = 0;
+        while i + 1 < tokens.len() {
+            let etm_ok = tokens[i + 1].pos == Pos::ETM
+                && matches!(tokens[i + 1].text.as_str(), "ㄴ" | "ᆫ" | "은");
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let det = DET.iter().find(|(stem, pos, _)|
+                tokens[i].text == *stem && tokens[i].pos == *pos);
+            if let (Some((_, _, surface)), true, true) = (det, etm_ok, same_eojeol) {
+                let (s, e) = (tokens[i].start, tokens[i + 1].end);
+                tokens[i] = Token {
+                    text: (*surface).to_string(), pos: Pos::MM,
+                    start: s, end: e, score: None,
+                };
+                tokens.remove(i + 1);
+                i += 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
     /// Merge consecutive single-char SL or SN tokens that are adjacent.
     fn merge_sl_sn_tokens(tokens: Vec<Token>) -> Vec<Token> {
         if tokens.is_empty() {
@@ -4247,6 +4282,7 @@ impl CodebookAnalyzer {
         Self::fix_mag_wa_vv(&mut tokens);
         Self::fix_bwa_auxiliary(&mut tokens);
         Self::fix_mm_determiners(&mut tokens);
+        Self::fix_geureon_mm(&mut tokens);
         Self::fix_geuraeseo_maj(&mut tokens);
         Self::fix_si_dependent_noun(&mut tokens);
         Self::fix_quote_jkq(&mut tokens);
@@ -4383,6 +4419,7 @@ impl CodebookAnalyzer {
             Self::fix_mag_wa_vv(&mut tokens);
             Self::fix_bwa_auxiliary(&mut tokens);
             Self::fix_mm_determiners(&mut tokens);
+            Self::fix_geureon_mm(&mut tokens);
             Self::fix_colloquial_pronouns(&mut tokens);
             Self::fix_geuraeseo_maj(&mut tokens);
             Self::fix_si_dependent_noun(&mut tokens);
@@ -4796,5 +4833,52 @@ mod tests {
         ];
         CodebookAnalyzer::fix_quote_jkq(&mut tokens);
         assert_eq!(tokens[1].pos, Pos::EC);
+    }
+
+    #[test]
+    fn test_fix_geureon_mm_merges_determiner() {
+        // 그런 (한 어절): 그렇/VA + 은/ETM → 그런/MM
+        let mut toks = vec![
+            tok("그렇", Pos::VA, 0, 2), tok("은", Pos::ETM, 0, 2),
+            tok("사람", Pos::NNG, 3, 5),
+        ];
+        CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 2);
+        assert_eq!((toks[0].text.as_str(), toks[0].pos), ("그런", Pos::MM));
+    }
+
+    #[test]
+    fn test_fix_geureon_mm_verb_variant() {
+        // 이런: 이러/VV + ㄴ/ETM → 이런/MM
+        let mut toks = vec![tok("이러", Pos::VV, 0, 2), tok("ㄴ", Pos::ETM, 0, 2)];
+        CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 1);
+        assert_eq!((toks[0].text.as_str(), toks[0].pos), ("이런", Pos::MM));
+    }
+
+    #[test]
+    fn test_fix_geureon_mm_skips_reul_etm() {
+        // 그럴 (그렇/VA + ㄹ/ETM) is a genuine verb form, NOT a determiner → keep.
+        let mut toks = vec![tok("그렇", Pos::VA, 0, 2), tok("ㄹ", Pos::ETM, 0, 2)];
+        CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 2);
+        assert_eq!(toks[0].pos, Pos::VA);
+    }
+
+    #[test]
+    fn test_fix_geureon_mm_skips_neun_etm() {
+        // 그러는 (그러/VV + 는/ETM) present adnominal → keep.
+        let mut toks = vec![tok("그러", Pos::VV, 0, 2), tok("는", Pos::ETM, 0, 2)];
+        CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 2);
+        assert_eq!(toks[0].pos, Pos::VV);
+    }
+
+    #[test]
+    fn test_fix_geureon_mm_skips_cross_eojeol() {
+        // 다른 어절이면 병합하지 않음 (start 불일치).
+        let mut toks = vec![tok("그렇", Pos::VA, 0, 2), tok("은", Pos::ETM, 3, 4)];
+        CodebookAnalyzer::fix_geureon_mm(&mut toks);
+        assert_eq!(toks.len(), 2);
     }
 }
