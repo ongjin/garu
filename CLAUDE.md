@@ -3,9 +3,9 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙로 동작 (CNN 폐기).
-- **F1 95.3%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / NIKL MP 93.9%
+- **F1 95.4%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / NIKL MP 93.9%
 - **모델 1.0 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요)
-- **WASM** — 브라우저에서 실행 (raw 337KB / gzip 155KB, opt-level=z + wasm-opt -Oz + brotli decoder)
+- **WASM** — 브라우저에서 실행 (raw 391KB / gzip 169KB, opt-level=3 + wasm-opt -O3 + brotli decoder. 속도 우선 전환으로 Kiwi 대비 격차 5.8×→2.4×, brotli +9KB)
 
 ## 아키텍처
 
@@ -47,6 +47,9 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 
 # 골드 F1 평가 (garu만, n=9000 v15k, ep_norm)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu)
+
+# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.901. 학습 사용 금지)
+python3 training/eval_nikl2025_guueh.py
 
 # 벤치마크 (NIKL MP 데이터: 기본 ~/workspace/data/nikl_mp_2021/. *.json glob)
 #   kkma가 JVM 크래시로 스크립트 중단 → --analyzers garu,kiwi 권장
