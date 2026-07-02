@@ -4152,6 +4152,26 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Recover the pronoun+topic "저는" misanalysed as the verb 절/VV(절다) +
+    /// 는/ETM. When the standalone eojeol is exactly 저는, the 저/NP + 는/JX
+    /// reading dominates the gold entirely (절/VV+는/ETM 골드 0건). Guarded to a
+    /// standalone 저는 eojeol so genuine 절다 forms in longer eojeols are untouched.
+    fn fix_jeoneun_np(tokens: &mut [Token]) {
+        for i in 0..tokens.len().saturating_sub(1) {
+            let pat = tokens[i].text == "절" && tokens[i].pos == Pos::VV
+                && tokens[i + 1].text == "는" && tokens[i + 1].pos == Pos::ETM;
+            let same_eojeol = tokens[i].start == tokens[i + 1].start;
+            let eojeol_start = i == 0 || tokens[i - 1].start != tokens[i].start;
+            let eojeol_end = i + 2 >= tokens.len()
+                || tokens[i + 2].start != tokens[i + 1].start;
+            if pat && same_eojeol && eojeol_start && eojeol_end {
+                tokens[i].text = "저".to_string();
+                tokens[i].pos = Pos::NP;
+                tokens[i + 1].pos = Pos::JX;
+            }
+        }
+    }
+
     /// Merge consecutive single-char SL or SN tokens that are adjacent.
     fn merge_sl_sn_tokens(tokens: Vec<Token>) -> Vec<Token> {
         if tokens.is_empty() {
@@ -4304,6 +4324,7 @@ impl CodebookAnalyzer {
         Self::fix_noun_inga_copula(&mut tokens);
         Self::fix_it_copula(&mut tokens);
         Self::fix_colloquial_pronouns(&mut tokens);
+        Self::fix_jeoneun_np(&mut tokens);
         Self::fix_vcp_eojeol_start_recovery(&mut tokens);
         Self::fix_nde_merge(&mut tokens);
         Self::fix_mag_ga_vv(&mut tokens);
@@ -4451,6 +4472,7 @@ impl CodebookAnalyzer {
             Self::fix_geureon_mm(&mut tokens);
             Self::fix_seyo_merge(&mut tokens);
             Self::fix_colloquial_pronouns(&mut tokens);
+            Self::fix_jeoneun_np(&mut tokens);
             Self::fix_geuraeseo_maj(&mut tokens);
             Self::fix_si_dependent_noun(&mut tokens);
             Self::fix_quote_jkq(&mut tokens);
@@ -4942,5 +4964,25 @@ mod tests {
         let mut toks = vec![tok("시", Pos::EP, 0, 2), tok("다", Pos::EF, 0, 2)];
         CodebookAnalyzer::fix_seyo_merge(&mut toks);
         assert_eq!(toks.len(), 2);
+    }
+
+    #[test]
+    fn test_fix_jeoneun_np_recovers_pronoun() {
+        // 저는 (한 어절): 절/VV + 는/ETM → 저/NP + 는/JX
+        let mut toks = vec![tok("절", Pos::VV, 0, 2), tok("는", Pos::ETM, 0, 2)];
+        CodebookAnalyzer::fix_jeoneun_np(&mut toks);
+        assert_eq!((toks[0].text.as_str(), toks[0].pos), ("저", Pos::NP));
+        assert_eq!(toks[1].pos, Pos::JX);
+    }
+
+    #[test]
+    fn test_fix_jeoneun_np_skips_non_standalone() {
+        // 절/는 앞에 같은 어절 토큰이 있으면(어절 시작 아님) 진짜 절다 활용이므로 미변환.
+        let mut toks = vec![
+            tok("얼", Pos::VV, 0, 3), tok("절", Pos::VV, 0, 3),
+            tok("는", Pos::ETM, 0, 3),
+        ];
+        CodebookAnalyzer::fix_jeoneun_np(&mut toks);
+        assert_eq!(toks[1].pos, Pos::VV);
     }
 }
