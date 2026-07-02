@@ -56,6 +56,8 @@ python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi   # garu F1 0.93
 #   (XSV/XSA 병합, 파생접미사 XSN 병합(적·성·화·권 등 16종 화이트리스트), _un-join,
 #    인용 EF+고·며·는 병합, 직접인용 JKQ canonical, 되/VX→VV canonical까지 구현.
 #    norm 후 2021 garu 0.9363 / 2025 garu 0.8806. 단위테스트 training/test_nikl_norm_2025.py.
+#    천장 측정(2026-07): kiwi도 2021 0.879 / 2025+norm 0.8165 (하락폭 ~6pp 동일)
+#    → 2025 고득점 자체가 불가능한 벤치. 2025 점수 목표 설정 금지.
 #    되/VX는 2021/gold=VV·2025만 VX인 컨벤션차라 정규화(2025 되/VX ~48% vs 2021 ×4).
 #    2025 잔여격차(~5.5pp)는 대부분 복합명사 분절(FN 28%)·태그컨벤션(있VA/하VX/와JKB)이라
 #    분석기 결함 아닌 분절 컨벤션 문제. 하/VX·구어 그/IC는 진짜 차이라 미정규화)
