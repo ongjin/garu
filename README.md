@@ -1,5 +1,9 @@
 # 가루 (Garu)
 
+[![npm](https://img.shields.io/npm/v/garu-ko)](https://www.npmjs.com/package/garu-ko)
+[![npm downloads](https://img.shields.io/npm/dm/garu-ko)](https://www.npmjs.com/package/garu-ko)
+[![GitHub stars](https://img.shields.io/github/stars/ongjin/garu)](https://github.com/ongjin/garu/stargazers)
+
 **세계에서 가장 가벼운(1MB) 브라우저 네이티브 한국어 형태소 분석기.**
 
 기존 한국어 형태소 분석기는 대부분 수십 MB의 모델을 서버나 네이티브 런타임으로 구동하는 것을 전제로 합니다. Garu는 **1MB 모델과 337KB WASM 엔진**만으로 브라우저에서 직접 실행되며, 서버 통신 없이 완전한 오프라인 형태소 분석을 수행합니다.
