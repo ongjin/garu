@@ -3499,6 +3499,7 @@ impl CodebookAnalyzer {
     /// gold v15k 양방향 빈도 검증으로 통합형 비율 ≥98%인 surface만 화이트리스트.
     /// (구요·는데요는 양립 분포라 제외)
     fn fix_yo_jx_merge(tokens: &mut Vec<Token>) {
+        // 구(양립 15:8)·는데(분리 우세 1:6)는 골드 양방향 공존이라 제외 유지.
         const WHITELIST: &[&str] = &[
             "거든", "나", "은데", "네", "께", "니깐",
             "잖아", "으니까", "군", "다면서", "을게", "랄까",
@@ -3516,8 +3517,12 @@ impl CodebookAnalyzer {
             let eojeol_end = i + 3 == tokens.len()
                 || tokens[i + 3].start != tokens[i + 2].start
                 || tokens[i + 3].pos == Pos::SF;
+            // Noun/copula/ending stems cover the colloquial copula-elided pattern
+            // (그때거든요 = 그때/NNG + 거든/EF + 요, 이거든요 = 이/VCP + 거든/EF + 요)
+            // that the original verb-only guard skipped.
             let stem_ok = matches!(stem_pos,
-                Pos::VV | Pos::VA | Pos::VX | Pos::EP | Pos::XSV | Pos::XSA);
+                Pos::VV | Pos::VA | Pos::VX | Pos::EP | Pos::XSV | Pos::XSA
+                | Pos::VCP | Pos::NNG | Pos::NNP | Pos::NNB | Pos::EC | Pos::EF | Pos::XSN);
             let mid_ok = (mid_pos == Pos::EC || mid_pos == Pos::EF)
                 && WHITELIST.contains(&mid_text.as_str());
             let yo_ok = yo_pos == Pos::JX && yo_text == "요";
@@ -4767,6 +4772,21 @@ mod tests {
         CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
         assert_eq!(tokens.len(), before_len);
         assert_eq!(tokens[1].text, "거든");
+    }
+
+    #[test]
+    fn test_fix_yo_jx_merge_copula_elided_stem() {
+        // 이거든요: 이/VCP + 거든/EF + 요/JX → 이/VCP + 거든요/EF
+        // (완화된 stem guard로 VCP/NNG 등 계사-생략 패턴도 병합)
+        let mut tokens = vec![
+            tok("이", Pos::VCP, 0, 4),
+            tok("거든", Pos::EF, 0, 4),
+            tok("요", Pos::JX, 0, 4),
+        ];
+        CodebookAnalyzer::fix_yo_jx_merge(&mut tokens);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[1].text, "거든요");
+        assert_eq!(tokens[1].pos, Pos::EF);
     }
 
     #[test]
