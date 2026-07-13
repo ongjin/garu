@@ -33,6 +33,8 @@ def main():
     ap.add_argument("in_gmdl", type=Path)
     ap.add_argument("out_gmdl", type=Path)
     ap.add_argument("--margin", type=float, default=4.0)
+    ap.add_argument("--blob", type=Path, default=None,
+                    help="Section 14 raw blob도 저장 (build_codebook_model passthrough용)")
     args = ap.parse_args()
 
     raw = args.in_gmdl.read_bytes()
@@ -51,6 +53,8 @@ def main():
         pos += 5 + slen
 
     sec = build_section14(args.weights, args.margin)
+    if args.blob:
+        args.blob.write_bytes(sec)
     out += struct.pack("<BI", 14, len(sec)) + sec
 
     import brotli

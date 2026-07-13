@@ -1464,6 +1464,17 @@ def main():
     else:
         print(f"  Eojeol cache: none")
 
+    # Section 14: N-best 재순위 perceptron 가중치 (passthrough, optional)
+    # 갱신은 training/rerank/export_weights.py --blob 으로 재생성
+    rerank_path = DATA_DIR / "rerank_section14.bin"
+    if rerank_path.exists():
+        rr_data = rerank_path.read_bytes()
+        n_w = int.from_bytes(rr_data[6:10], 'little')
+        print(f"  Rerank perceptron: {n_w} weights, {len(rr_data):,} bytes")
+        write_section(buf, 14, rr_data)
+    else:
+        print(f"  Rerank perceptron: none")
+
     # Write output with brotli compression (q=11, max)
     import brotli as _brotli
     raw_bytes = bytes(buf)
