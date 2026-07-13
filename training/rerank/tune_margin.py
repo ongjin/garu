@@ -14,16 +14,18 @@ from train_perceptron import cand_scores, preprocess, sent_f1  # noqa: E402
 
 def main():
     data_dir = Path(sys.argv[1])
+    top_k = int(sys.argv[2]) if len(sys.argv) > 2 else 10
     w = np.load(data_dir / "weights.npz")["w"]
     dev = preprocess(data_dir, "dev")
     n = len(dev["sent_off"]) - 1
 
-    # 문장별 (scores, counts) 1회 계산
+    # 문장별 (scores, counts) 1회 계산 (top_k개로 절단)
     per_sent = []
     for s in range(n):
         scores, c0 = cand_scores(w, dev, s)
         if scores is None:
             continue
+        scores = scores[:top_k]
         per_sent.append((scores, dev["counts"][c0:c0 + len(scores)]))
 
     print(f"{'tau':>6} {'devF1':>8} {'overrides':>9} {'improved':>8} {'worsened':>8}")

@@ -113,6 +113,33 @@ impl Analyzer {
             }
         }
 
+        // Perceptron 재순위: 확신 마진을 넘을 때만 기존 선택을 교체.
+        // feature 입력은 학습 덤프(Model::analyze_topn)와 동일하게
+        // model 레벨 보정을 적용한 사본이어야 한다.
+        if let Some(rr) = self.codebook.reranker() {
+            let base_score = candidates[0].score;
+            let mut rr_best = 0usize;
+            let mut rr_best_s = f32::NEG_INFINITY;
+            let mut current_s = f32::NEG_INFINITY;
+            for (i, cand) in candidates.iter().enumerate() {
+                let mut toks = cand.tokens.clone();
+                CodebookAnalyzer::apply_adj_root_xsa(&mut toks);
+                Self::apply_protected_auxiliary_rules(&mut toks);
+                Self::apply_rule_pos_corrections(&mut toks);
+                let s = rr.score(&toks, cand.score - base_score, i + 1);
+                if s > rr_best_s {
+                    rr_best_s = s;
+                    rr_best = i;
+                }
+                if i == best_idx {
+                    current_s = s;
+                }
+            }
+            if rr_best != best_idx && rr_best_s - current_s > rr.margin() {
+                best_idx = rr_best;
+            }
+        }
+
         let mut result = candidates.swap_remove(best_idx);
         CodebookAnalyzer::apply_adj_root_xsa(&mut result.tokens);
         Self::apply_protected_auxiliary_rules(&mut result.tokens);

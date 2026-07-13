@@ -415,6 +415,8 @@ pub struct CodebookAnalyzer {
     word_bigrams: HashMap<String, Vec<(u8, u8, f32)>>,
     /// Smart eojeol cache: pre-analyzed eojeol → morpheme sequence
     eojeol_cache: HashMap<String, Vec<(String, Pos)>>,
+    /// N-best 재순위 perceptron (Section 14, optional)
+    reranker: Option<crate::rerank::Reranker>,
 }
 
 impl CodebookAnalyzer {
@@ -451,6 +453,7 @@ impl CodebookAnalyzer {
         let mut section11: Option<&[u8]> = None;
         let mut section12: Option<&[u8]> = None;
         let mut section13: Option<&[u8]> = None;
+        let mut section14: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -479,6 +482,7 @@ impl CodebookAnalyzer {
                 11 => section11 = Some(section_data),
                 12 => section12 = Some(section_data),
                 13 => section13 = Some(section_data),
+                14 => section14 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
@@ -493,6 +497,7 @@ impl CodebookAnalyzer {
             section11,
             section12,
             section13,
+            section14,
         )
     }
 
@@ -506,6 +511,7 @@ impl CodebookAnalyzer {
         ambig_data: Option<&[u8]>,
         wbigram_data: Option<&[u8]>,
         ecache_data: Option<&[u8]>,
+        rerank_data: Option<&[u8]>,
     ) -> Result<Self, String> {
         // Section 6: Content dict
         let content_dict = Dict::from_bytes(dict_data)?;
@@ -593,7 +599,15 @@ impl CodebookAnalyzer {
             ambiguity,
             word_bigrams,
             eojeol_cache,
+            reranker: match rerank_data {
+                Some(d) => Some(crate::rerank::Reranker::from_bytes(d)?),
+                None => None,
+            },
         })
+    }
+
+    pub fn reranker(&self) -> Option<&crate::rerank::Reranker> {
+        self.reranker.as_ref()
     }
 
     /// True if a suffix-codebook analysis is well-formed for the key it is stored
