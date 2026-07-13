@@ -39,11 +39,13 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 
 # 4. js/CHANGELOG.md 항목 추가 (## X.X.X 섹션)
 
-# 5. npm version (자동으로 git tag vX.X.X 생성 — --no-git-tag-version 쓰지 말 것)
+# 5. npm version — ⚠️ js/가 git root가 아니라서 태그/커밋을 만들지 **않는다** (package.json만 갱신).
+#    태그는 6단계에서 릴리스 커밋에 수동 부여 (2026-07-13 0.9.9에서 실측 확인)
 (cd js && npm version X.X.X)
 
-# 6. 커밋 + push (코드 + 태그)
+# 6. 커밋 + 수동 태그 + push (코드 + 태그)
 git add -A && git commit -m "feat: ..., bump to X.X.X"
+git tag vX.X.X
 git push origin main
 git push origin vX.X.X
 
