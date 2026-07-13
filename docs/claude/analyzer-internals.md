@@ -57,7 +57,7 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 
 ⚠️ **POS 보정의 일부는 codebook이 아니라 `model.rs::analyze_inner`의 R1~R6 override가 최종 결정** (codebook fix_* 이후 실행되므로 codebook에서 고쳐도 덮인다). 시간명사 오늘/어제/지금(조사앞 NNG·그 외 MAG)은 **R1**, 내일→NNG는 R2, 뭐/저기→NP는 R3/R4, NNP→NNG 힌트는 R6. 시간명사·지시대명사 POS는 여기를 고칠 것.
 
-**재순위 perceptron (GMDL Section 14 존재 시에만)**: `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘으면 선택을 교체. feature 입력은 후보 clone에 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6)을 적용한 것 — 학습 덤프(`Model::analyze_topn`)와 동일 입력을 보장하기 위함. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 완전 무동작(현 배포 모델 상태).
+**재순위 perceptron (GMDL Section 14, 2026-07-13 채택 — 현 배포 모델 포함)**: Section 14가 있으면 후보 폭이 k=5→10으로 확장되고, `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘으면 선택을 교체. feature 입력은 후보 clone에 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6)을 적용한 것 — 학습 덤프(`Model::analyze_topn`)와 동일 입력을 보장하기 위함. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 완전 무동작(k=5, 구버전과 byte-identical). ⚠️ nbest는 k에 따라 상위권 구성이 달라진다(빔 효과): nbest(5) ≠ nbest(20)[:5] — k=5 재순위가 +0.25pp에 그친 원인.
 
 ## 디버깅 방법
 

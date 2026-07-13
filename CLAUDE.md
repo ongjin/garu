@@ -2,23 +2,25 @@
 
 ## 프로젝트 개요
 
-브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙로 동작 (CNN 폐기).
-- **F1 95.4%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / NIKL MP 93.9%
-- **모델 1.0 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요)
-- **WASM** — 브라우저에서 실행 (raw 391KB / gzip 169KB, opt-level=3 + wasm-opt -O3 + brotli decoder. 속도 우선 전환으로 Kiwi 대비 격차 5.8×→2.4×, brotli +9KB)
+브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
+- **F1 95.7%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 held-out 91.0%
+- **모델 1.4 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요. 재순위 가중치 Section 14 +394KB 포함)
+- **WASM** — 브라우저에서 실행 (raw 399KB / gzip 172KB, opt-level=3 + wasm-opt -O3 + brotli decoder. viterbi_nbest 최적화가 재순위 비용을 상쇄해 Kiwi 대비 격차 2.4×→2.05×)
 
 ## 아키텍처
 
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
-           → 문장 수준 Trigram N-best Viterbi (top-5)
+           → 문장 수준 Trigram N-best Viterbi (top-10)
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
+           → 재순위 perceptron (Section 14, 확신 마진 τ=4 넘을 때만 교체)
            → 출력
 ```
 
 ### 핵심 Rust 코드
 - `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리 규칙(`fix_*`)
-- `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + POS override). POS 보정 규칙은 폐기된 CNN의 골드 행동을 distill한 것 (추론은 안 함)
+- `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + POS override + 재순위 게이트). POS 보정 규칙은 폐기된 CNN의 골드 행동을 distill한 것 (추론은 안 함)
+- `crates/garu-core/src/rerank.rs` — 재순위 perceptron (FNV-1a feature hashing — `training/rerank/features.py`와 바이트 단위 동일 필수)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩
@@ -48,12 +50,12 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 # 골드 F1 평가 (garu만, n=9000 v15k, ep_norm)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu)
 
-# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.901. 학습 사용 금지)
+# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.910. 학습 사용 금지)
 python3 training/eval_nikl2025_guueh.py
 
 # 벤치마크 (NIKL MP 데이터: 기본 ~/workspace/data/nikl_mp_2021/. *.json glob)
 #   kkma가 JVM 크래시로 스크립트 중단 → --analyzers garu,kiwi 권장
-python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi   # garu F1 0.937
+python3 training/eval_nikl_mp.py --n 2000 --analyzers garu,kiwi   # ⚠️ 2021판은 재순위 학습 데이터와 겹쳐 garu 자기평가(참고용). held-out은 위의 2025 구어 평가 사용
 # 다른 코퍼스는 NIKL_MP_DIR로 override. 단 2025판은 분절 컨벤션이 거칠어져
 #   (명사+하 병합, _복합어 결합) raw F1 비교불가 → --norm-2025 정규화 필요
 #   (XSV/XSA 병합, 파생접미사 XSN 병합(적·성·화·권 등 16종 화이트리스트), _un-join,
