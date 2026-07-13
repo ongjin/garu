@@ -2451,89 +2451,93 @@ impl CodebookAnalyzer {
         }));
 
         for pos in 0..=n {
-            for &arc_idx in &arcs_ending_at[pos] {
-                let arc = &arcs[arc_idx];
-                let last_pos = arc.morphemes.last().map(|(_, p)| *p as u8).unwrap_or(BOS);
+            // dp[arc.start](읽기)와 dp[pos](쓰기)를 무할당으로 동시 접근.
+            // arc.start < pos 불변이므로 split이 항상 성립.
+            {
+                let (head, tail) = dp.split_at_mut(pos);
+                let dst = &mut tail[0];
+                for &arc_idx in &arcs_ending_at[pos] {
+                    let arc = &arcs[arc_idx];
+                    let last_pos = arc.morphemes.last().map(|(_, p)| *p as u8).unwrap_or(BOS);
 
-                // Word-bigram lookup depends only on the arc's first morpheme,
-                // so hoist the (hashed) map lookup out of the per-state loop.
-                let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
-                let wb_entries = self.word_bigrams.get(arc.morphemes[0].0.as_str());
+                    // Word-bigram lookup depends only on the arc's first morpheme,
+                    // so hoist the (hashed) map lookup out of the per-state loop.
+                    let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
+                    let wb_entries = self.word_bigrams.get(arc.morphemes[0].0.as_str());
 
-                let start_entries: Vec<((u8, u8), usize, f32)> = dp[arc.start].iter()
-                    .flat_map(|(&state, entries)| {
-                        entries.iter().enumerate().map(move |(rank, &(cost, _))| (state, rank, cost))
-                    })
-                    .collect();
+                    for (&(prev_pos_tag, prev_prev_pos), src_entries) in head[arc.start].iter() {
+                        // transition/wb/internal은 rank와 무관 — state당 1회만 계산
+                        let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos_tag, first_pos);
+                        let wb_bonus = wb_entries.map_or(0.0, |entries| {
+                            entries.iter()
+                                .find(|&&(pp, tp, _)| pp == prev_pos_tag && tp == first_pos)
+                                .map_or(0.0, |&(_, _, b)| b)
+                        });
 
-                for ((prev_pos_tag, prev_prev_pos), rank, prev_cost) in start_entries {
-                    let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos_tag, first_pos);
-                    let wb_bonus = wb_entries.map_or(0.0, |entries| {
-                        entries.iter()
-                            .find(|&&(pp, tp, _)| pp == prev_pos_tag && tp == first_pos)
-                            .map_or(0.0, |&(_, _, b)| b)
-                    });
-
-                    let mut internal_cost = 0.0;
-                    if arc.morphemes.len() > 1 {
-                        let mut pp = prev_prev_pos;
-                        let mut p = prev_pos_tag;
-                        for (mi, (_, mpos)) in arc.morphemes.iter().enumerate() {
-                            if mi == 0 {
-                                pp = prev_pos_tag;
-                                p = *mpos as u8;
-                            } else {
-                                internal_cost += self.get_trigram_cost(pp, p, *mpos as u8);
-                                pp = p;
-                                p = *mpos as u8;
+                        let mut internal_cost = 0.0;
+                        if arc.morphemes.len() > 1 {
+                            let mut pp = prev_prev_pos;
+                            let mut p = prev_pos_tag;
+                            for (mi, (_, mpos)) in arc.morphemes.iter().enumerate() {
+                                if mi == 0 {
+                                    pp = prev_pos_tag;
+                                    p = *mpos as u8;
+                                } else {
+                                    internal_cost += self.get_trigram_cost(pp, p, *mpos as u8);
+                                    pp = p;
+                                    p = *mpos as u8;
+                                }
                             }
                         }
-                    }
 
-                    let total_cost = prev_cost + arc.cost + transition_cost + internal_cost + wb_bonus;
+                        let new_prev_prev = if arc.morphemes.len() >= 2 {
+                            arc.morphemes[arc.morphemes.len() - 2].1 as u8
+                        } else {
+                            prev_pos_tag
+                        };
+                        let new_state = (last_pos, new_prev_prev);
+                        let entries = dst.entry(new_state).or_default();
 
-                    let new_prev_prev = if arc.morphemes.len() >= 2 {
-                        arc.morphemes[arc.morphemes.len() - 2].1 as u8
-                    } else {
-                        prev_pos_tag
-                    };
-                    let new_state = (last_pos, new_prev_prev);
-
-                    let entries = dp[pos].entry(new_state).or_default();
-                    if entries.len() >= top_k && total_cost >= entries.last().unwrap().0 {
-                        continue;
-                    }
-                    let ins = entries.partition_point(|&(c, _)| c < total_cost);
-                    entries.insert(ins, (total_cost, Backpointer {
-                        prev_pos: arc.start,
-                        prev_state: (prev_pos_tag, prev_prev_pos),
-                        arc_idx: Some(arc_idx),
-                        prev_rank: rank,
-                    }));
-                    if entries.len() > top_k {
-                        entries.pop();
+                        for (rank, &(prev_cost, _)) in src_entries.iter().enumerate() {
+                            // f32 합산 순서는 기존 코드와 동일하게 유지 (byte-identical)
+                            let total_cost = prev_cost + arc.cost + transition_cost + internal_cost + wb_bonus;
+                            if entries.len() >= top_k && total_cost >= entries.last().unwrap().0 {
+                                // src rank는 비용 오름차순이므로 이후 rank도 전부 실패
+                                break;
+                            }
+                            let ins = entries.partition_point(|&(c, _)| c < total_cost);
+                            entries.insert(ins, (total_cost, Backpointer {
+                                prev_pos: arc.start,
+                                prev_state: (prev_pos_tag, prev_prev_pos),
+                                arc_idx: Some(arc_idx),
+                                prev_rank: rank,
+                            }));
+                            if entries.len() > top_k {
+                                entries.pop();
+                            }
+                        }
                     }
                 }
             }
 
             // Space pass-through
             if pos < n && chars[pos].is_whitespace() {
-                let states: Vec<((u8, u8), usize, f32)> = dp[pos].iter()
-                    .flat_map(|(&state, entries)| {
-                        entries.iter().enumerate().map(move |(rank, &(cost, _))| (state, rank, cost))
-                    })
-                    .collect();
-                for (state, rank, cost) in states {
-                    let entries = dp[pos + 1].entry(state).or_default();
-                    if entries.len() >= top_k && cost >= entries.last().unwrap().0 {
-                        continue;
-                    }
-                    let ins = entries.partition_point(|&(c, _)| c < cost);
-                    entries.insert(ins, (cost, Backpointer {
-                        prev_pos: pos, prev_state: state, arc_idx: None, prev_rank: rank,
-                    }));
-                    if entries.len() > top_k {
-                        entries.pop();
+                let (head, tail) = dp.split_at_mut(pos + 1);
+                let src = &head[pos];
+                let dst = &mut tail[0];
+                for (&state, src_entries) in src.iter() {
+                    let entries = dst.entry(state).or_default();
+                    for (rank, &(cost, _)) in src_entries.iter().enumerate() {
+                        if entries.len() >= top_k && cost >= entries.last().unwrap().0 {
+                            break;
+                        }
+                        let ins = entries.partition_point(|&(c, _)| c < cost);
+                        entries.insert(ins, (cost, Backpointer {
+                            prev_pos: pos, prev_state: state, arc_idx: None, prev_rank: rank,
+                        }));
+                        if entries.len() > top_k {
+                            entries.pop();
+                        }
                     }
                 }
             }

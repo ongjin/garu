@@ -29,6 +29,8 @@ pub struct Analyzer {
 
 /// Number of Viterbi candidates to generate.
 const NBEST_K: usize = 5;
+/// 재순위 perceptron 사용 시 후보 폭 (training/rerank 학습 조건 k=10과 동일)
+const RERANK_NBEST_K: usize = 10;
 /// Wider pool used only for short SNS-style lexical ambiguity.
 const CONTEXT_NBEST_K: usize = 10;
 
@@ -52,8 +54,10 @@ impl Analyzer {
     }
 
     fn analyze_inner(&self, text: &str) -> AnalyzeResult {
-        let mut candidates = self.codebook.analyze_topn(text, NBEST_K);
-        if Self::should_expand_contextual_nbest(text) {
+        // 재순위 perceptron이 있으면 후보 폭 k=10 (학습 조건과 동일), 없으면 기존 k=5
+        let base_k = if self.codebook.reranker().is_some() { RERANK_NBEST_K } else { NBEST_K };
+        let mut candidates = self.codebook.analyze_topn(text, base_k);
+        if Self::should_expand_contextual_nbest(text) && base_k < CONTEXT_NBEST_K {
             candidates = self.codebook.analyze_topn(text, CONTEXT_NBEST_K);
         }
 
