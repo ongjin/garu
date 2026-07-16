@@ -366,7 +366,7 @@ struct LatticeArc {
 // Viterbi backpointer
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Backpointer {
     prev_pos: usize,        // position in text
     prev_state: (u8, u8),   // (prev_pos_tag, prev_prev_pos_tag)
@@ -2441,14 +2441,28 @@ impl CodebookAnalyzer {
             arcs_ending_at[arc.end].push(idx);
         }
 
-        // DP: each state → Vec<(cost, backpointer)>, sorted ascending, max top_k
-        let mut dp: Vec<HashMap<(u8, u8), Vec<(f32, Backpointer)>>> = Vec::with_capacity(n + 1);
+        // DP: 상태 → arena 슬롯 인덱스. 각 슬롯은 stride=top_k+1 고정 구간에
+        // (cost, backpointer)를 비용 오름차순으로 최대 top_k개 유지.
+        // 상태별 소형 Vec 할당을 없애고 문장당 큰 버퍼 2개로 대체.
+        // byte-identical 보존: HashMap 키 삽입 순서·용량 성장이 기존과 동일해
+        // 순회 순서가 유지되고, 삽입/truncate 시맨틱도 Vec::insert+pop과 동일.
+        let stride = top_k + 1;
+        let dummy = (f32::INFINITY, Backpointer {
+            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
+        });
+        let mut dp: Vec<HashMap<(u8, u8), u32>> = Vec::with_capacity(n + 1);
         for _ in 0..=n {
             dp.push(HashMap::default());
         }
-        dp[0].entry((BOS, BOS)).or_default().push((0.0, Backpointer {
+        let mut arena: Vec<(f32, Backpointer)> = Vec::new();
+        let mut lens: Vec<u32> = Vec::new();
+
+        arena.resize(stride, dummy);
+        lens.push(1);
+        arena[0] = (0.0, Backpointer {
             prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
-        }));
+        });
+        dp[0].insert((BOS, BOS), 0u32);
 
         for pos in 0..=n {
             // dp[arc.start](읽기)와 dp[pos](쓰기)를 무할당으로 동시 접근.
@@ -2465,7 +2479,7 @@ impl CodebookAnalyzer {
                     let first_pos = arc.morphemes.first().map(|(_, p)| *p as u8).unwrap_or(BOS);
                     let wb_entries = self.word_bigrams.get(arc.morphemes[0].0.as_str());
 
-                    for (&(prev_pos_tag, prev_prev_pos), src_entries) in head[arc.start].iter() {
+                    for (&(prev_pos_tag, prev_prev_pos), &src_slot) in head[arc.start].iter() {
                         // transition/wb/internal은 rank와 무관 — state당 1회만 계산
                         let transition_cost = self.get_trigram_cost(prev_prev_pos, prev_pos_tag, first_pos);
                         let wb_bonus = wb_entries.map_or(0.0, |entries| {
@@ -2496,25 +2510,34 @@ impl CodebookAnalyzer {
                             prev_pos_tag
                         };
                         let new_state = (last_pos, new_prev_prev);
-                        let entries = dst.entry(new_state).or_default();
+                        let dst_slot = *dst.entry(new_state).or_insert_with(|| {
+                            let slot = lens.len() as u32;
+                            lens.push(0);
+                            arena.resize(arena.len() + stride, dummy);
+                            slot
+                        }) as usize;
+                        let src_off = src_slot as usize * stride;
+                        let src_len = lens[src_slot as usize] as usize;
+                        let dst_off = dst_slot * stride;
 
-                        for (rank, &(prev_cost, _)) in src_entries.iter().enumerate() {
+                        for rank in 0..src_len {
+                            let prev_cost = arena[src_off + rank].0;
                             // f32 합산 순서는 기존 코드와 동일하게 유지 (byte-identical)
                             let total_cost = prev_cost + arc.cost + transition_cost + internal_cost + wb_bonus;
-                            if entries.len() >= top_k && total_cost >= entries.last().unwrap().0 {
+                            let len = lens[dst_slot] as usize;
+                            if len >= top_k && total_cost >= arena[dst_off + len - 1].0 {
                                 // src rank는 비용 오름차순이므로 이후 rank도 전부 실패
                                 break;
                             }
-                            let ins = entries.partition_point(|&(c, _)| c < total_cost);
-                            entries.insert(ins, (total_cost, Backpointer {
+                            let ins = arena[dst_off..dst_off + len].partition_point(|&(c, _)| c < total_cost);
+                            arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                            arena[dst_off + ins] = (total_cost, Backpointer {
                                 prev_pos: arc.start,
                                 prev_state: (prev_pos_tag, prev_prev_pos),
                                 arc_idx: Some(arc_idx),
                                 prev_rank: rank,
-                            }));
-                            if entries.len() > top_k {
-                                entries.pop();
-                            }
+                            });
+                            lens[dst_slot] = core::cmp::min(len + 1, top_k) as u32;
                         }
                     }
                 }
@@ -2525,19 +2548,29 @@ impl CodebookAnalyzer {
                 let (head, tail) = dp.split_at_mut(pos + 1);
                 let src = &head[pos];
                 let dst = &mut tail[0];
-                for (&state, src_entries) in src.iter() {
-                    let entries = dst.entry(state).or_default();
-                    for (rank, &(cost, _)) in src_entries.iter().enumerate() {
-                        if entries.len() >= top_k && cost >= entries.last().unwrap().0 {
+                for (&state, &src_slot) in src.iter() {
+                    let dst_slot = *dst.entry(state).or_insert_with(|| {
+                        let slot = lens.len() as u32;
+                        lens.push(0);
+                        arena.resize(arena.len() + stride, dummy);
+                        slot
+                    }) as usize;
+                    let src_off = src_slot as usize * stride;
+                    let src_len = lens[src_slot as usize] as usize;
+                    let dst_off = dst_slot * stride;
+
+                    for rank in 0..src_len {
+                        let cost = arena[src_off + rank].0;
+                        let len = lens[dst_slot] as usize;
+                        if len >= top_k && cost >= arena[dst_off + len - 1].0 {
                             break;
                         }
-                        let ins = entries.partition_point(|&(c, _)| c < cost);
-                        entries.insert(ins, (cost, Backpointer {
+                        let ins = arena[dst_off..dst_off + len].partition_point(|&(c, _)| c < cost);
+                        arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                        arena[dst_off + ins] = (cost, Backpointer {
                             prev_pos: pos, prev_state: state, arc_idx: None, prev_rank: rank,
-                        }));
-                        if entries.len() > top_k {
-                            entries.pop();
-                        }
+                        });
+                        lens[dst_slot] = core::cmp::min(len + 1, top_k) as u32;
                     }
                 }
             }
@@ -2550,10 +2583,11 @@ impl CodebookAnalyzer {
         }
 
         let mut candidates: Vec<(f32, (u8, u8), usize)> = Vec::new();
-        for (&state, entries) in final_states {
+        for (&state, &slot) in final_states {
             let eos_cost = self.get_trigram_cost(state.1, state.0, BOS);
-            for (rank, &(cost, _)) in entries.iter().enumerate() {
-                candidates.push((cost + eos_cost, state, rank));
+            let off = slot as usize * stride;
+            for rank in 0..lens[slot as usize] as usize {
+                candidates.push((arena[off + rank].0 + eos_cost, state, rank));
             }
         }
         candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -2579,11 +2613,12 @@ impl CodebookAnalyzer {
 
             loop {
                 if cur_pos == 0 && cur_state == (BOS, BOS) { break; }
-                let entries = match dp[cur_pos].get(&cur_state) {
-                    Some(e) if cur_rank < e.len() => e,
+                let bp = match dp[cur_pos].get(&cur_state) {
+                    Some(&slot) if cur_rank < lens[slot as usize] as usize => {
+                        arena[slot as usize * stride + cur_rank].1
+                    }
                     _ => break,
                 };
-                let bp = &entries[cur_rank].1;
                 if let Some(ai) = bp.arc_idx {
                     path_arcs.push(ai);
                 }
