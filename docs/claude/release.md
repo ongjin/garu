@@ -21,7 +21,7 @@ F1 또는 모델 크기가 바뀌었으면 **하드코딩된 수치를 전부 �
 | `CLAUDE.md` 프로젝트 개요 | F1, 모델 크기 |
 | `js/CHANGELOG.md` 해당 X.X.X 섹션 | base.gmdl 바이트 수, F1 |
 
-> canonical 값: **F1 95.7% (modelInfo `accuracy` 0.957)**, 2025 구어 held-out 91.0%. 위 위치들을 항상 이 값으로 동기화. (NIKL MP 2021 수치는 재순위 학습 데이터와 겹쳐 자기평가 — 인용 금지)
+> canonical 값: **F1 95.8% (modelInfo `accuracy` 0.958)**, 2025 구어 held-out 91.0%. 위 위치들을 항상 이 값으로 동기화. (NIKL MP 2021 수치는 재순위 학습 데이터와 겹쳐 자기평가 — 인용 금지)
 
 # 릴리스 절차 (X.X.X 배포 시 항상 풀세트)
 
