@@ -17,6 +17,8 @@
 
 `build_codebook_model.py`는 Section 13(어절 캐시)을 **기존 `eojeol_cache.bin`을 그대로 기록** — 캐시를 리빌드하지 않는다(curated 캐시 보존, full rebuild는 -2pp 회귀 위험). 출력은 `models/codebook.gmdl` → `js/models/base.gmdl`로 복사. 소스가 동기화돼 있으면 무변경 리빌드는 byte-identical(재현성 보장).
 
+⚠️ **두 모델 파일은 반드시 동기 유지**: `models/codebook.gmdl`은 integration 테스트 픽스처, `js/models/base.gmdl`은 배포본. 0.9.9 때 `export_weights.py`가 js 쪽만 갱신해 픽스처가 Section 14 없는 구버전으로 남았고, 그 결과 재순위 wrong-override 회귀 3건(대박→대+박, 갈리없는데, 인가가)이 테스트에 안 잡힌 채 배송됨(2026-07-16 픽스처 동기화로 발견, research-history #37). gmdl을 직접 수정하는 도구를 쓸 때는 두 파일 모두 갱신할 것.
+
 **Section 14 (재순위 perceptron, 2026-07-13 채택)**: `training/rerank/` 파이프라인(prep_nikl→dump_topk k=10→train_perceptron→tune_margin)으로 학습, `export_weights.py --blob`이 gmdl 주입 + `training/codebook_data/rerank_section14.bin` blob 갱신. **빌더는 이 blob을 passthrough** (Section 13 어절 캐시와 같은 패턴 — blob 없으면 섹션 생략). 포맷은 `crates/garu-core/src/rerank.rs` 참조(FNV-1a feature hashing — feature 문자열 규칙이 `training/rerank/features.py`와 바이트 단위 동일해야 함). 섹션이 없으면 분석기는 재순위 없이 k=5로 동작(구모델 호환). ⚠️ 재학습 시 v15k∩NIKL 오염 3,950문장 제외 필수(prep_nikl.py가 자동 처리) + NIKL 2021 벤치는 이후 자기평가임에 유의.
 
 **dual-POS 강제 override** (Section 6, 사전은 단어당 POS 2개만 pack): content_dict가 명사 POS 하나만 가져 동사 읽기가 누락되는 어간을 build에서 secondary POS로 주입. 두 상수 — `RIEUL_DUAL`(ㄹ불규칙 어간, A4 발동용), `HOMOGRAPH_VERB_DUAL`(NNP/NNG 동형이의에 가린 동사 어간 박/팔/추 등 15개). 명사 primary는 보존하고 freq를 보수적으로 줘 trigram이 결정(POS-trigram이 어미-뒤-어간 vs 조사-뒤-명사를 자연 분리하므로 명사+조사는 거의 회귀 안 함). 단 **축약 과거형**(쟀다/뿌렸다=재/뿌리+었)은 어간만 추가해도 모음축약 재구성 갭 때문에 안 고쳐져 제외. 후보는 `find_missing_verb_stems.py`로 조사. **사전 변경은 반드시 골드 F1 무회귀 게이트** 통과 확인.
