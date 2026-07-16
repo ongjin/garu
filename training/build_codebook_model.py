@@ -471,10 +471,19 @@ def augment_irregular_conjugations(codebook: dict, content_dict_path: Path) -> d
             stem_with_rieul = stem[:-1] + compose_hangul(lead, vowel, TAIL_RIEUL)
             stem_form = stem
 
+            use_a = is_bright_vowel(vowel)
             for suffix_str, suffix_tags in SUFFIX_COMBOS:
                 first_suffix_ch = suffix_str[0]
                 if first_suffix_ch in ("어", "아"):
                     surface = stem_with_rieul + suffix_str
+                    add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
+                elif first_suffix_ch == "었":
+                    # ㄷ→ㄹ + 과거: 걷+었→걸었, 싣+었다→실었다, 깨닫+았→깨달았
+                    # (분석 morpheme은 었으로 두고 decode 내부 모음조화가 았 복원)
+                    # 듣·묻은 제외 — 들다/물다 동형어가 압도해 v15k 순회귀 실측
+                    if stem in ("듣", "묻"):
+                        continue
+                    surface = stem_with_rieul + ("았" if use_a else "었") + suffix_str[1:]
                     add_entry(surface, stem_form, pos, suffix_str, suffix_tags, freq)
                 elif first_suffix_ch in ("은", "을"):
                     surface = stem_with_rieul + suffix_str
@@ -755,6 +764,7 @@ def augment_contractions(codebook: dict) -> dict:
         "팠": [[["파", "VV"], ["았", "EP"]], 100],
         "잤": [[["자", "VV"], ["았", "EP"]], 500],
         "뤘": [[["루", "VV"], ["었", "EP"]], 50],
+        "뒀": [[["두", "VV"], ["었", "EP"]], 500],   # 두+었 (뒀어/뒀다)
         "챘": [[["채", "VV"], ["었", "EP"]], 100],
         "맸": [[["매", "VV"], ["었", "EP"]], 100],
         "댔": [[["대", "VV"], ["었", "EP"]], 100],
