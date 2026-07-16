@@ -816,6 +816,26 @@ def augment_contractions(codebook: dict) -> dict:
                     dialect_added += 1
     print(f"  Dialect suffix augmentation: {dialect_added} entries added")
 
+    # Spoken endings present in the raw codebook but below MIN_SUFFIX_FREQ:
+    # bump freq so the filter keeps them (gold: 구요/EF 15 vs 구+요 8).
+    SPOKEN_SUFFIX_BUMPS = {
+        "구요": ([["구요", "EF"]], 200),   # 구어 ~구요 (raw freq 26)
+    }
+    spoken_bumped = 0
+    for surface, (morphs, freq) in SPOKEN_SUFFIX_BUMPS.items():
+        key = tuple(tuple(m) for m in morphs)
+        entries = codebook.setdefault(surface, [])
+        for e in entries:
+            if tuple(tuple(m) for m in e["morphemes"]) == key:
+                if e["freq"] < freq:
+                    e["freq"] = freq
+                    spoken_bumped += 1
+                break
+        else:
+            entries.append({"morphemes": morphs, "freq": freq})
+            spoken_bumped += 1
+    print(f"  Spoken suffix bumps: {spoken_bumped}")
+
     print(f"  Contraction augmentation: {added} new entries added")
     return codebook
 
