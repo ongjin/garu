@@ -23,6 +23,8 @@
 
 **dual-POS 강제 override** (Section 6, 사전은 단어당 POS 2개만 pack): content_dict가 명사 POS 하나만 가져 동사 읽기가 누락되는 어간을 build에서 secondary POS로 주입. 두 상수 — `RIEUL_DUAL`(ㄹ불규칙 어간, A4 발동용), `HOMOGRAPH_VERB_DUAL`(NNP/NNG 동형이의에 가린 동사 어간 박/팔/추 등 15개). 명사 primary는 보존하고 freq를 보수적으로 줘 trigram이 결정(POS-trigram이 어미-뒤-어간 vs 조사-뒤-명사를 자연 분리하므로 명사+조사는 거의 회귀 안 함). 단 **축약 과거형**(쟀다/뿌렸다=재/뿌리+었)은 어간만 추가해도 모음축약 재구성 갭 때문에 안 고쳐져 제외. 후보는 `find_missing_verb_stems.py`로 조사. **사전 변경은 반드시 골드 F1 무회귀 게이트** 통과 확인.
 
+**suffix-충돌 제거 오폭 주의**: 빌더는 코드북에 기능형태소 분석이 있는 명사류(REMOVABLE_POS)를 사전에서 제거하는데(배가/NNG가 배+가를 막는 것 방지), **실제 단어가 지워질 수 있다** — 의대/NNG(freq 480)가 코드북 `의/JKG+대/XPN`(freq 1955)에 밀려 삭제돼 `의대 증원`→의+대 과분해(research-history #38). tech_supplement 등재 단어는 이 제거에서 보호되므로 이 클래스는 supplement 1줄로 수리된다. 저빈도 복합명사 과분해(의상실 freq 3 → 의+상실)도 supplement freq bump(200이면 충분 — 저빈도 비선형 페널티 구간만 벗어나면 됨)로 수리.
+
 **불규칙 활용 증강** (Section 7 코드북, `build_codebook_model.py`): `augment_irregular_conjugations`가 content_dict의 ㅂ/ㄷ/ㅅ/르/ㅡ탈락/ㅎ 어간을 `SUFFIX_COMBOS`(어/었/은/을/으니…) 활용형으로 펼쳐 코드북에 넣는다. ㅂ불규칙 과거(추웠다=춥+었), ㅅ불규칙(`IRREG_SIOT_STEMS`, 저었다=젓+었), ㅡ탈락 과거(아팠다=아프+었, ㅆ-병합)까지 커버. `augment_irregular_honorific`은 ㅂ/ㄷ/ㅅ 어간+존댓말(고우시다=곱+으시+다, 걸으신다=걷+으시, 저으신다=젓+으시)을 어절 단위로 주입 — `augment_honorific`(자음어간 접미사만)이 못 잡는 불규칙 surface prefix 붕괴를 막음. 회귀 가드 `training/test_irregular_restore.py`(과거·존댓말·정칙불변). 정칙 ㅂ(좁다)·계사(이었다)는 과대생성돼도 실텍스트에 없어 무해(v15k 무회귀로 확인).
 
 # 학습 파이프라인 (Python)
