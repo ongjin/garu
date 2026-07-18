@@ -267,10 +267,9 @@ fn test_contextual_reranking_everyday_and_sns() {
     );
 }
 
-// '실화냐'의 정확 분석(실화+냐, 무-VCP)은 대박 캐시 교정의 문맥 커플링으로
-// 실화+이/VCP+냐에 밀리는 상태 — 재순위 재학습 시 해결 대상.
+// 대박 캐시 교정의 문맥 커플링으로 '실화냐'가 실화+이/VCP+냐에 밀리던 것을
+// 어절 캐시 [실화,냐/EF] 추가로 복원 — 정확 분석 가드.
 #[test]
-#[ignore = "대박 캐시 교정 후 실화냐 VCP 삽입 잔존 — 재순위 재학습 시 해결"]
 fn test_silhwanya_no_vcp_tradeoff() {
     let analyzer = load_analyzer();
 
