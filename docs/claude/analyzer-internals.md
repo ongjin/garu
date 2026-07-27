@@ -57,7 +57,7 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 
 ⚠️ **POS 보정의 일부는 codebook이 아니라 `model.rs::analyze_inner`의 R1~R6 override가 최종 결정** (codebook fix_* 이후 실행되므로 codebook에서 고쳐도 덮인다). 시간명사 오늘/어제/지금(조사앞 NNG·그 외 MAG)은 **R1**, 내일→NNG는 R2, 뭐/저기→NP는 R3/R4, NNP→NNG 힌트는 R6. 시간명사·지시대명사 POS는 여기를 고칠 것.
 
-**재순위 perceptron (GMDL Section 14, 2026-07-13 채택 — 현 배포 모델 포함)**: Section 14가 있으면 후보 폭이 k=5→10으로 확장되고, `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘으면 선택을 교체. feature 입력은 후보 clone에 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6)을 적용한 것 — 학습 덤프(`Model::analyze_topn`)와 동일 입력을 보장하기 위함. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 완전 무동작(k=5, 구버전과 byte-identical). ⚠️ nbest는 k에 따라 상위권 구성이 달라진다(빔 효과): nbest(5) ≠ nbest(20)[:5] — k=5 재순위가 +0.25pp에 그친 원인.
+**재순위 perceptron (GMDL Section 14, 2026-07-13 채택 — 현 배포 모델 포함)**: Section 14가 있으면 후보 폭이 k=5→10으로 확장되고, `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘으면 선택을 교체. feature 입력은 후보 clone에 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6)을 적용한 것 — 학습 덤프(`Model::analyze_topn`)와 동일 입력을 보장하기 위함. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 완전 무동작(k=5, 구버전과 byte-identical). ⚠️ nbest는 k에 따라 상위권 구성이 달라진다(빔 효과): nbest(5) ≠ nbest(20)[:5] — k=5 재순위가 +0.25pp에 그친 원인. **rank1은 k와 무관하게 동일하지만(9,000문장 100% 일치) rank2 이하는 k에 의존한다** — 그래서 `cand[1].score − cand[0].score` 마진을 작은 k로 미리 구해 큰 k를 건너뛰는 최적화는 성립하지 않는다(research-history #39).
 
 ## 디버깅 방법
 
@@ -74,7 +74,15 @@ GARU_MODEL=js/models/base.gmdl cargo run -q --release --example dump_arcs "<문�
 
 # 골드 F1 회귀 측정 (norm=헤드라인, --no-norm=raw)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu [--no-norm])
+
+# 프로파일링 — release는 strip=true라 그냥 sample하면 주소만 나온다. 심볼 빌드 필수.
+CARGO_PROFILE_RELEASE_STRIP=false CARGO_PROFILE_RELEASE_DEBUG=1 \
+  cargo build --release --example analyze_batch
+GARU_MODEL=js/models/base.gmdl ./target/release/examples/analyze_batch <큰입력> >/dev/null &
+sample $(pgrep -n analyze_batch) 12 -mayDie -f prof.txt
 ```
+
+⚠️ **속도 A/B는 단발 `time`으로 판정하지 말 것.** 같은 바이너리 재실행 편차가 3~5%라 실제 +7% 이득이 노이즈에 묻힌다. 두 바이너리를 교차 실행하고 **min**을 비교할 것(research-history #39).
 
 디버깅 순서: ① dump_topk로 **정답 후보가 lattice에 있나** 확인 → ② 없으면 재구성 전략/코드북 갭(예: 으시 OOV), 있는데 랭킹이 밀리면 비용/trigram 문제, 1위가 맞는데 출력이 다르면 **후처리 fix_*/모음조화가 망가뜨리는 것** (issue #5가 이 케이스).
 
