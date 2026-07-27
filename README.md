@@ -151,6 +151,38 @@ garu.nouns('AI 기술이 발전했다', { includeSL: true });
 
 표면형 문자열 배열을 반환합니다. 분절된 텍스트만 필요할 때 `analyze()`의 경량 대안으로 사용합니다.
 
+### `garu.addUserWord(surface, pos, freq?): void`
+
+도메인 어휘를 런타임에 등록합니다. **모델 리빌드가 필요 없습니다.** 등록한 단어는 래티스에 통짜 후보로 들어가 내장 사전과 같은 비용 척도로 경쟁합니다.
+
+```typescript
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공", "지능", "기술", "발전"]
+
+garu.addUserWord('인공지능', 'NNG');
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공지능", "기술", "발전"]
+```
+
+`freq`는 내장 사전의 빈도와 같은 척도이며 클수록 분해 후보를 이길 확률이 높습니다(기본값 5000). 사용자 단어는 어절 경계를 넘지 않으므로 공백을 포함한 표면은 매칭되지 않습니다.
+
+제품명·기관명·신조어처럼 일반 코퍼스에 없는 복합명사를 검색 색인에 통짜로 넣고 싶을 때 특히 유용합니다.
+
+### `garu.addUserWords(words): void`
+
+여러 단어를 한 번에 등록합니다.
+
+```typescript
+garu.addUserWords([
+  { surface: '전세사기', pos: 'NNG' },
+  { surface: '탄소중립', pos: 'NNG', freq: 20000 },
+]);
+```
+
+### `garu.clearUserWords(): void` / `garu.userWordCount(): number`
+
+등록한 사용자 단어를 모두 제거하거나 개수를 확인합니다. 등록된 단어가 없으면 분석 결과는 내장 사전만 쓸 때와 완전히 동일합니다.
+
 ### `garu.isLoaded(): boolean`
 
 WASM 분석기가 초기화되어 사용 가능한 상태이면 `true`를 반환합니다.

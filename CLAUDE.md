@@ -5,7 +5,7 @@
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
 - **F1 95.8%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 held-out 91.0%
 - **모델 1.4 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요. 재순위 가중치 Section 14 +394KB 포함)
-- **WASM** — 브라우저에서 실행 (raw 401KB / gzip 172KB, opt-level=3 + wasm-opt -O3 + brotli decoder. viterbi_nbest 최적화가 재순위 비용을 상쇄해 Kiwi 대비 격차 2.4×→2.05×)
+- **WASM** — 브라우저에서 실행 (raw 407KB / gzip 175KB, opt-level=3 + wasm-opt -O3 + brotli decoder. viterbi_nbest 최적화가 재순위 비용을 상쇄해 Kiwi 대비 격차 2.4×→2.07×)
 
 ## 아키텍처
 
@@ -27,7 +27,7 @@
 - `crates/garu-tools/src/build_dict.rs` — FST 빌더 (다중 POS 지원)
 
 ### JS/TS (npm 패키지)
-- `js/src/core.ts` — `GaruBase` 클래스 (`analyze` / `tokenize` / `nouns` / `modelInfo`)
+- `js/src/core.ts` — `GaruBase` 클래스 (`analyze` / `tokenize` / `nouns` / `modelInfo` / 런타임 사용자 사전 `addUserWord`·`addUserWords`·`clearUserWords`·`userWordCount`)
 - `js/src/{browser,node}.ts` — `Garu extends GaruBase` + static `load()` (browser=WASM fetch / node=fs)
 - `js/src/normalize.ts` — `normalizeText` / `splitSentences`
 - `js/models/base.gmdl` — 번들된 모델
