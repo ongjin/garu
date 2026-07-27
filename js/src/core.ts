@@ -33,6 +33,14 @@ export interface NounsOptions {
   includeSL?: boolean;
 }
 
+/** A domain word registered at runtime via `addUserWord` / `addUserWords`. */
+export interface UserWord {
+  surface: string;
+  pos: POS;
+  /** Dictionary-scale frequency; higher wins over a split analysis. Default 5000. */
+  freq?: number;
+}
+
 export interface LoadOptions {
   modelData?: ArrayBuffer;
   modelUrl?: string;
@@ -125,6 +133,50 @@ export class GaruBase {
     return result.tokens
       .filter((t) => t.pos === 'NNG' || t.pos === 'NNP' || (includeSL && t.pos === 'SL'))
       .map((t) => t.text);
+  }
+
+  /**
+   * Register a domain word so it is recognised as a single token.
+   *
+   * No model rebuild is needed — the word is injected into the lattice and
+   * competes with the built-in dictionary on the same cost scale. A higher
+   * `freq` makes it more likely to win over a split analysis (default 5000).
+   * A word cannot span whitespace.
+   */
+  addUserWord(surface: string, pos: POS, freq?: number): void {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
+    this._wasm.add_user_word(surface, pos, freq);
+  }
+
+  /**
+   * Register several domain words at once.
+   */
+  addUserWords(words: UserWord[]): void {
+    for (const w of words) {
+      this.addUserWord(w.surface, w.pos, w.freq);
+    }
+  }
+
+  /**
+   * Remove every registered user word, restoring the built-in behaviour.
+   */
+  clearUserWords(): void {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
+    this._wasm.clear_user_words();
+  }
+
+  /**
+   * Number of registered user words.
+   */
+  userWordCount(): number {
+    if (!this._loaded) {
+      throw new Error('Garu instance has been destroyed');
+    }
+    return this._wasm.user_word_count() as number;
   }
 
   /**

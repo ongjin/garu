@@ -873,3 +873,64 @@ fn test_no_truncated_codebook_hallucination() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// 런타임 사용자 사전
+// ---------------------------------------------------------------------------
+
+fn surface_pos(analyzer: &Analyzer, text: &str) -> Vec<(String, Pos)> {
+    analyzer.analyze(text).tokens.into_iter().map(|t| (t.text, t.pos)).collect()
+}
+
+#[test]
+fn test_user_word_merges_compound() {
+    let mut analyzer = load_analyzer();
+
+    // 기본 사전에는 없어 과분해된다.
+    let before = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        !before.iter().any(|(s, _)| s == "탄소중립"),
+        "precondition: 탄소중립 should be split without a user word, got {:?}",
+        before
+    );
+
+    analyzer.add_user_word("탄소중립", Pos::NNG, None);
+    let after = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        after.contains(&("탄소중립".to_string(), Pos::NNG)),
+        "user word should win, got {:?}",
+        after
+    );
+    // 나머지 어절은 그대로여야 한다.
+    assert!(after.contains(&("목표".to_string(), Pos::NNG)), "got {:?}", after);
+}
+
+#[test]
+fn test_user_word_absent_is_byte_identical() {
+    let baseline = load_analyzer();
+    let mut with_dict = load_analyzer();
+    with_dict.add_user_word("탄소중립", Pos::NNG, None);
+    with_dict.clear_user_words();
+
+    for text in [
+        "나는 학교에서 공부했다",
+        "탄소중립 목표",
+        "아버지가 방에 들어가신다",
+        "무선 이어폰 추천",
+    ] {
+        assert_eq!(surface_pos(&baseline, text), surface_pos(&with_dict, text),
+                   "clearing user words must restore baseline behaviour: {text}");
+    }
+}
+
+#[test]
+fn test_user_word_does_not_cross_whitespace() {
+    let mut analyzer = load_analyzer();
+    analyzer.add_user_word("중립목표", Pos::NNG, None);
+    let out = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        !out.iter().any(|(s, _)| s == "중립목표"),
+        "a user word must not span a space, got {:?}",
+        out
+    );
+}

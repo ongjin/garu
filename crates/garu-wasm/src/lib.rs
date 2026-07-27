@@ -72,6 +72,24 @@ impl GaruWasm {
         serde_wasm_bindgen::to_value(&tokens).map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// 사용자 단어 등록 — 모델 리빌드 없이 도메인 어휘를 인식시킨다.
+    pub fn add_user_word(&mut self, surface: &str, pos: &str, freq: Option<u32>) -> Result<(), JsError> {
+        let parsed = garu_core::types::Pos::from_str(pos)
+            .ok_or_else(|| JsError::new(&format!("unknown POS tag: {pos}")))?;
+        self.analyzer.add_user_word(surface, parsed, freq);
+        Ok(())
+    }
+
+    /// 등록된 사용자 단어를 모두 제거.
+    pub fn clear_user_words(&mut self) {
+        self.analyzer.clear_user_words();
+    }
+
+    /// 등록된 사용자 단어 수.
+    pub fn user_word_count(&self) -> usize {
+        self.analyzer.user_word_count()
+    }
+
     #[wasm_bindgen]
     pub fn version() -> String {
         env!("CARGO_PKG_VERSION").to_string()

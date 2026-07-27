@@ -422,7 +422,16 @@ pub struct CodebookAnalyzer {
     eojeol_cache: HashMap<String, Vec<(String, Pos)>>,
     /// N-best 재순위 perceptron (Section 14, optional)
     reranker: Option<crate::rerank::Reranker>,
+    /// 런타임 사용자 사전: 표면 → (POS, freq). 모델 리빌드 없이 도메인 어휘를 넣는다.
+    /// 비어 있으면 래티스 주입 자체를 건너뛰므로 기존 동작과 완전히 동일하다.
+    user_dict: HashMap<String, (Pos, u32)>,
+    /// user_dict 표면의 최대 음절 수 — 주입 스캔 길이 상한.
+    user_dict_max_chars: usize,
 }
+
+/// 사용자 단어의 기본 빈도. 사전 빈도와 같은 척도이며, 이 값이면 일반적인
+/// 2분해(명사+조사·명사+명사)보다 비용이 낮아 통짜로 선택된다.
+pub const DEFAULT_USER_WORD_FREQ: u32 = 5000;
 
 impl CodebookAnalyzer {
     /// Parse a GMDL v3 file from raw bytes. Accepts raw or brotli-compressed input.
@@ -608,11 +617,40 @@ impl CodebookAnalyzer {
                 Some(d) => Some(crate::rerank::Reranker::from_bytes(d)?),
                 None => None,
             },
+            user_dict: HashMap::default(),
+            user_dict_max_chars: 0,
         })
     }
 
     pub fn reranker(&self) -> Option<&crate::rerank::Reranker> {
         self.reranker.as_ref()
+    }
+
+    /// 사용자 단어 등록 — 모델 리빌드 없이 래티스에 통짜 아크로 주입된다.
+    /// `freq`는 사전 빈도와 같은 척도(생략 시 [`DEFAULT_USER_WORD_FREQ`])로,
+    /// 클수록 비용이 낮아 분해 후보를 이긴다. 같은 표면을 다시 등록하면 덮어쓴다.
+    /// 공백을 포함한 표면은 어절을 넘을 수 없어 등록해도 매칭되지 않는다.
+    pub fn add_user_word(&mut self, surface: &str, pos: Pos, freq: Option<u32>) {
+        if surface.is_empty() {
+            return;
+        }
+        let n_chars = surface.chars().count();
+        self.user_dict.insert(
+            surface.to_string(),
+            (pos, freq.unwrap_or(DEFAULT_USER_WORD_FREQ).max(1)),
+        );
+        self.user_dict_max_chars = self.user_dict_max_chars.max(n_chars);
+    }
+
+    /// 등록된 사용자 단어를 모두 제거 — 이후 동작은 등록 전과 완전히 동일하다.
+    pub fn clear_user_words(&mut self) {
+        self.user_dict.clear();
+        self.user_dict_max_chars = 0;
+    }
+
+    /// 등록된 사용자 단어 수.
+    pub fn user_word_count(&self) -> usize {
+        self.user_dict.len()
     }
 
     /// True if a suffix-codebook analysis is well-formed for the key it is stored
@@ -2168,6 +2206,34 @@ impl CodebookAnalyzer {
                     }
                 }
                 ej_start = ej_end;
+            }
+        }
+
+        // 사용자 사전 주입 — 사전/코드북 아크와 같은 비용 척도로 경쟁시킨다.
+        // OOV fallback보다 앞에 둬서 사용자 단어 시작 위치가 has_arc로 잡히게 한다.
+        if !self.user_dict.is_empty() {
+            let mut buf = String::new();
+            for start in 0..n {
+                if chars[start].is_whitespace() {
+                    continue;
+                }
+                let max_len = self.user_dict_max_chars.min(n - start);
+                buf.clear();
+                for l in 0..max_len {
+                    let c = chars[start + l];
+                    if c.is_whitespace() {
+                        break; // 사용자 단어는 어절 경계를 넘지 않는다
+                    }
+                    buf.push(c);
+                    if let Some(&(pos, freq)) = self.user_dict.get(&buf) {
+                        arcs.push(LatticeArc {
+                            start,
+                            end: start + l + 1,
+                            morphemes: vec![(buf.clone(), pos)],
+                            cost: self.get_word_cost(&buf, pos, freq),
+                        });
+                    }
+                }
             }
         }
 

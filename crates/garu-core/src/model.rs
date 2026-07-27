@@ -45,6 +45,22 @@ impl Analyzer {
         Ok(Self { codebook, options })
     }
 
+    /// 사용자 단어 등록 — 모델 리빌드 없이 도메인 어휘를 인식시킨다.
+    /// `freq`는 사전 빈도와 같은 척도(생략 시 `DEFAULT_USER_WORD_FREQ`).
+    pub fn add_user_word(&mut self, surface: &str, pos: Pos, freq: Option<u32>) {
+        self.codebook.add_user_word(surface, pos, freq);
+    }
+
+    /// 등록된 사용자 단어를 모두 제거.
+    pub fn clear_user_words(&mut self) {
+        self.codebook.clear_user_words();
+    }
+
+    /// 등록된 사용자 단어 수.
+    pub fn user_word_count(&self) -> usize {
+        self.codebook.user_word_count()
+    }
+
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
         let mut result = self.analyze_inner(text);
         if self.options.normalize_jamo {
