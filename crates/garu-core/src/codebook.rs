@@ -366,12 +366,17 @@ struct LatticeArc {
 // Viterbi backpointer
 // ---------------------------------------------------------------------------
 
+/// `Backpointer::arc_idx` sentinel — space pass-through consumes no arc.
+const NO_ARC: u32 = u32::MAX;
+
+/// 필드 폭은 의도적으로 좁다: N-best DP arena가 정렬 삽입마다 엔트리를 memmove하므로
+/// `(f32, Backpointer)` 크기가 그대로 복사 트래픽이 된다 (48B → 16B).
 #[derive(Clone, Copy)]
 struct Backpointer {
-    prev_pos: usize,        // position in text
+    prev_pos: u32,          // position in text
+    arc_idx: u32,           // index into arcs list, NO_ARC for space pass-through
     prev_state: (u8, u8),   // (prev_pos_tag, prev_prev_pos_tag)
-    arc_idx: Option<usize>, // index into arcs list, None for space pass-through
-    prev_rank: usize,       // rank at prev state (for N-best Viterbi)
+    prev_rank: u16,         // rank at prev state (for N-best Viterbi)
 }
 
 // ---------------------------------------------------------------------------
@@ -2274,9 +2279,9 @@ impl CodebookAnalyzer {
                     let entry = dp[pos].entry(new_state).or_insert((f32::INFINITY, None));
                     if total_cost < entry.0 {
                         *entry = (total_cost, Some(Backpointer {
-                            prev_pos: arc.start,
+                            prev_pos: arc.start as u32,
                             prev_state: (prev_pos, prev_prev_pos),
-                            arc_idx: Some(arc_idx),
+                            arc_idx: arc_idx as u32,
                             prev_rank: 0,
                         }));
                     }
@@ -2292,9 +2297,9 @@ impl CodebookAnalyzer {
                     let entry = dp[pos + 1].entry(state).or_insert((f32::INFINITY, None));
                     if cost < entry.0 {
                         *entry = (cost, Some(Backpointer {
-                            prev_pos: pos,
+                            prev_pos: pos as u32,
                             prev_state: state,
-                            arc_idx: None,
+                            arc_idx: NO_ARC,
                             prev_rank: 0,
                         }));
                     }
@@ -2331,10 +2336,10 @@ impl CodebookAnalyzer {
                 Some((_, Some(bp))) => bp.clone(),
                 _ => break,
             };
-            if let Some(arc_idx) = bp.arc_idx {
-                path_arcs.push(arc_idx);
+            if bp.arc_idx != NO_ARC {
+                path_arcs.push(bp.arc_idx as usize);
             }
-            cur_pos = bp.prev_pos;
+            cur_pos = bp.prev_pos as usize;
             cur_state = bp.prev_state;
             if cur_pos == 0 && cur_state == (BOS, BOS) {
                 break;
@@ -2430,6 +2435,8 @@ impl CodebookAnalyzer {
 
     /// N-best Viterbi decoding. Returns top `top_k` distinct paths sorted by cost.
     fn viterbi_nbest(&self, text: &str, arcs: &[LatticeArc], top_k: usize) -> Vec<(Vec<Token>, f32)> {
+        // Backpointer::prev_rank가 u16이라 비현실적으로 큰 k에서 wrap하지 않도록 상한.
+        let top_k = top_k.min(u16::MAX as usize);
         let chars: Vec<char> = text.chars().collect();
         let n = chars.len();
         if n == 0 {
@@ -2448,7 +2455,7 @@ impl CodebookAnalyzer {
         // 순회 순서가 유지되고, 삽입/truncate 시맨틱도 Vec::insert+pop과 동일.
         let stride = top_k + 1;
         let dummy = (f32::INFINITY, Backpointer {
-            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
+            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: NO_ARC, prev_rank: 0,
         });
         let mut dp: Vec<HashMap<(u8, u8), u32>> = Vec::with_capacity(n + 1);
         for _ in 0..=n {
@@ -2460,7 +2467,7 @@ impl CodebookAnalyzer {
         arena.resize(stride, dummy);
         lens.push(1);
         arena[0] = (0.0, Backpointer {
-            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: None, prev_rank: 0,
+            prev_pos: 0, prev_state: (BOS, BOS), arc_idx: NO_ARC, prev_rank: 0,
         });
         dp[0].insert((BOS, BOS), 0u32);
 
@@ -2530,12 +2537,16 @@ impl CodebookAnalyzer {
                                 break;
                             }
                             let ins = arena[dst_off..dst_off + len].partition_point(|&(c, _)| c < total_cost);
-                            arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                            // total_cost는 rank에 대해 오름차순이라 맨 뒤 삽입이 흔하다.
+                            // 그때 copy_within은 빈 범위인데도 memmove를 호출하므로 건너뛴다.
+                            if ins < len {
+                                arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                            }
                             arena[dst_off + ins] = (total_cost, Backpointer {
-                                prev_pos: arc.start,
+                                prev_pos: arc.start as u32,
                                 prev_state: (prev_pos_tag, prev_prev_pos),
-                                arc_idx: Some(arc_idx),
-                                prev_rank: rank,
+                                arc_idx: arc_idx as u32,
+                                prev_rank: rank as u16,
                             });
                             lens[dst_slot] = core::cmp::min(len + 1, top_k) as u32;
                         }
@@ -2566,9 +2577,12 @@ impl CodebookAnalyzer {
                             break;
                         }
                         let ins = arena[dst_off..dst_off + len].partition_point(|&(c, _)| c < cost);
-                        arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                        if ins < len {
+                            arena.copy_within(dst_off + ins..dst_off + len, dst_off + ins + 1);
+                        }
                         arena[dst_off + ins] = (cost, Backpointer {
-                            prev_pos: pos, prev_state: state, arc_idx: None, prev_rank: rank,
+                            prev_pos: pos as u32, prev_state: state, arc_idx: NO_ARC,
+                            prev_rank: rank as u16,
                         });
                         lens[dst_slot] = core::cmp::min(len + 1, top_k) as u32;
                     }
@@ -2619,12 +2633,12 @@ impl CodebookAnalyzer {
                     }
                     _ => break,
                 };
-                if let Some(ai) = bp.arc_idx {
-                    path_arcs.push(ai);
+                if bp.arc_idx != NO_ARC {
+                    path_arcs.push(bp.arc_idx as usize);
                 }
-                cur_pos = bp.prev_pos;
+                cur_pos = bp.prev_pos as usize;
                 cur_state = bp.prev_state;
-                cur_rank = bp.prev_rank;
+                cur_rank = bp.prev_rank as usize;
             }
             path_arcs.reverse();
 
