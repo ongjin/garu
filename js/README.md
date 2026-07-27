@@ -177,7 +177,7 @@ F1 95.8% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 91.0%
 The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.
 
 **Does it use a neural network?**
-No. It combines a codebook, an eojeol cache, sentence-level N-best trigram Viterbi, and deterministic post-processing rules, so output is deterministic and reproducible.
+No. It combines a codebook, an eojeol cache, sentence-level N-best trigram Viterbi, deterministic post-processing rules, and a linear reranking perceptron — not a neural network — so output is deterministic and reproducible.
 
 **Where does it run besides the browser?**
 The same `npm install garu-ko` works in browser ESM, Node.js 18+, Bun, and Deno with one API.

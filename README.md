@@ -16,7 +16,7 @@
 - **초경량** -- 1.4MB 코드북 모델, 407KB WASM (npm 패키지에 포함)
 - **높은 정확도** -- F1 95.8% (9,000문장 v15k 골드 테스트셋, ep_norm 정규화), 2025 구어 held-out F1 91.0%
 - **서버 불필요** -- WebAssembly로 클라이언트에서 직접 실행
-- **결정적** -- 코드북 + 문장 N-best Trigram Viterbi + 컨텍스트 규칙 POS 보정 (신경망 없음)
+- **결정적** -- 코드북 + 문장 N-best Trigram Viterbi + 컨텍스트 규칙 POS 보정 + 선형 재순위 perceptron (신경망 없음)
 - **오프라인 지원** -- 네트워크 없이도 완전한 형태소 분석 가능
 - **[라이브 데모](https://garu.zerry.co.kr)** -- 브라우저에서 바로 체험
 
@@ -92,9 +92,9 @@ const garu = await Garu.load({ modelData });
 
 <img alt="Garu 아키텍처 다이어그램" src="docs/paper-1.png">
 
-코드북 + 어절 캐시 + 문장 수준 N-best Trigram Viterbi 구조에 결정적 후처리 규칙을 결합한 경량 분석기입니다.
+코드북 + 어절 캐시 + 문장 수준 N-best Trigram Viterbi 구조에 결정적 후처리 규칙과 재순위 perceptron을 결합한 경량 분석기입니다.
 
-전체 문장에 대해 래티스를 구축하고, 어절 캐시 항목을 저비용 후보 아크로 주입한 뒤 문장 수준 Viterbi 디코딩(top-5)을 수행합니다. 컨텍스트 rerank 보너스로 N-best 중 최적을 선택하고, 마지막으로 결정적 POS 보정 규칙(시간 부사 "오늘/지금"→MAG, 의문대명사 "뭐+VV"→NP 등)과 NNG-hint 사전(NIKL gold에서 NNG 비율 ≥ 95% 단어 225개)을 적용합니다.
+전체 문장에 대해 래티스를 구축하고, 어절 캐시 항목과 등록된 사용자 단어를 저비용 후보 아크로 주입한 뒤 문장 수준 Viterbi 디코딩(top-10)을 수행합니다. 각 후보에 결정적 후처리 규칙(`fix_*`)을 적용한 다음 컨텍스트 보너스로 최적 후보를 고르고, 재순위 perceptron이 확신 마진을 넘을 때만 그 선택을 교체합니다. 마지막으로 POS 보정 규칙(시간 부사 "오늘/지금"→MAG, 의문대명사 "뭐+VV"→NP 등)과 NNG-hint 사전(NIKL gold에서 NNG 비율 ≥ 95% 단어 225개)을 적용합니다.
 
 코드북 데이터는 모두의 말뭉치(NIKL MP) 골드 어노테이션과 Kiwi 분석기 출력의 하이브리드로 추출합니다. 결정 규칙과 어절 캐시 확장 패턴은 5K 골드/NIKL 코퍼스에서 마이닝된 사례를 기반으로 합니다. 자세한 연구 경과는 [기술 논문](docs/paper.md)과 [CHANGELOG](js/CHANGELOG.md)를 참고하세요.
 
@@ -251,7 +251,7 @@ WebAssembly를 지원하는 모던 브라우저와 Node.js 18 이상에서 동�
 `npm install garu-ko` 후 `await Garu.load()`로 모델을 로드하고 `analyze()`로 형태소 분석을 수행합니다. 자세한 예시는 위의 Quick Start를 참고하세요.
 
 **신경망(딥러닝)을 사용하나요?**
-아니요. 코드북 + 어절 캐시 + 문장 수준 N-best Trigram Viterbi + 결정적 후처리 규칙으로 동작합니다. 신경망이 없어 결과가 결정적이고 재현 가능합니다.
+아니요. 코드북 + 어절 캐시 + 문장 수준 N-best Trigram Viterbi + 결정적 후처리 규칙 + 선형 재순위 perceptron으로 동작합니다. perceptron은 신경망이 아닌 선형 모델이며, 행렬 연산이나 확률적 요소가 없어 결과가 결정적이고 재현 가능합니다.
 
 **어떤 품사 태그셋을 사용하나요?**
 세종 태그셋(42개 품사 태그)을 사용합니다.
