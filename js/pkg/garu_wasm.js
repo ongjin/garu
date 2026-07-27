@@ -12,6 +12,29 @@ export class GaruWasm {
         wasm.__wbg_garuwasm_free(ptr, 0);
     }
     /**
+     * 사용자 단어 등록 — 모델 리빌드 없이 도메인 어휘를 인식시킨다.
+     * @param {string} surface
+     * @param {string} pos
+     * @param {number | null} [freq]
+     */
+    add_user_word(surface, pos, freq) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(surface, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(pos, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            wasm.garuwasm_add_user_word(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(freq) ? 0x100000001 : (freq) >>> 0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * @param {string} text
      * @returns {any}
      */
@@ -53,6 +76,12 @@ export class GaruWasm {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
+    }
+    /**
+     * 등록된 사용자 단어를 모두 제거.
+     */
+    clear_user_words() {
+        wasm.garuwasm_clear_user_words(this.__wbg_ptr);
     }
     /**
      * @param {Uint8Array} model_data
@@ -97,6 +126,14 @@ export class GaruWasm {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
+    }
+    /**
+     * 등록된 사용자 단어 수.
+     * @returns {number}
+     */
+    user_word_count() {
+        const ret = wasm.garuwasm_user_word_count(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @returns {string}

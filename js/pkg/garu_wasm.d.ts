@@ -4,10 +4,22 @@
 export class GaruWasm {
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * 사용자 단어 등록 — 모델 리빌드 없이 도메인 어휘를 인식시킨다.
+     */
+    add_user_word(surface: string, pos: string, freq?: number | null): void;
     analyze(text: string): any;
     analyze_topn(text: string, n: number): any;
+    /**
+     * 등록된 사용자 단어를 모두 제거.
+     */
+    clear_user_words(): void;
     constructor(model_data: Uint8Array, normalize_jamo?: boolean | null);
     tokenize(text: string): any;
+    /**
+     * 등록된 사용자 단어 수.
+     */
+    user_word_count(): number;
     static version(): string;
 }
 
@@ -16,10 +28,13 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_garuwasm_free: (a: number, b: number) => void;
+    readonly garuwasm_add_user_word: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly garuwasm_analyze: (a: number, b: number, c: number, d: number) => void;
     readonly garuwasm_analyze_topn: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly garuwasm_clear_user_words: (a: number) => void;
     readonly garuwasm_new: (a: number, b: number, c: number, d: number) => void;
     readonly garuwasm_tokenize: (a: number, b: number, c: number, d: number) => void;
+    readonly garuwasm_user_word_count: (a: number) => number;
     readonly garuwasm_version: (a: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
