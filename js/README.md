@@ -3,7 +3,7 @@
 **Browser-native Korean morphological analyzer.** No server required.
 
 - **1.4MB model** bundled in npm package (no CDN needed)
-- **401KB WASM** engine (172KB gzipped) -- runs in any modern browser
+- **407KB WASM** engine (175KB gzipped) -- runs in any modern browser
 - **F1 95.8%** on 9k human-verified gold testset (ep_norm), **F1 91.0%** on a held-out 2025 spoken-language set
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
@@ -104,6 +104,38 @@ garu.nouns('AI 기술이 발전했다', { includeSL: true });
 
 Returns surface-form strings only. Lightweight alternative to `analyze()`.
 
+### `garu.addUserWord(surface, pos, freq?): void`
+
+Register a domain word at runtime — **no model rebuild required**. The word is injected into the lattice and competes with the built-in dictionary on the same cost scale.
+
+```js
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공", "지능", "기술", "발전"]
+
+garu.addUserWord('인공지능', 'NNG');
+garu.nouns('인공지능 기술이 발전했다');
+// ["인공지능", "기술", "발전"]
+```
+
+`freq` uses the same scale as the built-in dictionary — higher values are more likely to beat a split analysis (default 5000). A user word cannot span whitespace.
+
+Useful for product names, organisations and neologisms that a general corpus does not cover, especially when indexing them as single search terms.
+
+### `garu.addUserWords(words): void`
+
+Register several words at once.
+
+```js
+garu.addUserWords([
+  { surface: '전세사기', pos: 'NNG' },
+  { surface: '탄소중립', pos: 'NNG', freq: 20000 },
+]);
+```
+
+### `garu.clearUserWords(): void` / `garu.userWordCount(): number`
+
+Remove every registered user word, or count them. With none registered, analysis is identical to using the built-in dictionary alone.
+
 ### `garu.destroy(): void`
 
 Free WASM memory. Instance is unusable after this call.
@@ -133,7 +165,7 @@ await search(db, { term: '먹다' })  // ← matches
 ## FAQ
 
 **What is garu-ko?**
-garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.4MB model and a 401KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
+garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.4MB model and a 407KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
 
 **Does it need a server or API?**
 No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
