@@ -72,6 +72,9 @@ GARU_MODEL=js/models/base.gmdl cargo run -q --release --example dump_topk <입�
 # raw 아크 (출처 추적용) — 정답 분해 아크가 lattice에 있는지/비용이 얼마인지 확인
 GARU_MODEL=js/models/base.gmdl cargo run -q --release --example dump_arcs "<문장>"
 #   [start..end] cost  형태소... 를 (start,end,cost)순 정렬 출력. cb.dump_arcs()는 캐시 주입 전 lattice.
+#   ⚠️ 그래서 **캐시·사용자 사전 아크는 여기 안 보인다** — dump_arcs에 없는데 최종 출력에 있으면
+#   캐시(또는 사용자 사전) 출처로 확정할 것. "아크가 없다"고 사전 결손으로 오판하기 쉽다
+#   (이불/NNG가 suffix-충돌 제거로 FST에서 빠졌는데 캐시가 가려주던 사례, research-history #41).
 
 # 골드 F1 회귀 측정 (norm=헤드라인, --no-norm=raw)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu [--no-norm])
