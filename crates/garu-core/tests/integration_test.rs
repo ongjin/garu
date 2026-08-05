@@ -874,6 +874,27 @@ fn test_no_truncated_codebook_hallucination() {
     }
 }
 
+#[test]
+fn test_gae_verb_vs_counter() {
+    // 개다(이불을 개다/날이 개다)가 사전에 없어 개/NNB(단위명사)로만 붕괴하던 것을
+    // HOMOGRAPH_VERB_DUAL 등재로 수리. 수사 선행 문맥의 단위명사 읽기는 보존돼야 한다.
+    let analyzer = load_analyzer();
+    for (input, form, pos) in [
+        ("이불 개라.", "개", Pos::VV),
+        ("비 갠 후 하늘이 맑았다.", "개", Pos::VV),
+        ("빨래를 개서 넣었다", "개", Pos::VV),
+        ("사과 세 개를 먹었다", "개", Pos::NNB),
+        ("문제는 두 개라고 했다", "개", Pos::NNB),
+        ("3개가 남았다", "개", Pos::NNB),
+    ] {
+        let pairs = surface_pos(&analyzer, input);
+        assert!(
+            pairs.iter().any(|(t, p)| t == form && *p == pos),
+            "{input}: {form}/{pos:?} 여야 함: {pairs:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 런타임 사용자 사전
 // ---------------------------------------------------------------------------

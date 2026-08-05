@@ -226,6 +226,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         "망치": ("VV", 1500), # 망치다 (to ruin)
         "우기": ("VV", 1200), # 우기다 (to insist)
         "배우": ("VV", 2500), # 배우다 (to learn)
+        "개": ("VV", 1500),   # 개다 (to fold/clear up)
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:
