@@ -2256,7 +2256,57 @@ impl CodebookAnalyzer {
             }
         }
 
+        Self::dedup_arcs(&mut arcs);
         arcs
+    }
+
+    /// 같은 span에 같은 형태소열을 만드는 아크가 사전·코드북·재구성 전략에서
+    /// 각각 생성돼 실측 9%가 완전 중복이었다. 비용이 높은 쪽은 토큰이 동일해
+    /// 최종 dedup에서 어차피 탈락하면서 N-best 슬롯만 소비하므로, 최소 비용
+    /// 하나만 남긴다(등장 순서는 보존 — DP 순회 순서가 tie-break에 영향).
+    fn dedup_arcs(arcs: &mut Vec<LatticeArc>) {
+        if arcs.len() < 2 {
+            return;
+        }
+        // 형태소 표면 전체를 해싱하지 않는다 — POS열·길이만으로 버킷을 나눈 뒤
+        // 실제 동일성은 아래에서 `==`로 확인하므로 충돌해도 정확하다.
+        fn morph_hash(morphemes: &[(String, Pos)]) -> u64 {
+            let mut h: u64 = 0xCBF2_9CE4_8422_2325;
+            for (form, pos) in morphemes {
+                h = (h ^ *pos as u64).wrapping_mul(0x0000_0100_0000_01B3);
+                h = (h ^ form.len() as u64).wrapping_mul(0x0000_0100_0000_01B3);
+            }
+            h
+        }
+        let mut best: HashMap<(u32, u32, u64), usize> = HashMap::default();
+        let mut keep = vec![true; arcs.len()];
+        for i in 0..arcs.len() {
+            let key = (
+                arcs[i].start as u32,
+                arcs[i].end as u32,
+                morph_hash(&arcs[i].morphemes),
+            );
+            if let Some(&j) = best.get(&key) {
+                // 해시 충돌 방어: 형태소열이 실제로 같을 때만 병합.
+                if arcs[j].morphemes == arcs[i].morphemes {
+                    // 비용·위치를 손대지 않고 열등한 쪽만 버린다 — 살아남는 아크는
+                    // 원래 인덱스·비용 그대로라 DP 순회 순서 교란이 없다.
+                    let loser = if arcs[i].cost < arcs[j].cost { j } else { i };
+                    keep[loser] = false;
+                    if loser == j {
+                        best.insert(key, i);
+                    }
+                    continue;
+                }
+            }
+            best.insert(key, i);
+        }
+        let mut idx = 0;
+        arcs.retain(|_| {
+            let k = keep[idx];
+            idx += 1;
+            k
+        });
     }
 
     // -----------------------------------------------------------------------
@@ -4635,7 +4685,7 @@ impl CodebookAnalyzer {
         }
 
         // Post-process each path
-        paths.into_iter().map(|(raw_tokens, score)| {
+        let processed: Vec<AnalyzeResult> = paths.into_iter().map(|(raw_tokens, score)| {
             let mut tokens: Vec<Token> = raw_tokens.into_iter().map(|token| {
                 let (es, ee) = eojeol_boundaries.iter()
                     .find(|&&(s, e)| token.start >= s && token.start < e)
@@ -4684,7 +4734,27 @@ impl CodebookAnalyzer {
             Self::fix_quote_jkq(&mut tokens);
 
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
-        }).collect()
+        }).collect();
+
+        // viterbi_nbest의 dedup은 후처리 이전 형태를 비교하므로, fix_* 체인이
+        // 서로 다른 경로를 같은 결과로 접으면 중복이 그대로 남는다(실측: 같은
+        // 토큰열이 rank 1·2·6에 동시 등장). 재순위 feature에 rank가 들어가므로
+        // 같은 분석이 서로 다른 점수로 경쟁하게 되어 후보 예산만 축낸다.
+        let mut results: Vec<AnalyzeResult> = Vec::with_capacity(processed.len());
+        for cand in processed {
+            let dup = results.iter().any(|prev: &AnalyzeResult| {
+                prev.tokens.len() == cand.tokens.len()
+                    && prev.tokens.iter().zip(cand.tokens.iter())
+                        .all(|(a, b)| a.text == b.text && a.pos == b.pos)
+            });
+            if !dup {
+                results.push(cand);
+                if results.len() >= n {
+                    break;
+                }
+            }
+        }
+        results
     }
 
     /// Extract surface forms from analysis.
