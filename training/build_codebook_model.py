@@ -850,6 +850,13 @@ def augment_contractions(codebook: dict) -> dict:
     # bump freq so the filter keeps them (gold: 구요/EF 15 vs 구+요 8).
     SPOKEN_SUFFIX_BUMPS = {
         "구요": ([["구요", "EF"]], 200),   # 구어 ~구요 (raw freq 26)
+        # 개(동물)/NNG+조사: 코드북에 정답 분석이 있는데 임계 미만이라 탈락해
+        # 아크 자체가 없었다(개가 72·개는 62·개와 50·개도 13). 임계를 넘긴
+        # 개를(144)·개의(127)는 문맥이 강하면 이미 NNG를 고른다.
+        "개가": ([["개", "NNG"], ["가", "JKS"]], 100),
+        "개는": ([["개", "NNG"], ["는", "JX"]], 100),
+        "개와": ([["개", "NNG"], ["와", "JC"]], 80),
+        "개도": ([["개", "NNG"], ["도", "JX"]], 80),
     }
     spoken_bumped = 0
     for surface, (morphs, freq) in SPOKEN_SUFFIX_BUMPS.items():
