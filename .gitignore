@@ -40,3 +40,6 @@ training/neural/variants.py
 
 # gold 복원 1회성 백업
 training/gold_testset/gold_testset.pre_restore148.jsonl.bak
+
+# 재순위 학습 산출물 (prep_nikl/dump_topk/preprocess 캐시, 680MB — 스크립트로 재생성)
+training/rerank/data/

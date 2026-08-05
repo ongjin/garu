@@ -4,7 +4,7 @@
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
 - **F1 96.0%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 held-out 91.1%
-- **모델 1.2 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요. 재순위 가중치 Section 14 +178KB 포함)
+- **모델 1.2 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요. 재순위 가중치 Section 14 +200KB 포함)
 - **WASM** — 브라우저에서 실행 (raw 412KB / gzip 176KB, opt-level=3 + wasm-opt -O3 + brotli decoder. viterbi_nbest 최적화가 재순위 비용을 상쇄해 Kiwi 대비 격차 2.4×→2.07×)
 
 ## 아키텍처
@@ -94,4 +94,4 @@ GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <�
 - [docs/claude/model-build.md](docs/claude/model-build.md) — **모델/학습 빌드**. GMDL v3 섹션 구성(사전/코드북/트라이그램/캐시), build_codebook_model.py의 캐시 보존 동작, 학습 파이프라인 스크립트. 모델·사전·코드북 리빌드하거나 학습 스크립트 만질 때.
 - [docs/claude/analyzer-internals.md](docs/claude/analyzer-internals.md) — **codebook.rs 동작 지도**. 아크 출처(사전/코드북/캐시/재구성 전략 A2b·A2c·E·A3·A4·D·B·C), viterbi vs nbest 불일치, 후처리 fix_* 체인이 analyze와 analyze_topn에서 다름, 디버깅 방법. "[분석 오류]" 이슈 디버깅하거나 후처리 규칙 추가할 때.
 - [docs/claude/morphology-conventions.md](docs/claude/morphology-conventions.md) — **분석 정답 기준**. 표준국어대사전 우선(골드/Kiwi 맹신 금지), 높임 -시- 분리 원칙(기본형↔보충법, 드시=들+시), ㅂ불규칙 모음조화, 으시 OOV, ep_norm. 분석 정답이 헷갈리거나 골드 라벨 바꿀 때.
-- [docs/claude/research-history.md](docs/claude/research-history.md) — **연구 이력 30항목 + 폐기된 CNN**. 무엇을 왜 채택/폐기했는지, 같은 실패 반복 방지. 과거 맥락이 필요하거나 폐기 접근(CNN·perceptron) 재도입 검토 시.
+- [docs/claude/research-history.md](docs/claude/research-history.md) — **연구 이력 49항목 + 폐기된 CNN**. 무엇을 왜 채택/폐기했는지, 같은 실패 반복 방지. 과거 맥락이 필요하거나 폐기 접근(CNN·perceptron) 재도입 검토 시.
