@@ -229,12 +229,25 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
         "개": ("VV", 1500),   # 개다 (to fold/clear up)
     }
 
+    # 위키 제목 유입으로 NNP 단독 등재된 일반명사(대역폭·디코더·쿼리·노드 등)에
+    # NNG를 secondary로 주입. 사전이 이들의 일반명사 읽기를 아예 안 만들어 top-100
+    # 후보에도 정답이 없던 클래스 — 아크가 없으니 재순위로는 접근 불가였다.
+    # freq는 NNP와 동일하게 줘 trigram이 문맥으로 결정한다. 무차별 적용(위키 제목
+    # 전량 51,529개)은 인명·작품명이 침식돼 v15k -0.88pp라 근거 있는 목록만 쓴다.
+    nng_dual_path = DATA_DIR / "nng_dual.txt"
+    NNG_DUAL = set()
+    if nng_dual_path.exists():
+        with open(nng_dual_path, encoding="utf-8") as nf:
+            NNG_DUAL = {ln.strip() for ln in nf
+                        if ln.strip() and not ln.startswith("#")}
+
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = Path(tmpdir) / "dict_input.txt"
         output_path = Path(tmpdir) / "dict_output.bin"
 
         rieul_added = 0
         homograph_added = 0
+        nng_dual_added = 0
         with open(input_path, "w", encoding="utf-8") as f:
             for word in sorted_words:
                 tag, freq = best[word]
@@ -259,6 +272,12 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                         secondary_written = True
                         homograph_added += 1
 
+                # NNP 단독 등재된 일반명사에 NNG secondary (동일 freq)
+                if not secondary_written and tag == "NNP" and word in NNG_DUAL:
+                    f.write(f"{word}\t{pos_byte('NNG')}\t{freq}\n")
+                    secondary_written = True
+                    nng_dual_added += 1
+
                 # Add secondary POS from NIKL if significantly different
                 if not secondary_written and word in nikl_word_pos:
                     total = sum(nikl_word_pos[word].values())
@@ -272,7 +291,7 @@ def build_content_dict_fst(dict_path: Path) -> tuple[bytes, int]:
                                 f.write(f"{word}\t{alt_pb}\t{alt_freq}\n")
                                 dual_count += 1
                                 break  # only 1 secondary
-        print(f"  Dual-POS words: {dual_count} (NIKL) + {rieul_added} (ㄹ-irregular forced) + {homograph_added} (homograph verb forced)")
+        print(f"  Dual-POS words: {dual_count} (NIKL) + {rieul_added} (ㄹ-irregular forced) + {homograph_added} (homograph verb forced) + {nng_dual_added} (NNG dual)")
 
         # Run build-dict from repo root
         result = subprocess.run(

@@ -4,7 +4,7 @@
 
 | Section | 내용 | 크기 (raw) |
 |---------|------|------|
-| 6 | 내용어 사전 (FST, 다중 POS) | 1,061 KB |
+| 6 | 내용어 사전 (FST, 다중 POS) | 1,086 KB |
 | 7 | 접미사 코드북 (31K 패턴, string table + u8 freq 양자화) | 847 KB |
 | 8 | 트라이그램 비용 (sparse bitmap + u8 양자화) | 36 KB |
 | 9 | 빈도 메타데이터 | 8 B |
@@ -21,7 +21,7 @@
 
 **Section 14 (재순위 perceptron, 2026-07-13 채택)**: `training/rerank/` 파이프라인(prep_nikl→dump_topk k=10→train_perceptron→tune_margin)으로 학습, `export_weights.py --blob`이 gmdl 주입 + `training/codebook_data/rerank_section14.bin` blob 갱신. **빌더는 이 blob을 passthrough** (Section 13 어절 캐시와 같은 패턴 — blob 없으면 섹션 생략). 포맷은 `crates/garu-core/src/rerank.rs` 참조(FNV-1a feature hashing — feature 문자열 규칙이 `training/rerank/features.py`와 바이트 단위 동일해야 함). 섹션이 없으면 분석기는 재순위 없이 k=5로 동작(구모델 호환). **ver=2(2026-08-05)**: bucket 오름차순 차분 varint + 가중치 int16 양자화(step = max|w|/32767)로 652→244KB raw, 모델 −219KB. 디코더는 ver=1도 계속 읽는다. 기존 gmdl을 변환할 때는 `reencode_section14.py <blob> <gmdl>...`(weights.npz 불필요, 섹션만 in-place 교체). 양자화는 비트 동일이 아니므로 **변환 후 9,000문장 출력 diff로 확인할 것** — 채택 시점 실측은 v15k 9,000 + 구어 held-out 16,407 전부 byte-identical. ⚠️ 재학습 시 v15k∩NIKL 오염 3,950문장 제외 필수(prep_nikl.py가 자동 처리) + NIKL 2021 벤치는 이후 자기평가임에 유의.
 
-**dual-POS 강제 override** (Section 6, 사전은 단어당 POS 2개만 pack): content_dict가 명사 POS 하나만 가져 동사 읽기가 누락되는 어간을 build에서 secondary POS로 주입. 두 상수 — `RIEUL_DUAL`(ㄹ불규칙 어간, A4 발동용), `HOMOGRAPH_VERB_DUAL`(명사 동형이의에 가린 동사 어간 박/팔/추/개 등 16개). 명사 primary는 보존하고 freq를 보수적으로 줘 trigram이 결정(POS-trigram이 어미-뒤-어간 vs 조사-뒤-명사를 자연 분리하므로 명사+조사는 거의 회귀 안 함). 단 **축약 과거형**(쟀다/뿌렸다=재/뿌리+었)은 어간만 추가해도 모음축약 재구성 갭 때문에 안 고쳐져 제외. 후보는 `find_missing_verb_stems.py`로 조사(재실행 시 123개 나오지만 상위권 주·비·차·세·대는 전부 과거 기각 클래스다). **의존명사 동형어도 무조건 제외는 아니다** — 개(NNB freq 80,826, 기존 등재 항목 최대치의 3배)를 VV 1500으로 넣었는데 25,407문장에서 회귀 0이었다(research-history #43). 판단 기준은 명사 빈도가 아니라 **문맥이 갈리는가**: NIKL에서 개/NNB의 84.3%가 수사 선행이고 위험 구간인 `개/NNB+이/VCP` 114건은 100% 수사 선행이라 trigram이 완전히 분리한다. **사전 변경은 반드시 골드 F1 무회귀 게이트** 통과 확인.
+**dual-POS 강제 override** (Section 6, 사전은 단어당 POS 2개만 pack): content_dict가 명사 POS 하나만 가져 동사 읽기가 누락되는 어간을 build에서 secondary POS로 주입. 두 상수 — `RIEUL_DUAL`(ㄹ불규칙 어간, A4 발동용), `HOMOGRAPH_VERB_DUAL`(명사 동형이의에 가린 동사 어간 박/팔/추/개 등 16개). 세 번째로 **`nng_dual.txt`**(데이터 파일, 594개) — 위키 제목 유입으로 **NNP 단독 등재된 일반명사**(대역폭·디코더·쿼리·노드·트래픽)에 NNG를 **동일 freq**로 주입해 trigram이 문맥으로 고르게 한다. 분절은 안 바뀌고 POS만 경쟁하므로 안전한 편이지만 **무차별 확대는 확실히 회귀**한다 — 위키 제목 전량(51,529개 적용)은 v15k −0.88pp(뉴스 −1.92)이고 freq 스케일을 0.1까지 낮춰도 baseline을 못 넘는다(research-history #45). 목록 추가 시 근거는 NIKL NNG 우세이며, 언어명(영어·일본어)·국호·지명은 골드 컨벤션이 NNP라 제외할 것. 명사 primary는 보존하고 freq를 보수적으로 줘 trigram이 결정(POS-trigram이 어미-뒤-어간 vs 조사-뒤-명사를 자연 분리하므로 명사+조사는 거의 회귀 안 함). 단 **축약 과거형**(쟀다/뿌렸다=재/뿌리+었)은 어간만 추가해도 모음축약 재구성 갭 때문에 안 고쳐져 제외. 후보는 `find_missing_verb_stems.py`로 조사(재실행 시 123개 나오지만 상위권 주·비·차·세·대는 전부 과거 기각 클래스다). **의존명사 동형어도 무조건 제외는 아니다** — 개(NNB freq 80,826, 기존 등재 항목 최대치의 3배)를 VV 1500으로 넣었는데 25,407문장에서 회귀 0이었다(research-history #43). 판단 기준은 명사 빈도가 아니라 **문맥이 갈리는가**: NIKL에서 개/NNB의 84.3%가 수사 선행이고 위험 구간인 `개/NNB+이/VCP` 114건은 100% 수사 선행이라 trigram이 완전히 분리한다. **사전 변경은 반드시 골드 F1 무회귀 게이트** 통과 확인.
 
 **suffix-충돌 제거 오폭 주의**: 빌더는 코드북에 기능형태소 분석이 있는 명사류(REMOVABLE_POS)를 사전에서 제거하는데(배가/NNG가 배+가를 막는 것 방지), **실제 단어가 지워질 수 있다** — 의대/NNG(freq 480)가 코드북 `의/JKG+대/XPN`(freq 1955)에 밀려 삭제돼 `의대 증원`→의+대 과분해(research-history #38). tech_supplement 등재 단어는 이 제거에서 보호되므로 이 클래스는 supplement 1줄로 수리된다. 저빈도 복합명사 과분해(의상실 freq 3 → 의+상실)도 supplement freq bump(200이면 충분 — 저빈도 비선형 페널티 구간만 벗어나면 됨)로 수리.
 

@@ -3,7 +3,7 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
-- **F1 95.8%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 held-out 91.1%
+- **F1 96.0%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 held-out 91.1%
 - **모델 1.2 MB** (brotli q=11 압축, npm 패키지에 포함, CDN 불필요. 재순위 가중치 Section 14 +178KB 포함)
 - **WASM** — 브라우저에서 실행 (raw 412KB / gzip 176KB, opt-level=3 + wasm-opt -O3 + brotli decoder. viterbi_nbest 최적화가 재순위 비용을 상쇄해 Kiwi 대비 격차 2.4×→2.07×)
 
