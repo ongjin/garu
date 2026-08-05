@@ -6,11 +6,15 @@
 
 ```
 build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전략 + 오타 아크)
+  → dedup_arcs               # 같은 span·같은 형태소열 중복 아크 제거 (열등한 쪽만)
   → 어절 캐시 아크 주입        # analyze()/analyze_topn() 안에서 (-2.0 비용)
   → viterbi() / viterbi_nbest # 문장 수준 Trigram 디코딩 (+ decode 내부 모음조화 후처리)
   → fix_* 후처리 체인          # POS/분절 교정 (analyze와 analyze_topn이 체인이 다름!)
+  → 후처리 결과 dedup          # analyze_topn만. fix_*가 접어버린 동일 결과 제거
   → 출력
 ```
+
+**중복 제거가 두 군데인 이유** (research-history #44): 아크는 사전·코드북·재구성 전략이 같은 분석을 각각 만들어 실측 9%가 완전 중복이고, `viterbi_nbest` 내부 dedup은 **후처리 이전** 형태를 비교하므로 `fix_nde_merge` 같은 규칙이 서로 다른 경로를 같은 결과로 접으면 중복이 그대로 남는다(같은 토큰열이 rank 1·2·6에 동시 등장하던 상태). 둘 다 N-best 슬롯만 축내고 재순위 feature의 `rank`를 왜곡한다. **후보를 더 만드는 방향은 반대로 회귀**한다 — 역추적 풀을 2배로 늘려 실효 후보 6.76개를 준 실험은 v15k −0.05pp였다(재순위 픽 품질이 병목).
 
 ## 분석 경로 = 아크가 어디서 오나
 
