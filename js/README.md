@@ -2,9 +2,9 @@
 
 **Browser-native Korean morphological analyzer.** No server required.
 
-- **1.4MB model** bundled in npm package (no CDN needed)
-- **407KB WASM** engine (175KB gzipped) -- runs in any modern browser
-- **F1 95.8%** on 9k human-verified gold testset (ep_norm), **F1 91.0%** on a held-out 2025 spoken-language set
+- **1.2MB model** bundled in npm package (no CDN needed)
+- **412KB WASM** engine (176KB gzipped) -- runs in any modern browser
+- **F1 95.8%** on 9k human-verified gold testset (ep_norm), **F1 91.1%** on a held-out 2025 spoken-language set
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -165,13 +165,13 @@ await search(db, { term: '먹다' })  // ← matches
 ## FAQ
 
 **What is garu-ko?**
-garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.4MB model and a 407KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
+garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.2MB model and a 412KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
 
 **Does it need a server or API?**
 No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
 
 **How accurate is it?**
-F1 95.8% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 91.0% on a held-out 2025 spoken-language evaluation set.
+F1 95.8% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 91.1% on a held-out 2025 spoken-language evaluation set.
 
 **Which POS tagset does it use?**
 The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.
