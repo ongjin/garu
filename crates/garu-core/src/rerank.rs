@@ -29,36 +29,83 @@ pub struct Reranker {
 }
 
 impl Reranker {
-    /// Section 14 포맷: [ver u8=1][dim_log2 u8][margin f32][count u32]
-    /// [(bucket u32, weight f32) × count] (bucket 오름차순).
+    /// Section 14 포맷 (공통 헤더 `[ver u8][dim_log2 u8][margin f32][count u32]`):
+    /// - ver=1: `[(bucket u32, weight f32) × count]` (bucket 오름차순)
+    /// - ver=2: `[scale f32][bucket delta varint × count][quantized weight i16 × count]`
+    ///   — bucket은 오름차순 차분을 LEB128로, 가중치는 `round(w/scale)`로 저장.
+    ///     같은 가중치를 압축 친화적으로 담은 것이라 디코드 결과는 ver=1과 같은 형태다.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
         if data.len() < 10 {
             return Err("Rerank section too short".into());
         }
-        if data[0] != 1 {
-            return Err(format!("Unknown rerank section version {}", data[0]));
+        let ver = data[0];
+        if ver != 1 && ver != 2 {
+            return Err(format!("Unknown rerank section version {}", ver));
         }
         let dim_log2 = data[1];
         let margin = f32::from_le_bytes(data[2..6].try_into().map_err(|_| "Bad margin")?);
         let count =
             u32::from_le_bytes(data[6..10].try_into().map_err(|_| "Bad count")?) as usize;
-        if data.len() < 10 + count * 8 {
-            return Err("Rerank section truncated".into());
-        }
         let mut buckets = Vec::with_capacity(count);
         let mut weights = Vec::with_capacity(count);
-        let mut pos = 10;
-        for _ in 0..count {
-            let b = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
-            if let Some(&last) = buckets.last() {
-                if b <= last {
+
+        if ver == 1 {
+            if data.len() < 10 + count * 8 {
+                return Err("Rerank section truncated".into());
+            }
+            let mut pos = 10;
+            for _ in 0..count {
+                let b = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+                if let Some(&last) = buckets.last() {
+                    if b <= last {
+                        return Err("Rerank buckets not strictly sorted".into());
+                    }
+                }
+                buckets.push(b);
+                weights.push(f32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap()));
+                pos += 8;
+            }
+        } else {
+            if data.len() < 14 {
+                return Err("Rerank section truncated".into());
+            }
+            let scale = f32::from_le_bytes(data[10..14].try_into().map_err(|_| "Bad scale")?);
+            let mut pos = 14;
+            let mut acc: u64 = 0;
+            for _ in 0..count {
+                let mut delta: u64 = 0;
+                let mut shift = 0u32;
+                loop {
+                    if pos >= data.len() || shift > 63 {
+                        return Err("Rerank section truncated".into());
+                    }
+                    let byte = data[pos];
+                    pos += 1;
+                    delta |= ((byte & 0x7F) as u64) << shift;
+                    if byte & 0x80 == 0 {
+                        break;
+                    }
+                    shift += 7;
+                }
+                if delta == 0 && !buckets.is_empty() {
                     return Err("Rerank buckets not strictly sorted".into());
                 }
+                acc += delta;
+                if acc > u32::MAX as u64 {
+                    return Err("Rerank bucket out of range".into());
+                }
+                buckets.push(acc as u32);
             }
-            buckets.push(b);
-            weights.push(f32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap()));
-            pos += 8;
+            if data.len() < pos + count * 2 {
+                return Err("Rerank section truncated".into());
+            }
+            for _ in 0..count {
+                let q = i16::from_le_bytes(data[pos..pos + 2].try_into().unwrap());
+                weights.push(q as f32 * scale);
+                pos += 2;
+            }
         }
+
         Ok(Reranker {
             dim_mask: (1u64 << dim_log2) - 1,
             margin,

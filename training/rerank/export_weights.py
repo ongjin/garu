@@ -3,7 +3,9 @@
 usage: export_weights.py <weights.npz> <in.gmdl> <out.gmdl> [--margin 4.0]
 
 Section 14 포맷 (crates/garu-core/src/rerank.rs와 동일):
-  [ver u8=1][dim_log2 u8][margin f32][count u32][(bucket u32, weight f32)×count]
+  [ver u8=2][dim_log2 u8][margin f32][count u32][scale f32]
+  [bucket 차분 varint × count][양자화 가중치 i16 × count]
+bucket 차분 + int16 양자화(step = max|w|/32767)로 ver=1 대비 모델 -220KB.
 입력 gmdl은 raw/brotli 모두 허용, 출력은 brotli q=11 (기존 section 14는 교체).
 """
 import argparse
@@ -17,14 +19,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from features import DIM  # noqa: E402
 
 
+def varint(n):
+    out = bytearray()
+    while True:
+        chunk = n & 0x7F
+        n >>= 7
+        out.append(chunk | 0x80 if n else chunk)
+        if not n:
+            return bytes(out)
+
+
+def pack_section14(buckets, weights, dim_log2, margin):
+    """오름차순 bucket + 가중치 → ver=2 blob."""
+    buckets = np.asarray(buckets, dtype=np.int64)
+    weights = np.asarray(weights, dtype=np.float32)
+    assert len(buckets) == len(weights)
+    assert np.all(np.diff(buckets) > 0), "bucket은 강한 오름차순이어야 함"
+    peak = float(np.abs(weights).max()) if len(weights) else 0.0
+    scale = peak / 32767.0 if peak > 0 else 1.0
+    blob = bytearray(struct.pack("<BBfIf", 2, dim_log2, margin, len(buckets), scale))
+    deltas = np.diff(np.concatenate([[0], buckets]))
+    blob += b"".join(varint(int(d)) for d in deltas)
+    blob += np.round(weights / scale).astype("<i2").tobytes()
+    return bytes(blob)
+
+
 def build_section14(npz_path, margin):
     w = np.load(npz_path)["w"]
     assert len(w) == DIM
-    nz = np.nonzero(w)[0]
-    blob = bytearray(struct.pack("<BBfI", 1, DIM.bit_length() - 1, margin, len(nz)))
-    for b in nz:  # np.nonzero는 오름차순
-        blob += struct.pack("<If", int(b), float(w[b]))
-    return bytes(blob)
+    nz = np.nonzero(w)[0]  # np.nonzero는 오름차순
+    return pack_section14(nz, w[nz], DIM.bit_length() - 1, margin)
 
 
 def main():
