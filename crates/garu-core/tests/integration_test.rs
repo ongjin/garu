@@ -964,3 +964,21 @@ fn test_user_word_does_not_cross_whitespace() {
         out
     );
 }
+
+/// 공백을 포함한 다어절 고유명사의 span이 첫 어절로 잘리지 않아야 한다.
+/// 이전에는 `여수 밤바다/NNP`가 [0:2](="여수")로 잘렸다.
+#[test]
+fn test_multiword_nnp_span_not_truncated() {
+    let analyzer = load_analyzer();
+    let text = "여수 밤바다 진짜 이쁘다";
+    let r = analyzer.analyze(text);
+    let nnp = r.tokens.iter()
+        .find(|t| t.text.contains(' '))
+        .expect("다어절 고유명사 토큰이 있어야 한다");
+    let surface_len = nnp.text.chars().count();
+    assert!(
+        nnp.end - nnp.start >= surface_len,
+        "span [{}:{}]이 표면 {}자보다 짧다: {}",
+        nnp.start, nnp.end, surface_len, nnp.text
+    );
+}

@@ -4494,6 +4494,21 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// 토큰에 씌울 어절 단위 span을 고른다.
+    ///
+    /// 토큰이 한 어절 안에 있으면 그 어절 범위를 그대로 쓴다(기존 동작).
+    /// 공백을 가로지르는 아크(사전의 다어절 고유명사 — `류마티스 관절염`,
+    /// `바이에른 뮌헨` 등)는 겹치는 어절을 모두 합친다. 예전에는 `token.start`가
+    /// 속한 **첫 어절로 잘려** `류마티스 관절염/NNP[0:4]`처럼 표면보다 짧은
+    /// span이 나왔다.
+    fn eojeol_span_for(boundaries: &[(usize, usize)], token: &Token) -> (usize, usize) {
+        let mut it = boundaries.iter().filter(|&&(s, e)| s < token.end && e > token.start);
+        match it.next() {
+            Some(&(s0, e0)) => (s0, it.last().map_or(e0, |&(_, e)| e)),
+            None => (token.start, token.end),
+        }
+    }
+
     /// Fallback tokenization when Viterbi fails to reach end.
     fn fallback_tokenize(&self, text: &str) -> (Vec<Token>, f32) {
         let chars: Vec<char> = text.chars().collect();
@@ -4560,10 +4575,7 @@ impl CodebookAnalyzer {
         }
 
         for token in raw_tokens {
-            let (es, ee) = eojeol_boundaries.iter()
-                .find(|&&(s, e)| token.start >= s && token.start < e)
-                .copied()
-                .unwrap_or((token.start, token.end));
+            let (es, ee) = Self::eojeol_span_for(&eojeol_boundaries, &token);
             tokens.push(Token { start: es, end: ee, ..token });
         }
 
@@ -4670,9 +4682,7 @@ impl CodebookAnalyzer {
         // Post-process each path
         let processed: Vec<AnalyzeResult> = paths.into_iter().map(|(raw_tokens, score)| {
             let mut tokens: Vec<Token> = raw_tokens.into_iter().map(|token| {
-                let (es, ee) = eojeol_boundaries.iter()
-                    .find(|&&(s, e)| token.start >= s && token.start < e)
-                    .copied().unwrap_or((token.start, token.end));
+                let (es, ee) = Self::eojeol_span_for(&eojeol_boundaries, &token);
                 Token { start: es, end: ee, ..token }
             }).collect();
 
