@@ -4449,6 +4449,51 @@ impl CodebookAnalyzer {
         merged
     }
 
+    /// Inject eojeol cache entries as competing arcs in the lattice.
+    ///
+    /// Must run *after* `build_lattice` (which dedups dictionary/codebook arcs),
+    /// so cache arcs are never deduped against them. `analyze` and `analyze_topn`
+    /// share this so the two chains cannot drift apart.
+    fn inject_cache_arcs(&self, text: &str, arcs: &mut Vec<LatticeArc>) {
+        if self.eojeol_cache.is_empty() {
+            return;
+        }
+        let mut char_offset = 0usize;
+        for eojeol in text.split_whitespace() {
+            let byte_start = text[char_offset..].find(eojeol)
+                .map(|p| char_offset + p)
+                .unwrap_or(char_offset);
+            let eojeol_char_start = text[..byte_start].chars().count();
+            let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
+
+            if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
+                let morphemes: Vec<(String, Pos)> = cached_morphs.iter()
+                    .map(|(f, p)| (f.clone(), *p))
+                    .collect();
+
+                // -2.0: very strong prior, but cross-eojeol trigram can still override.
+                // For the last eojeol ending with EC, weaken the bonus so Viterbi
+                // can choose EF if the SF-aware arc provides a better path.
+                let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
+                    .any(|c| !c.is_whitespace()
+                        && !matches!(c, '.' | '!' | '?' | '…')
+                        && !(c >= '\u{3131}' && c <= '\u{3163}'));
+                let last_is_ec = cached_morphs.last()
+                    .map_or(false, |(_, p)| *p == Pos::EC);
+                let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
+
+                arcs.push(LatticeArc {
+                    start: eojeol_char_start,
+                    end: eojeol_char_end,
+                    morphemes,
+                    cost: cache_cost,
+                });
+            }
+
+            char_offset = byte_start + eojeol.len();
+        }
+    }
+
     /// Fallback tokenization when Viterbi fails to reach end.
     fn fallback_tokenize(&self, text: &str) -> (Vec<Token>, f32) {
         let chars: Vec<char> = text.chars().collect();
@@ -4496,46 +4541,7 @@ impl CodebookAnalyzer {
         // Build full-sentence lattice with cache entries as arcs
         let mut arcs = self.build_lattice(text);
 
-        // Inject eojeol cache entries as competing arcs in the lattice
-        if !self.eojeol_cache.is_empty() {
-            let mut char_offset = 0usize;
-
-            for eojeol in text.split_whitespace() {
-                let byte_start = text[char_offset..].find(eojeol)
-                    .map(|p| char_offset + p)
-                    .unwrap_or(char_offset);
-                let eojeol_char_start = text[..byte_start].chars().count();
-                let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
-
-                if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
-                    // Add cache entry as a very low-cost arc
-                    let morphemes: Vec<(String, Pos)> = cached_morphs.iter()
-                        .map(|(f, p)| (f.clone(), *p))
-                        .collect();
-
-                    // Give cache entries a strong bonus (low cost) but not absolute
-                    // -2.0 bonus: very strong prior, but cross-eojeol trigram can still override
-                    // For the last eojeol ending with EC, weaken the bonus so Viterbi
-                    // can choose EF if the SF-aware arc (above) provides a better path.
-                    let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
-                        .any(|c| !c.is_whitespace()
-                            && !matches!(c, '.' | '!' | '?' | '…')
-                            && !(c >= '\u{3131}' && c <= '\u{3163}'));
-                    let last_is_ec = cached_morphs.last()
-                        .map_or(false, |(_, p)| *p == Pos::EC);
-                    let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
-
-                    arcs.push(LatticeArc {
-                        start: eojeol_char_start,
-                        end: eojeol_char_end,
-                        morphemes,
-                        cost: cache_cost,
-                    });
-                }
-
-                char_offset = byte_start + eojeol.len();
-            }
-        }
+        self.inject_cache_arcs(text, &mut arcs);
 
         // Run sentence-level Viterbi on the full lattice
         let (raw_tokens, score) = self.viterbi(text, &arcs);
@@ -4642,30 +4648,7 @@ impl CodebookAnalyzer {
 
         // Build lattice with cache injection (same as analyze)
         let mut arcs = self.build_lattice(text);
-        if !self.eojeol_cache.is_empty() {
-            let mut char_offset = 0usize;
-            for eojeol in text.split_whitespace() {
-                let byte_start = text[char_offset..].find(eojeol)
-                    .map(|p| char_offset + p).unwrap_or(char_offset);
-                let eojeol_char_start = text[..byte_start].chars().count();
-                let eojeol_char_end = eojeol_char_start + eojeol.chars().count();
-                if let Some(cached_morphs) = self.eojeol_cache.get(eojeol) {
-                    let morphemes: Vec<(String, Pos)> = cached_morphs.iter()
-                        .map(|(f, p)| (f.clone(), *p)).collect();
-                    let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
-                        .any(|c| !c.is_whitespace()
-                            && !matches!(c, '.' | '!' | '?' | '…')
-                            && !(c >= '\u{3131}' && c <= '\u{3163}'));
-                    let last_is_ec = cached_morphs.last().map_or(false, |(_, p)| *p == Pos::EC);
-                    let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
-                    arcs.push(LatticeArc {
-                        start: eojeol_char_start, end: eojeol_char_end,
-                        morphemes, cost: cache_cost,
-                    });
-                }
-                char_offset = byte_start + eojeol.len();
-            }
-        }
+        self.inject_cache_arcs(text, &mut arcs);
 
         // Run N-best Viterbi
         let paths = self.viterbi_nbest(text, &arcs, n);
