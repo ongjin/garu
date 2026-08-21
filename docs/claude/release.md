@@ -34,6 +34,11 @@ sed -i '' 's/^version = ".*"/version = "X.X.X"/' crates/garu-core/Cargo.toml cra
 # 2. WASM 리빌드 (env!("CARGO_PKG_VERSION") 새 버전 박힘)
 wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 
+# 2b. WASM 로드 검증 — 절대 생략 금지 (0.9.15 사고: binaryen 신버전 + --all-features가
+#     V8 미지원 인코딩(compact imports)을 출력 → 전 사용자 CompileError, issue #7.
+#     wasm-opt feature는 crates/garu-wasm/Cargo.toml에 명시 목록으로 고정, --all-features 금지)
+node -e 'new WebAssembly.Module(require("fs").readFileSync("js/pkg/garu_wasm_bg.wasm")); console.log("wasm V8 OK")'
+
 # 3. TypeScript 빌드
 (cd js && npx tsc)
 

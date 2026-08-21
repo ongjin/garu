@@ -1,6 +1,6 @@
 [package]
 name = "garu-wasm"
-version = "0.9.15"
+version = "0.9.16"
 edition = "2021"
 
 [lib]
@@ -12,5 +12,19 @@ wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 
+# --all-features 금지: binaryen 신버전이 V8 미지원 인코딩(compact imports 등)을 켜서
+# 배포 wasm이 브라우저/Node에서 CompileError 나는 사고가 남 (0.9.15, issue #7).
+# 모듈이 실제 쓰는 표준 feature만 명시할 것.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O3", "--all-features"]
+wasm-opt = [
+    "-O3",
+    "--enable-simd",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+    "--enable-reference-types",
+    "--enable-multivalue",
+    "--enable-call-indirect-overlong",
+    "--enable-extended-const",
+]
