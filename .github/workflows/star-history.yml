@@ -1,0 +1,35 @@
+# README 의 Star History 차트 자가 생성.
+# star-history.com 임베드는 2026-06-30 GitHub stargazers API 제한으로 깨졌고,
+# 레포 자신의 GITHUB_TOKEN 은 여전히 접근 가능하므로 여기서 SVG 를 만들어
+# star-history 브랜치에 발행한다. README 는 그 raw URL 을 참조.
+name: star-history
+
+on:
+  schedule:
+    - cron: '23 0 * * 1' # 매주 월 00:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 차트 생성
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/star-history.mjs "$RUNNER_TEMP"
+      - name: star-history 브랜치로 발행
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan star-history
+          cp "$RUNNER_TEMP"/star-history-*.svg .
+          git add star-history-*.svg
+          git commit -m "chore: star history 차트 갱신"
+          git push --force origin star-history

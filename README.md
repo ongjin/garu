@@ -334,10 +334,9 @@ MIT
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=ongjin%2Fgaru&type=date&legend=bottom-right">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ongjin/garu&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ongjin/garu&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ongjin/garu&type=date&legend=top-left" />
- </picture>
-</a>
+<!-- star-history 브랜치의 SVG 는 .github/workflows/star-history.yml 이 매주 자가 생성 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ongjin/garu/star-history/star-history-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ongjin/garu/star-history/star-history-light.svg" />
+  <img alt="Star History Chart" src="https://raw.githubusercontent.com/ongjin/garu/star-history/star-history-light.svg" />
+</picture>
