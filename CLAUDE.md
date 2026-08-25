@@ -78,6 +78,7 @@ GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <�
 - git email: dydwls140@naver.com
 - 설계/계획 문서를 repo에 올리지 않음
 - push / 배포 / GitHub Release 생성은 사용자 허락 필수 (커밋은 자유)
+- `star-history` 브랜치는 산출물 — `.github/workflows/star-history.yml` 이 README 의 Star History SVG 를 매주 재생성해 force-push 한다(2026-06-30 GitHub stargazers API 가 소유자 전용이 되어 star-history.com 임베드가 깨진 것의 자가 호스팅 대체). 직접 커밋 금지, 차트 수정은 `.github/scripts/star-history.mjs`.
 
 ## 추가 문서 (docs/claude/)
 
