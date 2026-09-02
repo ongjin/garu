@@ -4483,7 +4483,8 @@ impl CodebookAnalyzer {
                     .map(|(f, p)| (f.clone(), *p))
                     .collect();
 
-                // -2.0: very strong prior, but cross-eojeol trigram can still override.
+                // -1.0: 캐시 우선순위. 스윕 실측(research-history #54)에서 -0.5~-1.5가
+                // 평탄한 최적이고 -2.0 이하는 단조 하락한다(-3.0 −0.03pp, -6.0 −0.11pp).
                 // For the last eojeol ending with EC, weaken the bonus so Viterbi
                 // can choose EF if the SF-aware arc provides a better path.
                 let is_last_eojeol = !text[byte_start + eojeol.len()..].chars()
@@ -4492,7 +4493,7 @@ impl CodebookAnalyzer {
                         && !(c >= '\u{3131}' && c <= '\u{3163}'));
                 let last_is_ec = cached_morphs.last()
                     .map_or(false, |(_, p)| *p == Pos::EC);
-                let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -2.0 };
+                let cache_cost = if is_last_eojeol && last_is_ec { -0.5 } else { -1.0 };
 
                 arcs.push(LatticeArc {
                     start: eojeol_char_start,
