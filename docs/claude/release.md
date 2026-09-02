@@ -39,8 +39,17 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 #     wasm-opt feature는 crates/garu-wasm/Cargo.toml에 명시 목록으로 고정, --all-features 금지)
 node -e 'new WebAssembly.Module(require("fs").readFileSync("js/pkg/garu_wasm_bg.wasm")); console.log("wasm V8 OK")'
 
+# 2c. wasm-pack이 남기는 js/pkg/.gitignore 삭제 — 절대 생략 금지 (0.9.17에서 적발)
+#     내용이 `*` 한 글자라 npm이 pkg/ 전체를 패키지에서 제외한다. 지우지 않으면
+#     WASM 없는 반쪽 패키지가 배포된다(파일 48개 → 11개, 1.7MB → 1.3MB).
+rm -f js/pkg/.gitignore
+
 # 3. TypeScript 빌드
 (cd js && npx tsc)
+
+# 3b. 패키지 내용 검증 — pkg/garu_wasm_bg.wasm이 목록에 있어야 한다
+(cd js && npm pack --dry-run 2>&1 | grep -E "total files|garu_wasm_bg.wasm")
+#     기대: total files 48개 내외 + wasm 411KB. 11개면 2c를 빠뜨린 것.
 
 # 4. js/CHANGELOG.md 항목 추가 (## X.X.X 섹션)
 
