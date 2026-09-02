@@ -1310,15 +1310,19 @@ def build_suffix_codebook(codebook_path: Path, min_freq: int = MIN_SUFFIX_FREQ) 
 
     # Build compact binary (v1 format)
     buf = bytearray()
+    # string table이 u16 오프셋 한계(65,535)를 넘으면 sub-version 2(u32 오프셋)로 승격.
+    # 넘지 않으면 기존 포맷 그대로라 기존 모델과 byte-identical.
+    wide_offsets = len(string_table) > 0xFFFF
     buf.extend(struct.pack("<I", 0xFFFFFFFF))  # format marker
-    buf.extend(struct.pack("B", 1))            # sub-version 1
+    buf.extend(struct.pack("B", 2 if wide_offsets else 1))
 
     # String table
     buf.extend(struct.pack("<I", len(string_table)))
     buf.extend(string_table)
     buf.extend(struct.pack("<H", len(sorted_forms)))
+    off_fmt = "<I" if wide_offsets else "<H"
     for off in string_offsets:
-        buf.extend(struct.pack("<H", off))
+        buf.extend(struct.pack(off_fmt, off))
 
     # Max freq for dequantization
     buf.extend(struct.pack("<I", max_suffix_freq))

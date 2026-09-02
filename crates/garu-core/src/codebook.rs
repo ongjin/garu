@@ -780,6 +780,7 @@ impl CodebookAnalyzer {
     }
 
     fn parse_suffix_codebook_v1(data: &[u8]) -> Result<(Vec<SuffixEntry>, HashMap<String, usize>, usize), String> {
+        let sub_version = data[4];
         let mut pos = 5; // skip 0xFFFFFFFF marker + sub-version byte
 
         // String table
@@ -795,13 +796,24 @@ impl CodebookAnalyzer {
         ) as usize;
         pos += 2;
 
+        // sub-version 2: string table > 64KB이면 오프셋이 u32 (빌더가 필요할 때만 승격)
         let mut string_offsets = Vec::with_capacity(num_strings + 1);
-        for _ in 0..=num_strings {
-            let off = u16::from_le_bytes(
-                data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
-            ) as usize;
-            string_offsets.push(off);
-            pos += 2;
+        if sub_version >= 2 {
+            for _ in 0..=num_strings {
+                let off = u32::from_le_bytes(
+                    data[pos..pos + 4].try_into().map_err(|_| "Bad string offset")?,
+                ) as usize;
+                string_offsets.push(off);
+                pos += 4;
+            }
+        } else {
+            for _ in 0..=num_strings {
+                let off = u16::from_le_bytes(
+                    data[pos..pos + 2].try_into().map_err(|_| "Bad string offset")?,
+                ) as usize;
+                string_offsets.push(off);
+                pos += 2;
+            }
         }
 
         // Precompute form strings
