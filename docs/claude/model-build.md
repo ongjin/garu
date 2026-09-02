@@ -15,6 +15,8 @@
 | 14 | N-best 재순위 perceptron 가중치 (95K sparse, ver=2 varint+int16) | 278 KB |
 | — | **brotli q=11 압축 후** | **~1217 KB** |
 
+⚠️ **Section 7 string table은 u16 오프셋 한계(65,535 B)에 거의 닿아 있다** — 현행 `MIN_SUFFIX_FREQ=75`에서 64,562 B(98.5%)라 형태를 ~140개만 더 늘려도 넘친다. 빌더는 넘칠 때만 sub-version 2(u32 오프셋)로 승격하고 그 미만은 기존 포맷 그대로 기록하므로 현행 모델은 byte-identical이다(research-history #54). 디코더는 1·2 모두 읽는다. **승격된 모델은 0.9.16 이하 런타임이 못 읽으니 배포 시 버전 게이트 확인.** 임계를 낮춰 코드북을 키우는 것 자체는 F1 이득이 없다(th=10에서 +0.03pp에 모델 +53%).
+
 `build_codebook_model.py`는 Section 13(어절 캐시)을 **기존 `eojeol_cache.bin`을 그대로 기록** — 캐시를 리빌드하지 않는다(curated 캐시 보존, full rebuild는 -2pp 회귀 위험). 출력은 `models/codebook.gmdl` → `js/models/base.gmdl`로 복사. 소스가 동기화돼 있으면 무변경 리빌드는 byte-identical(재현성 보장).
 
 ⚠️ **두 모델 파일은 반드시 동기 유지**: `models/codebook.gmdl`은 integration 테스트 픽스처, `js/models/base.gmdl`은 배포본. 0.9.9 때 `export_weights.py`가 js 쪽만 갱신해 픽스처가 Section 14 없는 구버전으로 남았고, 그 결과 재순위 wrong-override 회귀 3건(대박→대+박, 갈리없는데, 인가가)이 테스트에 안 잡힌 채 배송됨(2026-07-16 픽스처 동기화로 발견, research-history #37). gmdl을 직접 수정하는 도구를 쓸 때는 두 파일 모두 갱신할 것.
