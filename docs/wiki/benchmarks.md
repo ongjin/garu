@@ -36,3 +36,28 @@ NIKL_MP_DIR=~/workspace/data/nikl_mp_2025 python3 training/eval_nikl_mp.py --n 2
 # 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제
 GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <입력파일>
 ```
+
+## 영문 원문 (구 경로 — 기록용)
+
+데이터 경로가 옛 것(`~/Downloads/NIKL_MP(v1.1)/`)이라 현행 명령은 위 한국어 절을 따른다. 2026-09-04 AGENTS.md 에서 옮김.
+
+### Common Commands (영문 원문)
+
+```bash
+# Rebuild model
+python3 training/build_codebook_model.py
+
+# Rust tests
+cargo test
+
+# WASM build
+wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
+
+# NIKL MP benchmark, requires ~/Downloads/NIKL_MP(v1.1)/
+python3 training/eval_nikl_mp.py --n 2000
+
+# Gold testset evaluation
+python3 training/gold_testset/eval_f1.py
+```
+
+Use focused commands first when iterating. Run broader tests before claiming a general improvement.

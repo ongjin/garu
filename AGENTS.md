@@ -46,7 +46,7 @@ Primary constraints:
 
 ## 아키텍처
 
-### 파이프라인 (현행 — 재순위 perceptron, CNN 폐기)
+### 파이프라인 (현행 — 재순위 perceptron, CNN 은 속도 문제로 폐기)
 
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
@@ -54,25 +54,6 @@ Primary constraints:
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
            → 재순위 perceptron (Section 14, 확신 마진 τ=4 넘을 때만 교체)
            → 출력
-```
-
-### Current Architecture (영문 원문 — CNN 재순위 시절 기술. 위 파이프라인과 상충)
-
-Pipeline:
-
-```text
-input text
-  -> sentence-level lattice construction
-     - FST content-word dictionary
-     - suffix codebook
-     - smart eojeol cache as low-cost arcs
-     - typo-tolerant OOV arcs
-  -> trigram N-best Viterbi decoding
-  -> postprocessing rules
-     - VCP split
-     - VX/JC/JKC/NNB/XSN/XPN/MM/XSV/XSA corrections
-  -> CNN reranking / agreement scoring
-  -> token output
 ```
 
 ### 핵심 Rust 코드
@@ -93,23 +74,9 @@ input text
 
 모델 포맷(GMDL 섹션 구성)·학습 파이프라인은 [docs/wiki/model-build.md](docs/wiki/model-build.md) 참조.
 
-### Important model pieces (영문 원문 — `cnn2.bin`·`cnn.rs` 는 위 한국어 목록과 상충)
-
-Important model pieces:
-
-- `codebook.gmdl` / `js/models/base.gmdl`: GMDL binary model with FST dictionary, suffix codebook, sparse trigram costs, word-bigram adjustments, parameters, and smart eojeol cache.
-- `cnn2.bin`: small int8 1D CNN used for reranking and POS correction.
-- `crates/garu-core/src/model.rs`: analyzer orchestration.
-- `crates/garu-core/src/codebook.rs`: lattice construction, Viterbi, cache injection, and postprocessing.
-- `crates/garu-core/src/cnn.rs`: quantized CNN inference.
-- `crates/garu-core/src/trie.rs`: FST dictionary and multi-POS packing.
-- `crates/garu-core/src/types.rs`: Sejong POS tags.
-- `crates/garu-wasm/src/lib.rs`: WASM bindings.
-- `js/src/index.ts`: public JS/TS API.
-
 ## 빌드·명령
 
-### 자주 쓰는 명령 (한국어 정본 발췌 — 전문은 [docs/wiki/benchmarks.md](docs/wiki/benchmarks.md))
+### 자주 쓰는 명령 (발췌 — 전문은 [docs/wiki/benchmarks.md](docs/wiki/benchmarks.md))
 
 ```bash
 # 모델 리빌드
@@ -130,27 +97,6 @@ python3 training/eval_nikl2025_guueh.py
 # 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제
 GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <입력파일>
 ```
-
-### Common Commands (영문 원문 — NIKL MP 데이터 경로가 위 한국어 정본과 상충)
-
-```bash
-# Rebuild model
-python3 training/build_codebook_model.py
-
-# Rust tests
-cargo test
-
-# WASM build
-wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
-
-# NIKL MP benchmark, requires ~/Downloads/NIKL_MP(v1.1)/
-python3 training/eval_nikl_mp.py --n 2000
-
-# Gold testset evaluation
-python3 training/gold_testset/eval_f1.py
-```
-
-Use focused commands first when iterating. Run broader tests before claiming a general improvement.
 
 ## Research Lessons
 
@@ -173,15 +119,15 @@ Strong historical wins:
 - Smart eojeol cache broke the codebook-only ceiling by caching high-correction-value words, not merely frequent words.
 - Contextual postprocessing rules gave free accuracy without growing the model.
 - Sentence-level Viterbi allows cached analyses to be overridden by stronger sentence context.
-- N-best Viterbi plus CNN agreement scoring is the main current path for better ambiguity handling.
+- N-best Viterbi plus the reranking perceptron (Section 14, swap only above confidence margin τ=4) is the main current path for better ambiguity handling. CNN agreement scoring was retired for speed — see docs/wiki/research-history.md.
 
 ## Research Priorities
 
 Prefer work that targets known residual error classes:
 
-- Segmentation errors: the dominant remaining error source. Investigate Viterbi top-N candidates, CNN reranking, and candidate generation changes that can actually change boundaries.
-- POS ambiguity: continue using sentence context, word-bigram rules, CNN confidence, and targeted postprocessing.
-- OOV and neologisms: explore syllable-pattern or CNN-assisted POS inference without adding large neural inference cost.
+- Segmentation errors: the dominant remaining error source. Investigate Viterbi top-N candidates, reranking-perceptron features, and candidate generation changes that can actually change boundaries.
+- POS ambiguity: continue using sentence context, word-bigram rules, reranker confidence margin, and targeted postprocessing.
+- OOV and neologisms: explore syllable-pattern POS inference without adding neural inference cost (no CNN — retired for speed).
 - Typos and spacing noise: improve typo arcs, noisy training, and pre/postprocessing while measuring clean-text regressions.
 - Domain robustness: compare same-domain, split, and cross-domain NIKL results. Do not optimize only one split.
 - Model-size discipline: record size deltas for every model or dictionary change.

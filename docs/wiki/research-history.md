@@ -156,3 +156,40 @@
 | 출력 FC (288→81) | 23K | 23 KB |
 | 바이어스 + 스케일 + vocab | — | 24 KB |
 | **합계** | ~913K | **brotli q=11 압축 후 701 KB** |
+
+## 영문 원문 아카이브 — CNN 재순위 시절 (폐기, 속도 문제)
+
+2026-09-04 AGENTS.md 정리 때 옮김. 아래 두 절은 CNN 을 현행으로 전제하던 시점의 영문 기술이라 **현재 구조와 다르다**(현행은 재순위 perceptron, `cnn.rs` 삭제). 기록용으로만 둔다.
+
+### Current Architecture (영문 원문, CNN 시절)
+
+Pipeline:
+
+```text
+input text
+  -> sentence-level lattice construction
+     - FST content-word dictionary
+     - suffix codebook
+     - smart eojeol cache as low-cost arcs
+     - typo-tolerant OOV arcs
+  -> trigram N-best Viterbi decoding
+  -> postprocessing rules
+     - VCP split
+     - VX/JC/JKC/NNB/XSN/XPN/MM/XSV/XSA corrections
+  -> CNN reranking / agreement scoring
+  -> token output
+```
+
+### Important model pieces (영문 원문, CNN 시절 — `cnn2.bin`·`cnn.rs` 는 삭제됨)
+
+Important model pieces:
+
+- `codebook.gmdl` / `js/models/base.gmdl`: GMDL binary model with FST dictionary, suffix codebook, sparse trigram costs, word-bigram adjustments, parameters, and smart eojeol cache.
+- `cnn2.bin`: small int8 1D CNN used for reranking and POS correction.
+- `crates/garu-core/src/model.rs`: analyzer orchestration.
+- `crates/garu-core/src/codebook.rs`: lattice construction, Viterbi, cache injection, and postprocessing.
+- `crates/garu-core/src/cnn.rs`: quantized CNN inference.
+- `crates/garu-core/src/trie.rs`: FST dictionary and multi-POS packing.
+- `crates/garu-core/src/types.rs`: Sejong POS tags.
+- `crates/garu-wasm/src/lib.rs`: WASM bindings.
+- `js/src/index.ts`: public JS/TS API.
