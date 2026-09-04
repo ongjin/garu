@@ -46,7 +46,7 @@ Primary constraints:
 
 ## 아키텍처
 
-### 파이프라인 (현행 — 재순위 perceptron, CNN 은 속도 문제로 폐기)
+### 파이프라인 (현행 — 재순위 perceptron, CNN 은 크기 대비 이득 부족으로 폐기: +700KB 에 +0.2%p)
 
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
@@ -119,7 +119,7 @@ Strong historical wins:
 - Smart eojeol cache broke the codebook-only ceiling by caching high-correction-value words, not merely frequent words.
 - Contextual postprocessing rules gave free accuracy without growing the model.
 - Sentence-level Viterbi allows cached analyses to be overridden by stronger sentence context.
-- N-best Viterbi plus the reranking perceptron (Section 14, swap only above confidence margin τ=4) is the main current path for better ambiguity handling. CNN agreement scoring was retired for speed — see docs/wiki/research-history.md.
+- N-best Viterbi plus the reranking perceptron (Section 14, swap only above confidence margin τ=4) is the main current path for better ambiguity handling. CNN agreement scoring was retired because +0.2%p did not justify +700KB of model size — see docs/wiki/research-history.md.
 
 ## Research Priorities
 
@@ -127,7 +127,7 @@ Prefer work that targets known residual error classes:
 
 - Segmentation errors: the dominant remaining error source. Investigate Viterbi top-N candidates, reranking-perceptron features, and candidate generation changes that can actually change boundaries.
 - POS ambiguity: continue using sentence context, word-bigram rules, reranker confidence margin, and targeted postprocessing.
-- OOV and neologisms: explore syllable-pattern POS inference without adding neural inference cost (no CNN — retired for speed).
+- OOV and neologisms: explore syllable-pattern POS inference without adding neural inference cost (no CNN — retired: +0.2%p did not justify +700KB).
 - Typos and spacing noise: improve typo arcs, noisy training, and pre/postprocessing while measuring clean-text regressions.
 - Domain robustness: compare same-domain, split, and cross-domain NIKL results. Do not optimize only one split.
 - Model-size discipline: record size deltas for every model or dictionary change.
