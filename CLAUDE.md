@@ -33,7 +33,7 @@
 - `js/models/base.gmdl` — 번들된 모델
 - `js/pkg/` — wasm-pack 빌드 출력
 
-모델 포맷(GMDL 섹션 구성)·학습 파이프라인은 [docs/claude/model-build.md](docs/claude/model-build.md) 참조.
+모델 포맷(GMDL 섹션 구성)·학습 파이프라인은 [docs/wiki/model-build.md](docs/wiki/model-build.md) 참조.
 
 ## 빌드
 
@@ -80,19 +80,19 @@ GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <�
 - push / 배포 / GitHub Release 생성은 사용자 허락 필수 (커밋은 자유)
 - `star-history` 브랜치는 산출물 — `.github/workflows/star-history.yml` 이 README 의 Star History SVG 를 매주 재생성해 force-push 한다(2026-06-30 GitHub stargazers API 가 소유자 전용이 되어 star-history.com 임베드가 깨진 것의 자가 호스팅 대체). 직접 커밋 금지, 차트 수정은 `.github/scripts/star-history.mjs`.
 
-## 추가 문서 (docs/claude/)
+## 추가 문서 (docs/wiki/)
 
 위의 CLAUDE.md 본문에는 매 세션 필요한 공통 컨텍스트만 둔다. 특정 작업 들어갈 때 아래 문서를 직접 읽어와서 참고할 것.
 
 **문서화 규칙** (다음 세션이 lean한 CLAUDE.md를 유지하도록):
-- **자동 갱신 (지시 없이)**: 코드·수치·아키텍처·빌드 절차·규칙을 바꿔서 기존 문서(CLAUDE.md·docs/claude/·README·paper 등)가 부정확해지면, "문서 고쳐줘"라는 별도 지시가 없어도 같은 작업 안에서 해당 문서를 함께 갱신한다. 매 작업 끝에 "이번 변경이 문서화된 사실을 무효화했나?"를 점검할 것. (단, push/배포 규칙은 그대로 — 커밋은 자유.)
-- **CLAUDE.md는 lean 유지**. 매 세션 자동 로드되므로 high-signal만 — 개요, 아키텍처, 빌드, 규칙. 그 외는 `docs/claude/`로.
-- **분할 기준**: 한 주제로 30줄 넘게 쌓이는데 그 내용이 *특정 작업 시에만* 필요하면 `docs/claude/<topic>.md`로 옮긴다. 본문에서 그 섹션을 제거하고 아래 인덱스에 한 줄만 추가.
+- **자동 갱신 (지시 없이)**: 코드·수치·아키텍처·빌드 절차·규칙을 바꿔서 기존 문서(CLAUDE.md·docs/wiki/·README·paper 등)가 부정확해지면, "문서 고쳐줘"라는 별도 지시가 없어도 같은 작업 안에서 해당 문서를 함께 갱신한다. 매 작업 끝에 "이번 변경이 문서화된 사실을 무효화했나?"를 점검할 것. (단, push/배포 규칙은 그대로 — 커밋은 자유.)
+- **CLAUDE.md는 lean 유지**. 매 세션 자동 로드되므로 high-signal만 — 개요, 아키텍처, 빌드, 규칙. 그 외는 `docs/wiki/`로.
+- **분할 기준**: 한 주제로 30줄 넘게 쌓이는데 그 내용이 *특정 작업 시에만* 필요하면 `docs/wiki/<topic>.md`로 옮긴다. 본문에서 그 섹션을 제거하고 아래 인덱스에 한 줄만 추가.
 - **각 doc 첫 줄은 `> **언제 읽나**: ...` blockquote로 trigger 명시**. 인덱스 hook 보고 doc을 열었을 때 첫 줄만으로 자기 작업에 맞는지 즉시 판단 가능하도록.
 - **기존 doc 갱신**: 가능하면 같은 doc 안에서 끝낸다. 인덱스 hook이 더 이상 정확하지 않으면 그 hook도 같이 고친다.
 
-- [docs/claude/release.md](docs/claude/release.md) — **npm 배포 풀세트**. Cargo→wasm-pack→tsc→CHANGELOG→npm version→commit/push→publish→gh release 8단계 + 통합 패키지(orama/minisearch) 동기화. X.X.X 배포하거나 통합 패키지 sync할 때.
-- [docs/claude/model-build.md](docs/claude/model-build.md) — **모델/학습 빌드**. GMDL v3 섹션 구성(사전/코드북/트라이그램/캐시), build_codebook_model.py의 캐시 보존 동작, 학습 파이프라인 스크립트. 모델·사전·코드북 리빌드하거나 학습 스크립트 만질 때.
-- [docs/claude/analyzer-internals.md](docs/claude/analyzer-internals.md) — **codebook.rs 동작 지도**. 아크 출처(사전/코드북/캐시/재구성 전략 A2b·A2c·E·A3·A4·D·B·C), viterbi vs nbest 불일치, 후처리 fix_* 체인이 analyze와 analyze_topn에서 다름, 디버깅 방법. "[분석 오류]" 이슈 디버깅하거나 후처리 규칙 추가할 때.
-- [docs/claude/morphology-conventions.md](docs/claude/morphology-conventions.md) — **분석 정답 기준**. 표준국어대사전 우선(골드/Kiwi 맹신 금지), 높임 -시- 분리 원칙(기본형↔보충법, 드시=들+시), ㅂ불규칙 모음조화, 으시 OOV, ep_norm. 분석 정답이 헷갈리거나 골드 라벨 바꿀 때.
-- [docs/claude/research-history.md](docs/claude/research-history.md) — **연구 이력 54항목 + 폐기된 CNN**. 무엇을 왜 채택/폐기했는지, 같은 실패 반복 방지. 과거 맥락이 필요하거나 폐기 접근(CNN·perceptron) 재도입 검토 시.
+- [docs/wiki/release.md](docs/wiki/release.md) — **npm 배포 풀세트**. Cargo→wasm-pack→tsc→CHANGELOG→npm version→commit/push→publish→gh release 8단계 + 통합 패키지(orama/minisearch) 동기화. X.X.X 배포하거나 통합 패키지 sync할 때.
+- [docs/wiki/model-build.md](docs/wiki/model-build.md) — **모델/학습 빌드**. GMDL v3 섹션 구성(사전/코드북/트라이그램/캐시), build_codebook_model.py의 캐시 보존 동작, 학습 파이프라인 스크립트. 모델·사전·코드북 리빌드하거나 학습 스크립트 만질 때.
+- [docs/wiki/analyzer-internals.md](docs/wiki/analyzer-internals.md) — **codebook.rs 동작 지도**. 아크 출처(사전/코드북/캐시/재구성 전략 A2b·A2c·E·A3·A4·D·B·C), viterbi vs nbest 불일치, 후처리 fix_* 체인이 analyze와 analyze_topn에서 다름, 디버깅 방법. "[분석 오류]" 이슈 디버깅하거나 후처리 규칙 추가할 때.
+- [docs/wiki/morphology-conventions.md](docs/wiki/morphology-conventions.md) — **분석 정답 기준**. 표준국어대사전 우선(골드/Kiwi 맹신 금지), 높임 -시- 분리 원칙(기본형↔보충법, 드시=들+시), ㅂ불규칙 모음조화, 으시 OOV, ep_norm. 분석 정답이 헷갈리거나 골드 라벨 바꿀 때.
+- [docs/wiki/research-history.md](docs/wiki/research-history.md) — **연구 이력 54항목 + 폐기된 CNN**. 무엇을 왜 채택/폐기했는지, 같은 실패 반복 방지. 과거 맥락이 필요하거나 폐기 접근(CNN·perceptron) 재도입 검토 시.
