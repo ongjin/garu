@@ -31,6 +31,45 @@
 
 **불규칙 활용 증강** (Section 7 코드북, `build_codebook_model.py`): `augment_irregular_conjugations`가 content_dict의 ㅂ/ㄷ/ㅅ/르/ㅡ탈락/ㅎ 어간을 `SUFFIX_COMBOS`(어/었/은/을/으니…) 활용형으로 펼쳐 코드북에 넣는다. ㅂ불규칙 과거(추웠다=춥+었), ㅅ불규칙(`IRREG_SIOT_STEMS`, 저었다=젓+었), ㅡ탈락 과거(아팠다=아프+었, ㅆ-병합)까지 커버. `augment_irregular_honorific`은 ㅂ/ㄷ/ㅅ 어간+존댓말(고우시다=곱+으시+다, 걸으신다=걷+으시, 저으신다=젓+으시)을 어절 단위로 주입 — `augment_honorific`(자음어간 접미사만)이 못 잡는 불규칙 surface prefix 붕괴를 막음. 회귀 가드 `training/test_irregular_restore.py`(과거·존댓말·정칙불변). 정칙 ㅂ(좁다)·계사(이었다)는 과대생성돼도 실텍스트에 없어 무해(v15k 무회귀로 확인).
 
+## 도메인 원문과 검수 자료
+
+도메인 보강용 원문은 레포 밖 `~/workspace/data/`에 둔다. 아래 두 말뭉치는 형태소 정답이 없는 원시 자료이며, 기존 `nikl_mp_2025`의 구어 held-out과 별개다.
+
+| 자료 | JSON 위치 | 분류 기준 |
+|---|---|---|
+| 문어 말뭉치 | `nikl_written_2025/NIKL_WRITTEN 2025_v1.0/` | 파일의 `metadata.category`와 책의 제목·본문 |
+| 온라인 게시 자료 | `nikl_online_2025/NIKL_Online Posting Materials Corpus 2025/` | `metadata.category`: 블로그 / 누리소통망 |
+
+각 상위 폴더의 한국어 PDF가 배포 설명서다. 문어의 `기술과학` 분류에는 건강·육아·요리가 포함되고 IT 책은 사회과학·철학 등에도 있으므로, IT 표본은 분류명만으로 고르지 않는다. 누리소통망 자료의 매체는 인스타그램이다. 문어는 `document[].paragraph[].form`을 문장 분리해야 하고, 이 배포본의 누리소통망에는 `paragraph[].sentence[]`도 있다. 온라인의 `form`과 `original_form`은 이모지 등에서 다를 수 있으므로 둘 다 보존한다.
+
+검수용 산출물은 `~/workspace/data/garu_domain_pilot_2025/`에 있다. `inventory.json`은 전체 JSON의 분류·건수, `manifest.json`은 추출 조건·출처 해시·중복 제외 범위, `baseline.json`은 분석에 사용한 코드·모델 식별자다. `pilot_300.jsonl`은 출처 ID와 문단 내 위치를 가진 원문 표본, `review_300.jsonl`은 Garu 최종 출력·top-10 후보·Kiwi 초안을 붙인 검수 자료다.
+
+표본은 `diagnostic_only`이며 원래의 `review_300.jsonl`은 미검수 입력으로 보존한다. 개별 검토 결과는 같은 폴더의 `adjudication/REPORT.md`와 `adjudication/reviewed_300.jsonl`에 있다. `reference_morphemes`는 진단용 잠정 참조, `gold_morphemes`는 계속 null이며 독립된 사람이 확정한 골드로 취급하지 않는다. 불확실한 분절·품사·문장 경계는 `needs_review`로 제외한다. Garu와 Kiwi의 불일치 자체는 오류 판정이 아니다.
+
+기술 표본은 IT 서적·키워드로 선별하므로 도메인 전체를 대표하는 무작위 벤치마크가 아니다. 온라인 `form`에는 &가 제거된 `brand/company/name` 치환 표지가 남기도 해 이를 제외한 집계도 확인한다. 현재 표본의 진단은 균등한 데이터 확대보다 SNS의 특정 오류 유형 재검증을 지지한다. 후보에 더 나은 분석이 없다는 판정은 top-10 범위에 한정하며, 래티스 결손·빔 밖 정답·후처리 손상을 구분하려면 별도 아크 조사가 필요하다. 구체 수치와 재현 명령은 위 보고서 및 `adjudication/diagnostic_summary.json`을 따른다.
+
+중복 제외는 기존 v15k, 재순위 train/dev, 구어 held-out 원문의 NFC·공백 제거 후 일치 기준이다. 의역 중복과 기존 자료와의 문서 단위 중복까지 검증한 것은 아니다. 학습 자료로 확대할 때는 책·게시글 단위 분리를 유지하고 SNS 작성자와 동일 작품의 다른 판본도 확인한다. 원문이나 자동 분석 초안을 기존 골드 파일에 합치지 않는다.
+
+## 전체 말뭉치 어휘 후보 발굴
+
+원문 기반 발굴 결과와 재현 스크립트는 `~/workspace/data/garu_word_mining_2025/`에 둔다. `REPORT.md`가 처리 범위·제외 기준·검증 결과를 설명하고, `LEXICAL_REVIEW.md`와 `lexical_review_queue.jsonl`이 문서 수·표면 출현 수·실제 용례·Garu/Kiwi 단독 분석을 제공한다. 이 목록은 사전 추가 승인이나 형태소 정답이 아니다. 실제 사전 포함 여부는 소스 목록 대신 배포 GMDL Section 6을 조회한다.
+
+발굴 전에는 파일럿 원문·동일 책을 제외하고, 새 평가 그룹을 책 제목+저자 또는 온라인 매체+작성자 단위로 남긴다. SNS 파일럿이 전체 작성자를 포함하므로 파일럿 작성자를 모두 제외하지는 않으며, 기존 파일럿을 향후 독립 성능 평가로 사용하지 않는다. v15k·구어 held-out·재순위 dev 문장 중복도 정해진 문자열 기준으로 제외한다. 구체 경계와 원본 해시는 `preparation.json`을 따른다.
+
+전체 원문을 순회해도 추출 임계치를 통과한 한글 명사형 후보만 남으므로 완전한 어휘 열거는 아니다. 실제 사전 미등재여도 코드북·캐시·OOV로 처리할 수 있고, 통째로 출력되지 않아도 정상 파생·합성어 분석일 수 있다. 후보를 사전에 넣기 전 실제 문단 분석과 품사·분절 검수를 거친다. 모델이나 사전이 바뀌면 `baseline.json`과 결과를 다시 대조한다.
+
+### 소규모 사전 추가 실험
+
+`~/workspace/data/garu_dictionary_trial_2025/`에는 나이아신아마이드·세라마이드·가브리살(NNG), 에픽테토스(NNP)의 네 항목 추가 실험이 있다. `REPORT.md`, `protocol.json`, `selection.json`이 품사 근거·사전 고정한 기준·선택 과정을 설명한다. 발굴용 용례에서 가장 낮은 빈도값을 고른 뒤 새 보류 그룹과 기존 골드·구어를 평가하며, 보류 점수로 값을 다시 튜닝하지 않는다.
+
+실험 모델은 복사한 GMDL의 Section 6에만 항목을 삽입해 기존 packed 사전값과 다른 섹션을 보존한다. 검증한 항목은 `training/codebook_data/tech_supplement.txt`에서 관리하고 정규 빌드로 두 모델 파일을 동기화한다. 새 보류 자료의 목표 단어/POS 인식률은 문장 전체 F1이 아니다. WASM 검증은 Node에서 수행하며 실제 브라우저 측정과 구분한다.
+
+Native `analyze_batch`는 입력 줄을 trim하므로 WASM과 비교할 때 같은 입력을 사용한다. 경계 공백을 그대로 둔 WASM 결과와 비교하면 기존 모델에서도 동점 경로의 토큰 순서 차이가 생길 수 있다. 공개 API A/B는 원래 공백을 포함한 입력의 토큰·위치·score도 따로 비교한다.
+
+확대 실험은 `~/workspace/data/garu_dictionary_expansion_2025/`에 있다. `active_targets.json`의 일반명사·고유명사를 각각 검증한 뒤 `models/combined_f200.gmdl`에 합쳤다. 신규 평가에서는 앞선 실험의 보류 문서를 제외하며, 문서 수와 용례 수를 구분한다. 주변 변화 감사의 미확정 품사와 잔여 오류는 `reviews/diff_audit.json`에 남긴다. 목표 단어 인식 성공을 문장 전체의 정답으로 해석하지 않는다.
+
+사전 항목 추가는 토큰·위치가 같아도 공개 `score`(분석 비용)를 바꿀 수 있다. 확대 모델은 기존 골드의 글램핑 용례에서 이 차이가 있으므로 출력 무변화 여부를 텍스트/POS·위치·score로 나누어 보고한다. 검증한 20항목은 기본 모델에 정규 빌드로 반영됐으며 실험 모델과 바이트 단위로 동일하다. 실험 근거는 확대 실험의 `REPORT.md`와 `validation.json`, 정규 빌드·배포 검증 기록은 `~/workspace/data/garu_release_0_9_18/`에 있다.
+
 # 학습 파이프라인 (Python)
 
 - `training/extract_codebook.py` — Kiwi + kowikitext에서 코드북 추출
@@ -40,3 +79,11 @@
 - `training/gold_testset/eval_f1.py` — 골드 테스트셋 (9,000문장 v15k, ep_norm) F1 평가
 - `training/find_missing_verb_stems.py` — NNP/NNG 동형이의에 가려 동사 읽기가 누락된 어간 조사 (Garu collapse vs Kiwi VV/VA, `HOMOGRAPH_VERB_DUAL` 후보 추출)
 - `training/neural/prepare_data.py`, `training/neural/experiment_all.py` — *(폐기된 CNN 학습용. 현재 분석기는 CNN 미사용 — `research-history.md` 참조)*
+
+## 이력
+
+- 2026-09-21 20항목을 supplement에 반영하고 0.9.18 정규 모델 생성. 실험 모델과 byte-identical, 모델 1,247,331B. 기존 모델에서 실패하는 회귀 테스트를 추가한 뒤 Rust·골드 norm/raw·구어 평가 통과.
+- 2026-09-21 새16항목을 추가한 총20항목 실험 모델 검증. 97문서108용례에서 목표 인식11→108건, 기존25,407문장 토큰/POS·WASM 위치 유지. 최초 모델 대비 Brotli +1,138B. score1건 변화와 주변 품사2건 검토 한계를 기록, 기본 모델 미반영.
+- 2026-09-21 네 단어 freq200 사전 추가 실험 통과. 새 보류 68문서에서 목표 인식 7→68건, 기존 25,407문장 출력 동일, Brotli +978B. Native/WASM 7회 교차 측정에서 저하 없음. 실험 모델만 보관.
+- 2026-09-21 문어·온라인 전체에서 평가용을 제외한 원문으로 어휘 후보 발굴. 추출 10,283개 중 실제 사전 미등재 7,241개, 비교 분석으로 좁힌 어휘 검토 후보 728개를 저장하고 대표 10개를 문맥에서 확인. 사전·모델은 변경하지 않음.
+- 2026-09-21 문어·온라인 JSON 전수 확인과 도메인 300건 추출 후 개별 진단 검토 완료. 잠정 참조 231건·보류 69건, top-10 개선 8건(치환 표지 제외 7건)으로 균등 3,000건 확대보다 SNS 오류 유형 재검증을 권고.

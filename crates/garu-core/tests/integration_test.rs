@@ -8,6 +8,41 @@ fn load_analyzer() -> Analyzer {
 }
 
 #[test]
+fn test_curated_domain_lexemes_are_not_oversegmented() {
+    let analyzer = load_analyzer();
+    let cases = [
+        ("나이아신아마이드를 함유했다", "나이아신아마이드", Pos::NNG),
+        ("세라마이드와 판테놀", "세라마이드", Pos::NNG),
+        ("가브리살을 구웠다", "가브리살", Pos::NNG),
+        ("에픽테토스가 말했다", "에픽테토스", Pos::NNP),
+        ("글램핑을 예약했다", "글램핑", Pos::NNG),
+        ("브라이트닝에 적합하다", "브라이트닝", Pos::NNG),
+        ("프롤레타리아트와 부르주아지", "프롤레타리아트", Pos::NNG),
+        ("아스타잔틴을 함유했다", "아스타잔틴", Pos::NNG),
+        ("호모시스테인 수치", "호모시스테인", Pos::NNG),
+        ("디지털 트랜스포메이션을 추진한다", "트랜스포메이션", Pos::NNG),
+        ("작품의 오리지널리티", "오리지널리티", Pos::NNG),
+        ("라미네이트를 사용했다", "라미네이트", Pos::NNG),
+        ("하버마스의 저서", "하버마스", Pos::NNP),
+        ("카라바조의 그림", "카라바조", Pos::NNP),
+        ("무인양품에서 샀다", "무인양품", Pos::NNP),
+        ("텔레마코스의 모험", "텔레마코스", Pos::NNP),
+        ("에라토스테네스가 계산했다", "에라토스테네스", Pos::NNP),
+        ("테이레시아스의 예언", "테이레시아스", Pos::NNP),
+        ("포카리스웨트를 마셨다", "포카리스웨트", Pos::NNP),
+        ("헤스페리데스의 정원", "헤스페리데스", Pos::NNP),
+    ];
+    let mut failures = Vec::new();
+    for (input, word, pos) in cases {
+        let result = analyzer.analyze(input);
+        if !result.tokens.iter().any(|token| token.text == word && token.pos == pos) {
+            failures.push((input, word, pos, result.tokens));
+        }
+    }
+    assert!(failures.is_empty(), "domain lexemes were split or mistagged: {failures:?}");
+}
+
+#[test]
 fn test_codebook_analyzer_v3() {
     let analyzer = load_analyzer();
 
