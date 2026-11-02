@@ -49,6 +49,34 @@ excludes final context-POS correction and display-only jamo normalization.
 Public `analyze_topn` includes final corrections. Revalidate the learned context
 rules if the underlying cache or analyzer conventions change.
 
+## Section 17: one-POS rules over final eojeol outputs
+
+`context_rules.py` mines rules from the current production output instead of the
+Section13 cache. A rule stores the eojeol surface, its exact final form/POS
+sequence, one position and the replacement POS, plus up to four neighbor guards
+(1-3 codepoint prefix/suffix of the previous/next word, the exact word, or a
+sentence edge). An n-codepoint guard only matches neighbors with at least n
+codepoints. Runtime order is Section16, then Section17; user words block both.
+
+```sh
+LAB=$(mktemp -d)
+python3 training/ambiguity/prepare.py --out "$LAB" --model js/models/base.gmdl
+cargo build --release --example analyze_batch
+for s in train dev; do
+  python3 -c "import json,sys; [print(json.loads(l)['text']) for l in open(sys.argv[1])]" "$LAB/$s.jsonl" > "$LAB/$s.txt"
+  GARU_MODEL=<model without Section17> target/release/examples/analyze_batch "$LAB/$s.txt" --json-spans > "$LAB/$s.base.jsonl"
+done
+python3 training/ambiguity/context_rules.py mine "$LAB"
+python3 training/ambiguity/context_rules.py select "$LAB"
+python3 training/ambiguity/context_rules.py export "$LAB/selected.json" js/models/base.gmdl out.gmdl --blob training/codebook_data/context_rules.bin
+```
+
+Mining uses the output of the model without Section17. Selection compares 32
+settings on the document-split dev only; fixed sets are judged afterwards with
+gate v2 (`docs/wiki/benchmarks.md`). The adopted record is `review_20261102.json`.
+It re-implements research-history #75 from its written description and is not
+the same rule file.
+
 Development and fixed-set totals improved, but some individual sentences
 regressed. The rejected lattice-injection pilot and the selected final-POS
 intervention are recorded separately in the research history and review JSON.

@@ -473,6 +473,100 @@ impl ContextCache {
     }
 }
 
+struct ContextRule {
+    source: Vec<(String, Pos)>,
+    index: usize,
+    pos: Pos,
+    guards: Vec<(u8, String)>,
+}
+
+/// Section 17: 어절 전체 최종 출력열이 학습 원래 열과 같을 때 POS 하나를 바꾸는 규칙.
+struct ContextRules {
+    entries: HashMap<String, Vec<ContextRule>>,
+}
+
+impl ContextRules {
+    const EDGE_BEFORE: u8 = 0;
+    const EDGE_AFTER: u8 = 13;
+    const EXACT_PREV: u8 = 14;
+    const EXACT_NEXT: u8 = 15;
+
+    fn from_bytes(mut data: &[u8]) -> Result<Self, String> {
+        fn take<'a>(data: &mut &'a [u8], n: usize) -> Result<&'a [u8], String> {
+            if data.len() < n { return Err("Truncated context rules".into()); }
+            let (head, tail) = data.split_at(n);
+            *data = tail;
+            Ok(head)
+        }
+        fn string(data: &mut &[u8]) -> Result<String, String> {
+            let len = u16::from_le_bytes(take(data, 2)?.try_into().unwrap()) as usize;
+            std::str::from_utf8(take(data, len)?)
+                .map(str::to_string).map_err(|_| "Invalid context rules UTF-8".into())
+        }
+        fn pos(data: &mut &[u8]) -> Result<Pos, String> {
+            let value = take(data, 1)?[0];
+            if value > 41 { return Err("Invalid context rules POS".into()); }
+            Ok(unsafe { std::mem::transmute(value) })
+        }
+        if take(&mut data, 5)? != b"GCPR\x01" {
+            return Err("Unsupported context rules".into());
+        }
+        let count = u32::from_le_bytes(take(&mut data, 4)?.try_into().unwrap());
+        let mut entries: HashMap<String, Vec<ContextRule>> = HashMap::default();
+        for _ in 0..count {
+            let surface = string(&mut data)?;
+            let num_morphs = take(&mut data, 1)?[0] as usize;
+            let mut source = Vec::with_capacity(num_morphs);
+            for _ in 0..num_morphs {
+                let form = normalize_jamo(&string(&mut data)?);
+                source.push((form, pos(&mut data)?));
+            }
+            let index = take(&mut data, 1)?[0] as usize;
+            let new_pos = pos(&mut data)?;
+            let num_guards = u16::from_le_bytes(take(&mut data, 2)?.try_into().unwrap());
+            let mut guards = Vec::with_capacity(num_guards as usize);
+            for _ in 0..num_guards {
+                let kind = take(&mut data, 1)?[0];
+                if kind > Self::EXACT_NEXT { return Err("Invalid context rules guard".into()); }
+                guards.push((kind, string(&mut data)?));
+            }
+            if surface.is_empty() || index >= source.len() || guards.is_empty()
+                || source[index].1 == new_pos {
+                return Err("Invalid context rules entry".into());
+            }
+            let rules = entries.entry(surface).or_default();
+            if rules.iter().any(|r| r.source == source) {
+                return Err("Duplicate context rules source".into());
+            }
+            rules.push(ContextRule { source, index, pos: new_pos, guards });
+        }
+        if !data.is_empty() { return Err("Trailing context rules bytes".into()); }
+        Ok(Self { entries })
+    }
+
+    /// n-gram 조건은 이웃 어절이 n자 이상이고 앞/뒤 n자가 값과 같을 때만 맞는다.
+    fn matches(guards: &[(u8, String)], previous: Option<&str>, next: Option<&str>) -> bool {
+        guards.iter().any(|(kind, value)| {
+            let n = value.chars().count();
+            let prefix = |word: Option<&str>, want: usize| n == want && word.map_or(false,
+                |w| w.chars().count() >= want && w.chars().take(want).eq(value.chars()));
+            let suffix = |word: Option<&str>, want: usize| n == want && word.map_or(false,
+                |w| w.chars().count() >= want && w.chars().rev().take(want).eq(value.chars().rev()));
+            match *kind {
+                Self::EDGE_BEFORE => previous.is_none(),
+                1..=3 => suffix(previous, *kind as usize),
+                4..=6 => prefix(next, (*kind - 3) as usize),
+                7..=9 => suffix(next, (*kind - 6) as usize),
+                10..=12 => prefix(previous, (*kind - 9) as usize),
+                Self::EDGE_AFTER => next.is_none(),
+                Self::EXACT_PREV => previous == Some(value.as_str()),
+                Self::EXACT_NEXT => next == Some(value.as_str()),
+                _ => false,
+            }
+        })
+    }
+}
+
 /// Codebook-based analyzer using lattice + Viterbi decoding.
 pub struct CodebookAnalyzer {
     suffix_entries: Vec<SuffixEntry>,
@@ -498,6 +592,8 @@ pub struct CodebookAnalyzer {
     eojeol_cache: HashMap<String, Vec<(String, Pos)>>,
     /// Optional, train-derived alternative cache (Section 16).
     context_cache: Option<ContextCache>,
+    /// Optional, train-derived one-POS rules over final eojeol outputs (Section 17).
+    context_rules: Option<ContextRules>,
     /// N-best 재순위 perceptron (Section 14, optional)
     reranker: Option<crate::rerank::Reranker>,
     /// 런타임 사용자 사전: 표면 → (POS, freq). 모델 리빌드 없이 도메인 어휘를 넣는다.
@@ -547,6 +643,7 @@ impl CodebookAnalyzer {
         let mut section13: Option<&[u8]> = None;
         let mut section14: Option<&[u8]> = None;
         let mut section16: Option<&[u8]> = None;
+        let mut section17: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -577,6 +674,7 @@ impl CodebookAnalyzer {
                 13 => section13 = Some(section_data),
                 14 => section14 = Some(section_data),
                 16 => section16 = Some(section_data),
+                17 => section17 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
@@ -593,6 +691,7 @@ impl CodebookAnalyzer {
             section13,
             section14,
             section16,
+            section17,
         )
     }
 
@@ -608,6 +707,7 @@ impl CodebookAnalyzer {
         ecache_data: Option<&[u8]>,
         rerank_data: Option<&[u8]>,
         context_data: Option<&[u8]>,
+        rules_data: Option<&[u8]>,
     ) -> Result<Self, String> {
         // Section 6: Content dict
         let content_dict = Dict::from_bytes(dict_data)?;
@@ -696,6 +796,7 @@ impl CodebookAnalyzer {
             word_bigrams,
             eojeol_cache,
             context_cache: context_data.map(ContextCache::from_bytes).transpose()?,
+            context_rules: rules_data.map(ContextRules::from_bytes).transpose()?,
             reranker: match rerank_data {
                 Some(d) => Some(crate::rerank::Reranker::from_bytes(d)?),
                 None => None,
@@ -4626,6 +4727,36 @@ impl CodebookAnalyzer {
         }
     }
 
+    /// Section 17: 어절의 최종 형태·POS·span 열이 규칙의 원래 열과 같으면 POS 하나만 바꾼다.
+    pub(crate) fn apply_context_rules(&self, text: &str, tokens: &mut [Token]) {
+        let Some(rules) = &self.context_rules else { return; };
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut byte_offset = 0;
+        for (i, &word) in words.iter().enumerate() {
+            let start = byte_offset + text[byte_offset..].find(word).unwrap_or(0);
+            byte_offset = start + word.len();
+            let Some(candidates) = rules.entries.get(word) else { continue; };
+            let char_start = text[..start].chars().count();
+            let char_end = char_start + word.chars().count();
+            let Some(first) = tokens.iter().position(|t| t.start < char_end && char_start < t.end)
+                else { continue; };
+            let count = tokens[first..].iter().take_while(|t| t.start < char_end).count();
+            let local = &mut tokens[first..first + count];
+            if !local.iter().all(|t| t.start == char_start && t.end == char_end) { continue; }
+            let Some(rule) = candidates.iter().find(|r| r.source.len() == local.len()
+                && r.source.iter().zip(local.iter()).all(|((f, p), t)| t.text == *f && t.pos == *p))
+                else { continue; };
+            let previous = i.checked_sub(1).map(|j| words[j]);
+            let next = words.get(i + 1).copied();
+            if !ContextRules::matches(&rule.guards, previous, next) { continue; }
+            if self.user_dict.contains_key(word)
+                || rule.source.iter().any(|(form, _)| self.user_dict.contains_key(form)) {
+                continue;
+            }
+            local[rule.index].pos = rule.pos;
+        }
+    }
+
     /// 토큰에 씌울 어절 단위 span을 고른다.
     ///
     /// 토큰이 한 어절 안에 있으면 그 어절 범위를 그대로 쓴다(기존 동작).
@@ -5561,5 +5692,140 @@ mod tests {
     #[test]
     fn context_cache_truncated() {
         assert!(CodebookAnalyzer::from_bytes(&context_cache_model(b"GCAC\x01")).is_err());
+    }
+
+    type RuleSpec<'a> = (&'a str, &'a [(&'a str, Pos)], u8, Pos, &'a [(u8, &'a str)]);
+
+    fn rules_blob(rules: &[RuleSpec]) -> Vec<u8> {
+        fn string(blob: &mut Vec<u8>, value: &str) {
+            blob.extend_from_slice(&(value.len() as u16).to_le_bytes());
+            blob.extend_from_slice(value.as_bytes());
+        }
+        let mut blob = b"GCPR\x01".to_vec();
+        blob.extend_from_slice(&(rules.len() as u32).to_le_bytes());
+        for (surface, source, index, pos, guards) in rules {
+            string(&mut blob, surface);
+            blob.push(source.len() as u8);
+            for (form, p) in source.iter() {
+                string(&mut blob, form);
+                blob.push(*p as u8);
+            }
+            blob.push(*index);
+            blob.push(*pos as u8);
+            blob.extend_from_slice(&(guards.len() as u16).to_le_bytes());
+            for (kind, value) in guards.iter() {
+                blob.push(*kind);
+                string(&mut blob, value);
+            }
+        }
+        blob
+    }
+
+    /// 픽스처의 Section 17을 주어진 blob으로 바꾼 raw 모델 (None이면 제거).
+    fn rules_model(blob: Option<&[u8]>) -> Vec<u8> {
+        let raw = decompress_brotli(include_bytes!("../../../models/codebook.gmdl")).unwrap();
+        let mut output = raw[..8].to_vec();
+        let mut offset = 8;
+        while offset < raw.len() {
+            let size = u32::from_le_bytes(raw[offset + 1..offset + 5].try_into().unwrap()) as usize;
+            let end = offset + 5 + size;
+            if raw[offset] != 17 { output.extend_from_slice(&raw[offset..end]); }
+            offset = end;
+        }
+        if let Some(blob) = blob {
+            output.push(17);
+            output.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            output.extend_from_slice(blob);
+        }
+        output
+    }
+
+    const SKY: RuleSpec = ("하늘을", &[("하늘", Pos::NNG), ("을", Pos::JKO)], 0, Pos::NNP,
+                           &[(ContextRules::EXACT_PREV, "나는")]);
+
+    #[test]
+    fn context_rules_guard_semantics() {
+        let g = |kind: u8, value: &str| vec![(kind, value.to_string())];
+        let m = ContextRules::matches;
+        assert!(m(&g(0, ""), None, Some("새")));
+        assert!(!m(&g(0, ""), Some("나는"), None));
+        assert!(m(&g(13, ""), Some("나는"), None));
+        assert!(m(&g(2, "나는"), Some("그나는"), None));
+        assert!(m(&g(1, "는"), Some("나는"), None));
+        assert!(!m(&g(3, "나는"), Some("나는"), None), "n-gram 길이 불일치");
+        assert!(!m(&g(3, "는"), Some("는"), None), "짧은 어절은 3-gram 조건을 만족하지 않음");
+        assert!(m(&g(4, "번"), None, Some("번째")));
+        assert!(m(&g(8, "째다"), None, Some("번째다")));
+        assert!(m(&g(10, "그"), Some("그나는"), None));
+        assert!(m(&g(14, "나는"), Some("나는"), None));
+        assert!(!m(&g(14, "나는"), Some("그나는"), None));
+        assert!(m(&g(15, "새"), None, Some("새")));
+        assert!(!m(&g(15, "새"), None, None));
+    }
+
+    #[test]
+    fn context_rules_edit_one_pos_on_exact_source() {
+        let book = CodebookAnalyzer::from_bytes(&rules_model(Some(&rules_blob(&[SKY])))).unwrap();
+        let text = "나는 하늘을 나는";
+        let mut tokens = vec![tok("나", Pos::NP, 0, 2), tok("는", Pos::JX, 0, 2),
+                              tok("하늘", Pos::NNG, 3, 6), tok("을", Pos::JKO, 3, 6),
+                              tok("나", Pos::VV, 7, 9), tok("는", Pos::ETM, 7, 9)];
+        tokens[3].score = Some(0.5);
+        let before = tokens.clone();
+        book.apply_context_rules(text, &mut tokens);
+        assert_eq!(tokens[2].pos, Pos::NNP);
+        for (i, (a, b)) in tokens.iter().zip(&before).enumerate() {
+            assert_eq!((&a.text, a.start, a.end, a.score), (&b.text, b.start, b.end, b.score));
+            if i != 2 { assert_eq!(a.pos, b.pos); }
+        }
+
+        let mut wrong_pos = before.clone();
+        wrong_pos[3].pos = Pos::JKS;
+        book.apply_context_rules(text, &mut wrong_pos);
+        assert_eq!(wrong_pos[2].pos, Pos::NNG);
+
+        let mut cross_span = before.clone();
+        cross_span[3].end = 9;
+        book.apply_context_rules(text, &mut cross_span);
+        assert_eq!(cross_span[2].pos, Pos::NNG);
+
+        let mut unguarded = before[2..].to_vec();
+        for t in &mut unguarded { t.start -= 3; t.end -= 3; }
+        book.apply_context_rules("하늘을 나는", &mut unguarded);
+        assert_eq!(unguarded[0].pos, Pos::NNG);
+    }
+
+    #[test]
+    fn context_rules_public_paths_and_user_priority() {
+        let text = "나는 하늘을 나는 새";
+        let baseline = crate::model::Analyzer::from_bytes(&rules_model(None)).unwrap();
+        let mut changed = crate::model::Analyzer::from_bytes(
+            &rules_model(Some(&rules_blob(&[SKY])))).unwrap();
+        let original = baseline.analyze(text);
+        let actual = changed.analyze(text);
+        assert_eq!(original.tokens[2].pos, Pos::NNG);
+        assert_eq!(actual.tokens[2].pos, Pos::NNP);
+        assert_eq!(actual.score.to_bits(), original.score.to_bits());
+        assert_eq!(changed.analyze_topn(text, 10)[0].tokens[2].pos, Pos::NNP);
+        let training = changed.analyze_topn_for_rerank(text, 10);
+        assert_eq!(training[0].tokens[2].pos, Pos::NNG);
+
+        changed.add_user_word("하늘", Pos::NNG, Some(1));
+        assert_eq!(changed.analyze(text).tokens[2].pos, Pos::NNG);
+        changed.clear_user_words();
+        assert_eq!(changed.analyze(text).tokens[2].pos, Pos::NNP);
+    }
+
+    #[test]
+    fn context_rules_reject_invalid() {
+        let bad = |rules: &[RuleSpec]| CodebookAnalyzer::from_bytes(
+            &rules_model(Some(&rules_blob(rules)))).is_err();
+        assert!(CodebookAnalyzer::from_bytes(&rules_model(Some(b"GCPR\x01"))).is_err());
+        assert!(CodebookAnalyzer::from_bytes(&rules_model(Some(b"GCPR\x02\0\0\0\0"))).is_err());
+        assert!(bad(&[("하늘을", &[("하늘", Pos::NNG)], 1, Pos::NNP, &[(0, "")])]), "index 범위");
+        assert!(bad(&[("하늘을", &[("하늘", Pos::NNG)], 0, Pos::NNG, &[(0, "")])]), "같은 POS");
+        assert!(bad(&[("하늘을", &[("하늘", Pos::NNG)], 0, Pos::NNP, &[])]), "조건 없음");
+        assert!(bad(&[("하늘을", &[("하늘", Pos::NNG)], 0, Pos::NNP, &[(16, "")])]), "조건 종류");
+        assert!(bad(&[SKY, SKY]), "중복 원래 열");
     }
 }

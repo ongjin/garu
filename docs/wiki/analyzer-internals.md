@@ -68,11 +68,13 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 
 **문맥 POS 교정 (GMDL Section 16)**: `apply_context_cache`는 주변 어절 조건 중 하나가 맞고 선택된 어절의 형태·POS열·문자 span이 원래 Section 13 캐시와 정확히 일치할 때만 POS 하나를 바꾼다. 형태·토큰 수·순서·span·점수와 다른 토큰은 그대로 둔다. 사용자 사전에 어절 전체나 교정 대상 형태소가 있으면 적용하지 않는다. 아크를 추가하거나 재순위를 다시 실행하지 않으며, `analyze_inner`가 조기 반환한 결과도 공개 `analyze`의 마지막 단계에서 검사한다. 규칙 정본과 학습·평가 경계는 [모델 빌드 문서](model-build.md)에 있다.
 
+**최종 출력열 POS 교정 (GMDL Section 17)**: Section 16 다음에 `apply_context_rules`가 실행된다. 어절의 모든 토큰 span이 어절 span과 같고 형태·POS열이 규칙의 원래 열과 정확히 같으며, 이웃 어절 조건(앞뒤 어절의 1~3자 접두·접미, 어절 전체, 문장 경계) 중 하나가 맞을 때 POS 하나를 바꾼다. n자 조건은 이웃 어절이 n자 이상일 때만 맞는다. 어절 전체나 원래 열의 어느 형태소라도 사용자 사전에 있으면 건너뛴다. 연쇄 적용은 없다.
+
 | 공개 Analyzer API | 후보·결과 처리 |
 |---|---|
-| `analyze` | 후보 선택과 기존 보정 → Section 16 → 옵션에 따른 표시용 자모 정규화 |
-| `analyze_topn` | 학습용 후보 각각에 Section 16 → 옵션에 따른 표시용 자모 정규화. 재순위 선택은 하지 않음 |
-| `analyze_topn_for_rerank` | Codebook N-best → `apply_rerank_rules`. Section 16·표시용 정규화 없이 실제 재순위 입력 반환 |
+| `analyze` | 후보 선택과 기존 보정 → Section 16 → Section 17 → 옵션에 따른 표시용 자모 정규화 |
+| `analyze_topn` | 학습용 후보 각각에 Section 16 → Section 17 → 옵션에 따른 표시용 자모 정규화. 재순위 선택은 하지 않음 |
+| `analyze_topn_for_rerank` | Codebook N-best → `apply_rerank_rules`. Section 16·17·표시용 정규화 없이 실제 재순위 입력 반환 |
 
 **선택적 경계 복원은 이 경로 밖에 있다.** `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`를 가져와 명시적으로 호출하며, 기존 `analyze`·`tokenize`는 띄어쓰기를 자동 복원하지 않는다. JS 구현은 `js/src/text.ts`·`js/src/boundaries.ts`·`js/src/boundary-data.ts`이고 추가 경계 가중치는 기본 GMDL과 별개다. 학습과 선택 후 검증의 한계는 [경계 모델 README](../../training/boundaries/README.md)를 따른다.
 

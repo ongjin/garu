@@ -64,6 +64,7 @@ impl Analyzer {
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
         let mut result = self.analyze_inner(text);
         self.codebook.apply_context_cache(text, &mut result.tokens);
+        self.codebook.apply_context_rules(text, &mut result.tokens);
         if self.options.normalize_jamo {
             Self::apply_jamo_normalization(&mut result.tokens);
         }
@@ -238,6 +239,7 @@ impl Analyzer {
         let mut results = self.analyze_topn_for_rerank(text, n);
         for result in &mut results {
             self.codebook.apply_context_cache(text, &mut result.tokens);
+            self.codebook.apply_context_rules(text, &mut result.tokens);
             if self.options.normalize_jamo {
                 Self::apply_jamo_normalization(&mut result.tokens);
             }

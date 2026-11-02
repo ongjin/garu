@@ -12,6 +12,15 @@ fn write_json(out: &mut impl Write, tokens: &[Token]) {
     writeln!(out).unwrap();
 }
 
+/// `--json-spans`: [형태, 품사, 시작, 끝] (trim된 입력 줄 기준 문자 위치)
+fn write_json_spans(out: &mut impl Write, tokens: &[Token]) {
+    let rows: Vec<(&str, &str, usize, usize)> = tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos.as_str(), t.start, t.end))
+        .collect();
+    serde_json::to_writer(&mut *out, &rows).unwrap();
+    writeln!(out).unwrap();
+}
+
 fn main() {
     let model_path = std::env::var("GARU_MODEL").unwrap_or_else(|_| "models/codebook.gmdl".to_string());
     let model_data = fs::read(&model_path).expect("Failed to read model");
@@ -22,6 +31,7 @@ fn main() {
     let input_path = std::env::args().nth(1).expect("Need input file path");
     let output_format = std::env::args().nth(2).unwrap_or_default();
     let json_mode = output_format == "--json";
+    let spans_mode = output_format == "--json-spans";
 
     let file = fs::File::open(&input_path).expect("Failed to open input");
     let reader = io::BufReader::new(file);
@@ -38,7 +48,9 @@ fn main() {
         }
         let result = analyzer.analyze(line);
 
-        if json_mode {
+        if spans_mode {
+            write_json_spans(&mut out, &result.tokens);
+        } else if json_mode {
             write_json(&mut out, &result.tokens);
         } else {
             let tokens: Vec<String> = result.tokens.iter()

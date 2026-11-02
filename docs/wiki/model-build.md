@@ -16,7 +16,8 @@
 | 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 251,500 |
 | 14 | N-best 재순위 perceptron 가중치 (95K sparse, ver=2 varint+int16) | 284,651 |
 | 16 | 문맥 조건부 POS 교정 (58어절, 220조건) | 3,054 |
-| — | **brotli q=11 압축 후** | **1,260,476 B** |
+| 17 | 최종 출력열 일치 POS 교정 (246규칙, 624조건, 2026-11-02) | 10,742 |
+| — | **brotli q=11 압축 후** | **1,263,894 B** |
 
 ⚠️ **Section 7 string table은 u16 오프셋 한계(65,535 B)에 거의 닿아 있다** — 현행 `MIN_SUFFIX_FREQ=75`에서 64,562 B(98.5%)라 형태를 ~140개만 더 늘려도 넘친다. 빌더는 넘칠 때만 sub-version 2(u32 오프셋)로 승격하고 그 미만은 기존 포맷 그대로 기록하므로 현행 모델은 byte-identical이다(research-history #54). 디코더는 1·2 모두 읽는다. **승격된 모델은 0.9.16 이하 런타임이 못 읽으니 배포 시 버전 게이트 확인.** 임계를 낮춰 코드북을 키우는 것 자체는 F1 이득이 없다(th=10에서 +0.03pp에 모델 +53%).
 
@@ -27,6 +28,8 @@
 **Section 14 (재순위 perceptron, 2026-07-13 채택)**: `training/rerank/` 파이프라인(prep_nikl→dump_topk k=10→train_perceptron→tune_margin)으로 학습, `export_weights.py --blob`이 gmdl 주입 + `training/codebook_data/rerank_section14.bin` blob 갱신. **빌더는 이 blob을 passthrough** (Section 13 어절 캐시와 같은 패턴 — blob 없으면 섹션 생략). 포맷은 `crates/garu-core/src/rerank.rs` 참조(FNV-1a feature hashing — feature 문자열 규칙이 `training/rerank/features.py`와 바이트 단위 동일해야 함). 섹션이 없으면 분석기는 재순위 없이 k=5로 동작(구모델 호환). **ver=2(2026-08-05)**: bucket 오름차순 차분 varint + 가중치 int16 양자화(step = max|w|/32767)로 652→244KB raw, 모델 −219KB. 디코더는 ver=1도 계속 읽는다. 기존 gmdl을 변환할 때는 `reencode_section14.py <blob> <gmdl>...`(weights.npz 불필요, 섹션만 in-place 교체). 양자화는 비트 동일이 아니므로 **변환 후 9,000문장 출력 diff로 확인할 것** — 채택 시점 실측은 v15k 9,000 + 구어 held-out 16,407 전부 byte-identical. ⚠️ 재학습 시 v15k∩NIKL 오염 3,950문장 제외 필수(prep_nikl.py가 자동 처리) + NIKL 2021 벤치는 이후 자기평가임에 유의. ⚠️ **`RERANK_TRAIN_PER_SRC=1000000000`(전체 316K)로 돌릴 것** — 기본값 40K는 train 80K짜리 축소판이라 dev pick 0.9471·nnz 43K로 배포본에 못 미친다(전체는 0.9478·nnz 95K). 학습 산출물 `training/rerank/data/`는 680MB라 gitignore 대상이고 스크립트로 재생성한다(prep 25초 + dump 3분 + preprocess 80초 + 8 epoch 2분). ⚠️ **dev pick이 동률이어도 재학습 가치가 있을 수 있다** — 사전이 바뀌면 후보 분포가 달라져 dev(NIKL)엔 안 보이고 v15k·held-out에서만 이득이 나온다(research-history #49). 반드시 export 후 실측할 것.
 
 **Section 16 (문맥 조건부 POS 교정)**: 정본은 Git으로 관리하는 `training/codebook_data/context_pos.bin`이다. 빌더는 이 blob을 그대로 기록하며, 파일이 없으면 섹션을 생략한다. `training/ambiguity/prepare.py`는 NIKL 2021의 문서 단위 train/dev 분할과 고정 평가셋의 공백 제거 중복 제외 후 train에서 대체 POS와 주변 어절 조건을 추출한다. `probe.py`는 고정 규칙을 모델에 넣어 실제 분석 결과를 비교한다. 포맷의 legacy 비용 필드 `-1.0`은 동일 모델 재현을 위해 남아 있으며 현재 추론이나 비용 탐색에는 사용하지 않는다.
+
+**Section 17 (최종 출력열 일치 POS 교정, 2026-11-02 채택)**: 정본은 `training/codebook_data/context_rules.bin`이고 빌더가 그대로 기록한다. Section 16과 달리 원래 열이 캐시 항목일 필요가 없고, 규칙마다 원래 형태·POS열과 바꿀 위치·POS를 저장한다. 재생성은 `prepare.py`의 train/dev에 대해 `analyze_batch --json-spans`로 현행 출력을 덤프한 뒤 `context_rules.py mine` → `select`(dev 32설정) → `export ... --blob`이다. 절차와 판정 기록은 `training/ambiguity/README.md`·`review_20261102.json`. 사전·캐시·재순위가 바뀌면 원래 열이 달라지므로 규칙을 다시 채굴하고 게이트 v2로 다시 판정한다.
 
 교정은 후보 생성·재순위·기존 model 보정이 끝난 뒤 적용한다. 선택된 어절의 형태·POS열·문자 span이 원래 Section 13 캐시와 모두 같고, 대체 분석이 형태를 유지한 채 POS 하나만 바꿀 때만 적용한다. 어절 전체 또는 바꿀 형태소가 사용자 사전에 있으면 건너뛴다. 다른 토큰의 형태·순서·span·점수는 바꾸지 않는다. 평가의 도메인 합계가 비음수가 되어도 개별 문장은 회귀할 수 있으며, 기존 기본 모델의 학습 노출과 고정셋의 과거 연구 노출이 있어 새로운 독립 일반화 평가로 해석하지 않는다. 실험 비교는 [연구 이력 #70](research-history.md)을 따른다.
 
@@ -117,6 +120,7 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 - `training/extract_nikl_codebook.py` — NIKL MP 골드 데이터에서 코드북 추출
 - `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합, 자동 brotli q=11 압축)
 - `training/ambiguity/{prepare,probe,context_cache}.py` — 문서 분할·문맥 POS 규칙 추출, Section 16 직렬화·실제 분석 비교
+- `training/ambiguity/context_rules.py` — 최종 출력열 기준 한 POS 규칙 채굴·dev 선택·Section 17 직렬화
 - `training/boundaries/` — 선택적 JS 띄어쓰기·문장 경계 모델 학습·선택·내보내기·공개 API 평가
 - `training/boundaries/{prepare_verifier,mine_verifier,verifier,export_verifier,eval_verifier}.py` 및 대응 `.mjs` — 원문 문단·hard negative·Q4 문맥 검증기 학습과 실제 JS 평가
 - `training/eval_nikl_mp.py` — NIKL MP 벤치마크 (Garu vs Kiwi)
@@ -126,6 +130,7 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 
 ## 이력
 
+- 2026-11-02 Section 17 최종 출력열 일치 POS 교정 채택. 모델 1,263,894B(+3,418B), SHA-256 `670a77bf4a6dc1cac120b592a7200f20fcdb3af67da194f96ded04051fbe8146`. 게이트 v2 세 세트 통과, 상세는 연구 이력 #78.
 - 2026-10-20 Section 16 문맥 POS 교정을 채택하고 학습 후보 API를 최종 교정과 분리. 기존 Section 6–14를 보존한 정규 빌드 모델은 1,260,476B(+2,042B), SHA-256 `f9ca34a2ad1d0a152f434dc21a755a802aef5a4f8d8246ff29625367d12a9ef7`. 고정 골드 모든 도메인 합계는 비음수지만 개별 문장 회귀는 남음. 선택적 JS 경계 모델을 기본 모델과 구분하고 누적 어휘 재현 기록을 현재 런타임으로 갱신. 상세는 연구 이력 #70·#71.
 - 2026-10-19 공개 사전3종 전체를 수집하고 전체 합집합 모델은 폐기, NNG1,449개를 별도 bulk supplement로 채택. 정규 빌드 동일성·55문맥 가드·고정 F1과 비용을 확인하고 기본 재현 기록을 bulk로 전환. 상세는 research-history #69.
 - 2026-10-19 어휘 94개 실험 후 문맥 회귀 6개를 보류하고 88개를 사전·두 모델에 적용. 골드 유지·구어 4문장 개선, 모델 +1,176B. 표적 원문 참조·해시와 WASM 재평가 도구 보존. 상세는 research-history #67.

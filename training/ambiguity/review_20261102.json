@@ -1,0 +1,1150 @@
+{
+ "schema": "garu-context-rules-v1",
+ "date": "2026-11-02",
+ "verdict": "adopted",
+ "hypothesis": "#75 재구현: production 최종 어절 출력열(형태·POS·span)이 학습 원래 열과 같고 이웃 어절 조건이 맞으면 POS 하나만 바꾼다. Section 16 이후 적용, 아크·분절 변경 없음.",
+ "data": {
+  "prepared_sha256": {
+   "train": "2e810a4d09ecaeb388ca6495459a06d3a4424569cf4405c0ef6be4b948f12fce",
+   "dev": "c9750959621fb1524f568a07cd2539cbc654efdb9fa19615d53cce08f7356ae1"
+  },
+  "note": "training/ambiguity/prepare.py 산출물. #75(review_20261026.json)의 prepared_sha256과 같다. 고정 골드·2025 정답은 채굴·선택에 쓰지 않았다."
+ },
+ "mining": {
+  "aligned_eojeols": 2587119,
+  "one_pos_occurrences": 91155,
+  "candidates": 1016,
+  "negative_occurrences": 262963
+ },
+ "selection": {
+  "rule": "dev micro F1 최대, NX/SX dev 비음수, 동률 시 작은 JSON brotli·적은 규칙",
+  "grid": {
+   "good": [
+    8,
+    16
+   ],
+   "docs": [
+    3,
+    5
+   ],
+   "precision": [
+    0.98,
+    1.0
+   ],
+   "ngram": [
+    1,
+    2
+   ],
+   "cap": [
+    128,
+    512
+   ]
+  },
+  "selected": {
+   "config": {
+    "good": 8,
+    "docs": 3,
+    "precision": 0.98,
+    "ngram": 1,
+    "cap": 512
+   },
+   "rules": 246,
+   "guards": 624,
+   "json_brotli": 4899,
+   "dev": {
+    "all/base": 0.9482576862781105,
+    "all/cand": 0.9495533270081581,
+    "NX/base": 0.9552759674146102,
+    "NX/cand": 0.9565516663817759,
+    "SX/base": 0.9281715713474273,
+    "SX/cand": 0.9295242848184179
+   },
+   "changes": {
+    "changed": 765,
+    "pos_edits": 800,
+    "win": 746,
+    "loss": 14,
+    "tie": 5
+   },
+   "nonnegative": true
+  },
+  "candidates": [
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 392,
+    "json_brotli": 2950,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9493254846750526,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.956338285079714,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9292550554382694
+    },
+    "changes": {
+     "changed": 631,
+     "pos_edits": 660,
+     "win": 615,
+     "loss": 13,
+     "tie": 3
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 246,
+    "guards": 624,
+    "json_brotli": 4899,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9495533270081581,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9565516663817759,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9295242848184179
+    },
+    "changes": {
+     "changed": 765,
+     "pos_edits": 800,
+     "win": 746,
+     "loss": 14,
+     "tie": 5
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 313,
+    "json_brotli": 2875,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490551344439797,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561180205098436,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288413615126752
+    },
+    "changes": {
+     "changed": 471,
+     "pos_edits": 487,
+     "win": 462,
+     "loss": 8,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 174,
+    "guards": 393,
+    "json_brotli": 3631,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9491299483444023,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561937364557366,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928913593785398
+    },
+    "changes": {
+     "changed": 515,
+     "pos_edits": 532,
+     "win": 505,
+     "loss": 8,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 392,
+    "json_brotli": 2957,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9491384499239959,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561226093550492,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9291499903143089
+    },
+    "changes": {
+     "changed": 524,
+     "pos_edits": 546,
+     "win": 510,
+     "tie": 2,
+     "loss": 12
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 246,
+    "guards": 624,
+    "json_brotli": 4924,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9493662922571013,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9563359906571112,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9294192196944575
+    },
+    "changes": {
+     "changed": 658,
+     "pos_edits": 686,
+     "win": 641,
+     "tie": 4,
+     "loss": 13
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 313,
+    "json_brotli": 2887,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489140082227278,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9559597053502493,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9287494295292097
+    },
+    "changes": {
+     "changed": 388,
+     "pos_edits": 400,
+     "win": 381,
+     "tie": 1,
+     "loss": 6
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 174,
+    "guards": 393,
+    "json_brotli": 3642,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489888221231505,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560354212961423,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288216618019326
+    },
+    "changes": {
+     "changed": 432,
+     "pos_edits": 445,
+     "win": 424,
+     "tie": 2,
+     "loss": 6
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 385,
+    "json_brotli": 2930,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.94932888530689,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9563336962345084,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9292813217192594
+    },
+    "changes": {
+     "changed": 633,
+     "pos_edits": 662,
+     "win": 617,
+     "loss": 13,
+     "tie": 3
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 242,
+    "guards": 605,
+    "json_brotli": 4781,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.949548226060402,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9565470775365702,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9295177182481704
+    },
+    "changes": {
+     "changed": 762,
+     "pos_edits": 797,
+     "win": 743,
+     "loss": 14,
+     "tie": 5
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 309,
+    "json_brotli": 2880,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490636360235731,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561249037776521,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288544946531702
+    },
+    "changes": {
+     "changed": 477,
+     "pos_edits": 493,
+     "win": 467,
+     "loss": 8,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 169,
+    "guards": 382,
+    "json_brotli": 3551,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9491282480284837,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561914420331338,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928913593785398
+    },
+    "changes": {
+     "changed": 514,
+     "pos_edits": 531,
+     "win": 504,
+     "loss": 8,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 385,
+    "json_brotli": 2938,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9491418505558332,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9561180205098436,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.929176256595299
+    },
+    "changes": {
+     "changed": 526,
+     "pos_edits": 548,
+     "win": 512,
+     "tie": 2,
+     "loss": 12
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 242,
+    "guards": 605,
+    "json_brotli": 4807,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9493611913093453,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9563314018119056,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.92941265312421
+    },
+    "changes": {
+     "changed": 655,
+     "pos_edits": 683,
+     "win": 638,
+     "tie": 4,
+     "loss": 13
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 128,
+    "guards": 309,
+    "json_brotli": 2881,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489225098023213,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9559665886180578,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9287625626697048
+    },
+    "changes": {
+     "changed": 394,
+     "pos_edits": 406,
+     "win": 386,
+     "tie": 2,
+     "loss": 6
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 8,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 169,
+    "guards": 382,
+    "json_brotli": 3552,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489871218072318,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560331268735395,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288216618019326
+    },
+    "changes": {
+     "changed": 431,
+     "pos_edits": 444,
+     "win": 423,
+     "tie": 2,
+     "loss": 6
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 100,
+    "guards": 239,
+    "json_brotli": 2168,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9492098631925812,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9562786300920407,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9289792594878732
+    },
+    "changes": {
+     "changed": 558,
+     "pos_edits": 581,
+     "win": 547,
+     "loss": 9,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 100,
+    "guards": 239,
+    "json_brotli": 2168,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9492098631925812,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9562786300920407,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9289792594878732
+    },
+    "changes": {
+     "changed": 558,
+     "pos_edits": 581,
+     "win": 547,
+     "loss": 9,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 64,
+    "guards": 152,
+    "json_brotli": 1544,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489208094864026,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560010049571,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9286574975457443
+    },
+    "changes": {
+     "changed": 388,
+     "pos_edits": 401,
+     "win": 382,
+     "loss": 5,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 64,
+    "guards": 152,
+    "json_brotli": 1544,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489208094864026,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560010049571,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9286574975457443
+    },
+    "changes": {
+     "changed": 388,
+     "pos_edits": 401,
+     "win": 382,
+     "loss": 5,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 100,
+    "guards": 237,
+    "json_brotli": 2184,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490228284415244,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560629543673761,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288741943639127
+    },
+    "changes": {
+     "changed": 448,
+     "pos_edits": 467,
+     "win": 439,
+     "tie": 2,
+     "loss": 7
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 100,
+    "guards": 237,
+    "json_brotli": 2184,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490228284415244,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560629543673761,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288741943639127
+    },
+    "changes": {
+     "changed": 448,
+     "pos_edits": 467,
+     "win": 439,
+     "tie": 2,
+     "loss": 7
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 64,
+    "guards": 152,
+    "json_brotli": 1576,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9487796832651507,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9558426897975058,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928565565562279
+    },
+    "changes": {
+     "changed": 304,
+     "pos_edits": 314,
+     "win": 300,
+     "loss": 3,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 3,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 64,
+    "guards": 152,
+    "json_brotli": 1576,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9487796832651507,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9558426897975058,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928565565562279
+    },
+    "changes": {
+     "changed": 304,
+     "pos_edits": 314,
+     "win": 300,
+     "loss": 3,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 98,
+    "guards": 233,
+    "json_brotli": 2131,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9492098631925812,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9562786300920407,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9289792594878732
+    },
+    "changes": {
+     "changed": 558,
+     "pos_edits": 581,
+     "win": 547,
+     "loss": 9,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 98,
+    "guards": 233,
+    "json_brotli": 2131,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9492098631925812,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9562786300920407,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9289792594878732
+    },
+    "changes": {
+     "changed": 558,
+     "pos_edits": 581,
+     "win": 547,
+     "loss": 9,
+     "tie": 2
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 62,
+    "guards": 148,
+    "json_brotli": 1509,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489208094864026,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560010049571,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9286574975457443
+    },
+    "changes": {
+     "changed": 388,
+     "pos_edits": 401,
+     "win": 382,
+     "loss": 5,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 0.98,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 62,
+    "guards": 148,
+    "json_brotli": 1509,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9489208094864026,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560010049571,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9286574975457443
+    },
+    "changes": {
+     "changed": 388,
+     "pos_edits": 401,
+     "win": 382,
+     "loss": 5,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 128
+    },
+    "rules": 98,
+    "guards": 231,
+    "json_brotli": 2145,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490228284415244,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560629543673761,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288741943639127
+    },
+    "changes": {
+     "changed": 448,
+     "pos_edits": 467,
+     "win": 439,
+     "tie": 2,
+     "loss": 7
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 1,
+     "cap": 512
+    },
+    "rules": 98,
+    "guards": 231,
+    "json_brotli": 2145,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9490228284415244,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9560629543673761,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.9288741943639127
+    },
+    "changes": {
+     "changed": 448,
+     "pos_edits": 467,
+     "win": 439,
+     "tie": 2,
+     "loss": 7
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 128
+    },
+    "rules": 62,
+    "guards": 148,
+    "json_brotli": 1544,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9487796832651507,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9558426897975058,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928565565562279
+    },
+    "changes": {
+     "changed": 304,
+     "pos_edits": 314,
+     "win": 300,
+     "loss": 3,
+     "tie": 1
+    },
+    "nonnegative": true
+   },
+   {
+    "config": {
+     "good": 16,
+     "docs": 5,
+     "precision": 1.0,
+     "ngram": 2,
+     "cap": 512
+    },
+    "rules": 62,
+    "guards": 148,
+    "json_brotli": 1544,
+    "dev": {
+     "all/base": 0.9482576862781105,
+     "all/cand": 0.9487796832651507,
+     "NX/base": 0.9552759674146102,
+     "NX/cand": 0.9558426897975058,
+     "SX/base": 0.9281715713474273,
+     "SX/cand": 0.928565565562279
+    },
+    "changes": {
+     "changed": 304,
+     "pos_edits": 314,
+     "win": 300,
+     "loss": 3,
+     "tie": 1
+    },
+    "nonnegative": true
+   }
+  ]
+ },
+ "parity": {
+  "dev_native_python_equal_rows": 27748,
+  "fixed_wasm_native_equal_rows": 39172
+ },
+ "gate_v2": {
+  "subsets": {
+   "gold/SNS": {
+    "delta_pp": 0.015382248884787675,
+    "lo_pp": 0.0,
+    "hi_pp": 0.07669519632214274,
+    "significant_regression": false
+   },
+   "gold/all": {
+    "delta_pp": 0.03582909521582245,
+    "lo_pp": 0.014889425806340863,
+    "hi_pp": 0.05826968105917843,
+    "significant_regression": false
+   },
+   "gold/구어": {
+    "delta_pp": 0.05332520758741799,
+    "lo_pp": -0.003807058244867612,
+    "hi_pp": 0.11416818543951095,
+    "significant_regression": false
+   },
+   "gold/기술": {
+    "delta_pp": 0.0,
+    "lo_pp": 0.0,
+    "hi_pp": 0.0,
+    "significant_regression": false
+   },
+   "gold/뉴스": {
+    "delta_pp": 0.04647665914837562,
+    "lo_pp": 0.010865841360459245,
+    "hi_pp": 0.08798599658332996,
+    "significant_regression": false
+   },
+   "gold/문학": {
+    "delta_pp": -0.017839621800019856,
+    "lo_pp": -0.08908086697233787,
+    "hi_pp": 0.0,
+    "significant_regression": false
+   },
+   "gold/엣지케이스": {
+    "delta_pp": 0.0,
+    "lo_pp": 0.0,
+    "hi_pp": 0.0,
+    "significant_regression": false
+   },
+   "gold/일상": {
+    "delta_pp": 0.06674676278199954,
+    "lo_pp": 0.0,
+    "hi_pp": 0.1615590186815033,
+    "significant_regression": false
+   },
+   "nx25/IT/과학": {
+    "delta_pp": 0.07017410765087773,
+    "lo_pp": 0.033303433344357494,
+    "hi_pp": 0.12258424662394676,
+    "significant_regression": false
+   },
+   "nx25/all": {
+    "delta_pp": 0.08659048913268741,
+    "lo_pp": 0.07048322514921648,
+    "hi_pp": 0.10419317682053555,
+    "significant_regression": false
+   },
+   "nx25/경제": {
+    "delta_pp": 0.0892990028278029,
+    "lo_pp": 0.05392797612397143,
+    "hi_pp": 0.13190065496775066,
+    "significant_regression": false
+   },
+   "nx25/문화": {
+    "delta_pp": 0.0642567153135487,
+    "lo_pp": 0.03142027962179562,
+    "hi_pp": 0.10145315169280067,
+    "significant_regression": false
+   },
+   "nx25/미용/건강": {
+    "delta_pp": 0.0684488021459595,
+    "lo_pp": 0.03544741828901097,
+    "hi_pp": 0.10465500749510621,
+    "significant_regression": false
+   },
+   "nx25/사회": {
+    "delta_pp": 0.1534905393182462,
+    "lo_pp": 0.07941027412666431,
+    "hi_pp": 0.23666720757390527,
+    "significant_regression": false
+   },
+   "nx25/생활": {
+    "delta_pp": 0.07014952925973317,
+    "lo_pp": 0.03555564010223718,
+    "hi_pp": 0.10777477776598517,
+    "significant_regression": false
+   },
+   "nx25/스포츠": {
+    "delta_pp": 0.042434249974621085,
+    "lo_pp": 0.01368222746967775,
+    "hi_pp": 0.07552398710155633,
+    "significant_regression": false
+   },
+   "nx25/연예": {
+    "delta_pp": 0.04753503423435834,
+    "lo_pp": 0.024424335076632723,
+    "hi_pp": 0.07561218733071087,
+    "significant_regression": false
+   },
+   "nx25/정치": {
+    "delta_pp": 0.1734278389383226,
+    "lo_pp": 0.10339676078566919,
+    "hi_pp": 0.26538763260270387,
+    "significant_regression": false
+   },
+   "sx25/all": {
+    "delta_pp": 0.0629647826522417,
+    "lo_pp": 0.04469425467450167,
+    "hi_pp": 0.08329845352101756,
+    "significant_regression": false
+   }
+  },
+  "heldout_pooled": {
+   "delta_pp": 0.07943695089207559,
+   "lo_pp": 0.07054637233988803,
+   "hi_pp": 0.08872785153338919
+  },
+  "regressions": [],
+  "benefit": true,
+  "pass": true,
+  "changes": {
+   "gold": {
+    "win": 45,
+    "loss": 11
+   },
+   "sx25": {
+    "win": 141,
+    "loss": 14
+   },
+   "nx25": {
+    "win": 417,
+    "loss": 17
+   }
+  }
+ },
+ "fixed_f1_percent": {
+  "gold": [
+   96.053823,
+   96.089652
+  ],
+  "sx25": [
+   91.227384,
+   91.290349
+  ],
+  "nx25": [
+   86.331339,
+   86.41793
+  ]
+ },
+ "cost": {
+  "model_bytes": [
+   1260476,
+   1263894
+  ],
+  "section17_raw_bytes": 10742,
+  "wasm_raw_bytes": [
+   424696,
+   433259
+  ],
+  "wasm_gzip9_bytes": [
+   181887,
+   184681
+  ],
+  "native_gold9000_time_ratio_median": 1.004,
+  "wasm_node_gold9000_time_ratio_median": 0.9987
+ },
+ "hashes": {
+  "model": "670a77bf4a6dc1cac120b592a7200f20fcdb3af67da194f96ded04051fbe8146",
+  "section17_blob": "52cb57b5621112c5afad0fc26b540a9e2e6439015b13fbc3a6bec7d677b98c4c"
+ },
+ "comparison_with_75": "정렬 어절 수는 #75와 같고(2,587,119) 같은 설정(good8·docs3·p0.98·ngram1·cap512)이 선택됐다. 후보 정의 세부가 기록되지 않아 규칙은 260→246개로 동일 산출물이 아니다."
+}

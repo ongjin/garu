@@ -3,9 +3,9 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
-- **F1 96.054%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 91.227% — 2026-10-20 실측, 연구 선택에 노출된 고정셋
-- **기본 모델 1,260,476 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14와 문맥 POS 교정 Section16 포함)
-- **WASM** — raw 424,696 B / gzip 181,869 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70 참조.
+- **F1 96.090%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 91.290% / 2025 문어 held-out 86.418% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 공개 README·CHANGELOG 수치는 릴리스 때 갱신
+- **기본 모델 1,263,894 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14와 문맥 POS 교정 Section16·17 포함)
+- **WASM** — raw 433,259 B / `gzip -9` 184,681 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78 참조.
 - **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74 참조.
 
 ### Purpose (영문 원문)
@@ -55,7 +55,7 @@ Primary constraints:
            → 문장 수준 Trigram N-best Viterbi (top-10)
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
            → 재순위 perceptron (Section 14, 확신 마진 τ=4 넘을 때만 교체)
-           → 학습 문맥 조건에 따른 최종 POS 교정 (Section16, 형태·경계 유지)
+           → 학습 문맥 조건에 따른 최종 POS 교정 (Section16 캐시 일치 → Section17 최종 출력열 일치, 형태·경계 유지)
            → 출력
 ```
 
@@ -132,7 +132,7 @@ Do not restart from approaches already shown to be poor fits unless the goal is 
 - Extending final one-POS corrections beyond exact cache matches improved aggregate fixed F1 but regressed literature, so the tested rules were not adopted. Distinguish absent cache surfaces from cached surfaces with different final analyses. Isolated evaluation also needs the ignored `content_dict.txt` used by the 2025 reference converter; matching predictions alone does not ensure matching references. See research-history #75.
 - Joint selection among spacing alternatives improved morphological F1 on synthetic whitespace-deleted inputs, but regressed normal text and some domains while increasing loaded Node/WASM cost. It also lowered spacing-boundary F1 because it often retained the unspaced input. Do not describe it as better spacing restoration or enable it automatically. See research-history #76.
 
-- Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. #75 passes partially (no NX rules preserved). A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing. See research-history #77.
+- Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing (#77). A re-implementation of #75 passed gate v2 on all three sets and ships as Section 17; it is not byte-identical to the deleted #75 rules (#78).
 
 Strong historical wins:
 

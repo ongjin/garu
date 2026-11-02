@@ -1547,6 +1547,14 @@ def main():
         write_section(buf, 16, context_data)
         print(f"  Context POS: {len(context_data):,} bytes")
 
+    # Section 17: learned one-POS rules over final eojeol outputs (optional).
+    # 갱신은 training/ambiguity/context_rules.py export ... --blob 으로 재생성
+    rules_path = DATA_DIR / "context_rules.bin"
+    if rules_path.exists():
+        rules_data = rules_path.read_bytes()
+        write_section(buf, 17, rules_data)
+        print(f"  Context POS rules: {len(rules_data):,} bytes")
+
     # Write output with brotli compression (q=11, max)
     import brotli as _brotli
     raw_bytes = bytes(buf)
