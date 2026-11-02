@@ -44,6 +44,12 @@ node -e 'new WebAssembly.Module(require("fs").readFileSync("js/pkg/garu_wasm_bg.
 #     WASM 없는 반쪽 패키지가 배포된다(파일 48개 → 11개, 1.7MB → 1.3MB).
 rm -f js/pkg/.gitignore
 
+# 2d. 이전 빌드가 남긴 snippet 폴더 삭제 — glue(js/pkg/garu_wasm.js)가 import하는 폴더만 남긴다.
+#     wasm-pack은 해시가 바뀐 snippets/garu-core-*를 지우지 않고 npm은 남은 폴더를 모두 담는다
+#     (0.11.0은 쓰지 않는 snippet 2개를 포함해 배포, 0.12.0에서 정리).
+keep=$(grep -o 'snippets/garu-core-[0-9a-f]*' js/pkg/garu_wasm.js | sort -u | cut -d/ -f2)
+for d in js/pkg/snippets/garu-core-*; do [ "$(basename "$d")" = "$keep" ] || rm -rf "$d"; done
+
 # 3. TypeScript 빌드
 (cd js && npx tsc)
 
