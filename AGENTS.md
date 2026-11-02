@@ -3,7 +3,7 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron + 구어 입력용 탐색 비용 보정으로 동작 (CNN 폐기).
-- **F1 96.183%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.085% / 2025 문어 held-out 86.422% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 미배포(CHANGELOG Unreleased)
+- **F1 96.183%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.085% / 2025 문어 held-out 86.422% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 0.12.0 배포본
 - **기본 모델 1,343,482 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18 포함)
 - **WASM** — raw 447,163 B / `gzip -9` 190,502 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78·#79 참조.
 - **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74 참조.
