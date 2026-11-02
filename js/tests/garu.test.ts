@@ -1,5 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Garu } from '../src/node';
+
+describe('Garu.load (node)', () => {
+  it('initializes WASM without deprecated-parameter warnings', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const garu = await Garu.load();
+      expect(garu.isLoaded()).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe('Garu API surface', () => {
   it('Garu class is defined', () => {

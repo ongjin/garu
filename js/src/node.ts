@@ -29,7 +29,7 @@ export class Garu extends GaruBase {
     const { join, dirname } = await import('path');
     const dir = dirname(fileURLToPath(import.meta.url));
     const wasmBytes = await readFile(join(dir, '..', 'pkg', 'garu_wasm_bg.wasm'));
-    await wasmModule.default(wasmBytes);
+    await wasmModule.default({ module_or_path: wasmBytes });
 
     let modelBytes: Uint8Array;
     if (options?.modelData) {
