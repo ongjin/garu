@@ -173,6 +173,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data_dir", type=Path)
     ap.add_argument("--epochs", type=int, default=8)
+    ap.add_argument("--seed", type=int, default=42, help="학습 순서 셔플 seed")
+    ap.add_argument("--out", type=Path, default=None, help="기본: <data_dir>/weights.npz")
     args = ap.parse_args()
 
     from features import DIM
@@ -194,7 +196,7 @@ def main():
     w = np.zeros(DIM, dtype=np.float64)
     wa = np.zeros(DIM, dtype=np.float64)
     step = 0
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(args.seed)
     best = (-1.0, None)
 
     for epoch in range(args.epochs):
@@ -225,8 +227,9 @@ def main():
         print(f"epoch {epoch+1}: updates={updates}  dev pick={ev['pick']:.4f} "
               f"rank1={ev['rank1']:.4f} oracle={ev['oracle']:.4f}{marker}")
 
-    np.savez_compressed(args.data_dir / "weights.npz", w=best[1])
-    print(f"saved weights.npz (dev pick={best[0]:.4f})")
+    out = args.out or args.data_dir / "weights.npz"
+    np.savez_compressed(out, w=best[1])
+    print(f"saved {out} (dev pick={best[0]:.4f})")
 
 
 if __name__ == "__main__":

@@ -99,6 +99,9 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 # 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.910. 학습 사용 금지)
 python3 training/eval_nikl2025_guueh.py
 
+# 채택 게이트 v2 (gold·2025 SX·2025 NX paired bootstrap, 규칙은 benchmarks.md)
+python3 training/gate/score.py predict --model <cand.gmdl> --out <dir> && python3 training/gate/gate.py <base_dir> <dir>
+
 # 단일 문장 분석 (디버깅): GARU_MODEL 지정 + analyze_batch 예제
 GARU_MODEL=js/models/base.gmdl cargo run -q --release --example analyze_batch <입력파일>
 ```
