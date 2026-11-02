@@ -1555,6 +1555,14 @@ def main():
         write_section(buf, 17, rules_data)
         print(f"  Context POS rules: {len(rules_data):,} bytes")
 
+    # Section 18: learned arc-cost correction before Viterbi, gated by a spoken router (optional).
+    # 갱신은 training/search/export.py ... --router ... --blob 으로 재생성
+    search_path = DATA_DIR / "search_cost.bin"
+    if search_path.exists():
+        search_data = search_path.read_bytes()
+        write_section(buf, 18, search_data)
+        print(f"  Search cost: {len(search_data):,} bytes")
+
     # Write output with brotli compression (q=11, max)
     import brotli as _brotli
     raw_bytes = bytes(buf)

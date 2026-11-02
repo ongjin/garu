@@ -362,6 +362,20 @@ struct LatticeArc {
     cost: f32,
 }
 
+/// 연구용 래티스: Section 18 학습이 아크 비용을 바꿔 가며 다시 탐색할 때 쓴다.
+#[doc(hidden)]
+pub struct LabLattice {
+    arcs: Vec<LatticeArc>,
+    base: Vec<f32>,
+    features: Vec<Vec<u32>>,
+}
+
+impl LabLattice {
+    pub fn features(&self, arc: usize) -> &[u32] {
+        &self.features[arc]
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Viterbi backpointer
 // ---------------------------------------------------------------------------
@@ -594,6 +608,8 @@ pub struct CodebookAnalyzer {
     context_cache: Option<ContextCache>,
     /// Optional, train-derived one-POS rules over final eojeol outputs (Section 17).
     context_rules: Option<ContextRules>,
+    /// Optional learned arc-cost correction before Viterbi (Section 18).
+    search_cost: Option<crate::search::SearchCost>,
     /// N-best 재순위 perceptron (Section 14, optional)
     reranker: Option<crate::rerank::Reranker>,
     /// 런타임 사용자 사전: 표면 → (POS, freq). 모델 리빌드 없이 도메인 어휘를 넣는다.
@@ -644,6 +660,7 @@ impl CodebookAnalyzer {
         let mut section14: Option<&[u8]> = None;
         let mut section16: Option<&[u8]> = None;
         let mut section17: Option<&[u8]> = None;
+        let mut section18: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -675,6 +692,7 @@ impl CodebookAnalyzer {
                 14 => section14 = Some(section_data),
                 16 => section16 = Some(section_data),
                 17 => section17 = Some(section_data),
+                18 => section18 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
@@ -692,6 +710,7 @@ impl CodebookAnalyzer {
             section14,
             section16,
             section17,
+            section18,
         )
     }
 
@@ -708,6 +727,7 @@ impl CodebookAnalyzer {
         rerank_data: Option<&[u8]>,
         context_data: Option<&[u8]>,
         rules_data: Option<&[u8]>,
+        search_data: Option<&[u8]>,
     ) -> Result<Self, String> {
         // Section 6: Content dict
         let content_dict = Dict::from_bytes(dict_data)?;
@@ -797,6 +817,7 @@ impl CodebookAnalyzer {
             eojeol_cache,
             context_cache: context_data.map(ContextCache::from_bytes).transpose()?,
             context_rules: rules_data.map(ContextRules::from_bytes).transpose()?,
+            search_cost: search_data.map(crate::search::SearchCost::from_bytes).transpose()?,
             reranker: match rerank_data {
                 Some(d) => Some(crate::rerank::Reranker::from_bytes(d)?),
                 None => None,
@@ -2747,12 +2768,19 @@ impl CodebookAnalyzer {
 
     /// N-best Viterbi decoding. Returns top `top_k` distinct paths sorted by cost.
     fn viterbi_nbest(&self, text: &str, arcs: &[LatticeArc], top_k: usize) -> Vec<(Vec<Token>, f32)> {
+        self.viterbi_nbest_paths(text, arcs, top_k).into_iter()
+            .map(|(tokens, cost, _)| (tokens, cost)).collect()
+    }
+
+    /// `viterbi_nbest`와 같고, 각 결과를 만든 아크 인덱스 열도 돌려준다(fallback은 빈 열).
+    fn viterbi_nbest_paths(&self, text: &str, arcs: &[LatticeArc], top_k: usize)
+        -> Vec<(Vec<Token>, f32, Vec<usize>)> {
         // Backpointer::prev_rank가 u16이라 비현실적으로 큰 k에서 wrap하지 않도록 상한.
         let top_k = top_k.min(u16::MAX as usize);
         let chars: Vec<char> = text.chars().collect();
         let n = chars.len();
         if n == 0 {
-            return vec![(Vec::new(), 0.0)];
+            return vec![(Vec::new(), 0.0, Vec::new())];
         }
 
         let mut arcs_ending_at: Vec<Vec<usize>> = vec![Vec::new(); n + 1];
@@ -2905,7 +2933,8 @@ impl CodebookAnalyzer {
         // Collect global top-N from final states
         let final_states = &dp[n];
         if final_states.is_empty() {
-            return vec![self.fallback_tokenize(text)];
+            let (tokens, cost) = self.fallback_tokenize(text);
+            return vec![(tokens, cost, Vec::new())];
         }
 
         let mut candidates: Vec<(f32, (u8, u8), usize)> = Vec::new();
@@ -2954,73 +2983,80 @@ impl CodebookAnalyzer {
             }
             path_arcs.reverse();
 
-            // Build tokens
-            let mut tokens = Vec::new();
-            for &ai in &path_arcs {
-                let arc = &arcs[ai];
-                for (form, pos) in &arc.morphemes {
-                    tokens.push(Token {
-                        text: normalize_jamo(form), pos: *pos,
-                        start: arc.start, end: arc.end, score: None,
-                    });
-                }
-            }
-
-            // Inline post-processing (same as viterbi)
-            let mut tokens = Self::merge_sl_sn_tokens(tokens);
-            for i in 1..tokens.len() {
-                if tokens[i].pos == Pos::EP && (tokens[i].text == "었" || tokens[i].text == "었었") {
-                    if let Some(last_char) = tokens[i - 1].text.chars().last() {
-                        let code = last_char as u32;
-                        if code >= 0xAC00 && code <= 0xD7A3 {
-                            let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
-                            if vowel == 0 || vowel == 8 {
-                                tokens[i].text = if tokens[i].text == "었" { "았".to_string() } else { "았었".to_string() };
-                            }
-                        }
-                    }
-                }
-                if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF) && tokens[i].text.starts_with("어") {
-                    if tokens[i - 1].pos == Pos::EP {
-                        continue;
-                    }
-                    if is_pieup_irregular_keeps_eo(&tokens[i - 1], &chars) {
-                        continue;
-                    }
-                    if let Some(last_char) = tokens[i - 1].text.chars().last() {
-                        let code = last_char as u32;
-                        if code >= 0xAC00 && code <= 0xD7A3 {
-                            let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
-                            if vowel == 0 || vowel == 8 {
-                                tokens[i].text = tokens[i].text.replacen("어", "아", 1);
-                            }
-                        }
-                    }
-                }
-                if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
-                    && tokens[i - 1].pos == Pos::EP
-                    && tokens[i].text.starts_with("아")
-                {
-                    tokens[i].text = tokens[i].text.replacen("아", "어", 1);
-                }
-            }
-            Self::fix_xsv_xsa(&mut tokens);
-            Self::merge_ec_ef_vowel(&mut tokens);
+            let tokens = Self::path_tokens(arcs, &path_arcs, &chars);
 
             // Dedup: skip if identical to a previous result
-            let dominated = results.iter().any(|(prev_tokens, _): &(Vec<Token>, f32)| {
+            let dominated = results.iter().any(|(prev_tokens, _, _): &(Vec<Token>, f32, Vec<usize>)| {
                 prev_tokens.len() == tokens.len()
                     && prev_tokens.iter().zip(tokens.iter()).all(|(a, b)| a.text == b.text && a.pos == b.pos)
             });
             if !dominated {
-                results.push((tokens, total_cost));
+                results.push((tokens, total_cost, path_arcs));
             }
         }
 
         if results.is_empty() {
-            results.push(self.fallback_tokenize(text));
+            let (tokens, cost) = self.fallback_tokenize(text);
+            results.push((tokens, cost, Vec::new()));
         }
         results
+    }
+
+    /// 아크 경로 → 원시 토큰 (N-best 역추적과 같은 인라인 정규화 포함).
+    fn path_tokens(arcs: &[LatticeArc], path_arcs: &[usize], chars: &[char]) -> Vec<Token> {
+        // Build tokens
+        let mut tokens = Vec::new();
+        for &ai in path_arcs {
+            let arc = &arcs[ai];
+            for (form, pos) in &arc.morphemes {
+                tokens.push(Token {
+                    text: normalize_jamo(form), pos: *pos,
+                    start: arc.start, end: arc.end, score: None,
+                });
+            }
+        }
+
+        // Inline post-processing (same as viterbi)
+        let mut tokens = Self::merge_sl_sn_tokens(tokens);
+        for i in 1..tokens.len() {
+            if tokens[i].pos == Pos::EP && (tokens[i].text == "었" || tokens[i].text == "었었") {
+                if let Some(last_char) = tokens[i - 1].text.chars().last() {
+                    let code = last_char as u32;
+                    if code >= 0xAC00 && code <= 0xD7A3 {
+                        let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                        if vowel == 0 || vowel == 8 {
+                            tokens[i].text = if tokens[i].text == "었" { "았".to_string() } else { "았었".to_string() };
+                        }
+                    }
+                }
+            }
+            if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF) && tokens[i].text.starts_with("어") {
+                if tokens[i - 1].pos == Pos::EP {
+                    continue;
+                }
+                if is_pieup_irregular_keeps_eo(&tokens[i - 1], &chars) {
+                    continue;
+                }
+                if let Some(last_char) = tokens[i - 1].text.chars().last() {
+                    let code = last_char as u32;
+                    if code >= 0xAC00 && code <= 0xD7A3 {
+                        let vowel = ((code - 0xAC00) % (21 * 28)) / 28;
+                        if vowel == 0 || vowel == 8 {
+                            tokens[i].text = tokens[i].text.replacen("어", "아", 1);
+                        }
+                    }
+                }
+            }
+            if (tokens[i].pos == Pos::EC || tokens[i].pos == Pos::EF)
+                && tokens[i - 1].pos == Pos::EP
+                && tokens[i].text.starts_with("아")
+            {
+                tokens[i].text = tokens[i].text.replacen("아", "어", 1);
+            }
+        }
+        Self::fix_xsv_xsa(&mut tokens);
+        Self::merge_ec_ef_vowel(&mut tokens);
+        tokens
     }
 
     /// Merge vowel EC + EF into a single EF when the EC is 어/아 and the
@@ -4692,6 +4728,117 @@ impl CodebookAnalyzer {
 
     }
 
+    fn arc_feature_list(chars: &[char], arc: &LatticeArc, out: &mut Vec<u32>) {
+        let at_start = arc.start == 0 || chars.get(arc.start - 1).map_or(true, |c| c.is_whitespace());
+        let at_end = chars.get(arc.end).map_or(true, |c| c.is_whitespace());
+        crate::search::arc_features(&arc.morphemes, arc.end.saturating_sub(arc.start),
+                                    at_start, at_end, out);
+    }
+
+    /// Section 18: 아크 비용에 학습된 선형 보정을 더한다.
+    fn apply_search_costs(&self, text: &str, arcs: &mut [LatticeArc]) {
+        let Some(search) = &self.search_cost else { return; };
+        if !search.applies(text) { return; }
+        let chars: Vec<char> = text.chars().collect();
+        let mut features = Vec::new();
+        for arc in arcs.iter_mut() {
+            features.clear();
+            Self::arc_feature_list(&chars, arc, &mut features);
+            arc.cost += search.delta(&features);
+        }
+    }
+
+    /// 연구용: 탐색 비용 보정 없이 만든 래티스와 아크별 feature.
+    #[doc(hidden)]
+    pub fn lab_lattice(&self, text: &str) -> LabLattice {
+        let mut arcs = self.build_lattice(text);
+        self.inject_cache_arcs(text, &mut arcs);
+        let chars: Vec<char> = text.chars().collect();
+        let features = arcs.iter().map(|arc| {
+            let mut out = Vec::new();
+            Self::arc_feature_list(&chars, arc, &mut out);
+            out
+        }).collect();
+        let base = arcs.iter().map(|a| a.cost).collect();
+        LabLattice { arcs, base, features }
+    }
+
+    /// 연구용: `base + scale × w·φ` 비용으로 rank1 경로의 아크 인덱스 열.
+    #[doc(hidden)]
+    pub fn lab_best(&self, text: &str, lat: &mut LabLattice, weights: &[f32], scale: f32) -> Vec<usize> {
+        for (i, arc) in lat.arcs.iter_mut().enumerate() {
+            let sum: f32 = lat.features[i].iter().map(|&f| weights[f as usize]).sum();
+            arc.cost = lat.base[i] + scale * sum;
+        }
+        self.viterbi_nbest_paths(text, &lat.arcs, 1).into_iter().next()
+            .map(|(_, _, path)| path).unwrap_or_default()
+    }
+
+    /// 연구용: 아크 형태소를 이어 붙이면 정답 형태소열과 같아지는 최소 기본 비용 경로.
+    /// 같음은 자모 정규화와 EP·어미의 아/어 교체만 허용한다. 후처리 결과는 따로 확인한다.
+    #[doc(hidden)]
+    pub fn lab_gold(&self, text: &str, lat: &LabLattice, gold: &[(String, Pos)]) -> Option<Vec<usize>> {
+        fn canon(form: &str, pos: Pos) -> (String, Pos) {
+            let f = normalize_jamo(form);
+            let f = match pos {
+                Pos::EP if f.starts_with('았') || f.starts_with('였') => format!("었{}", &f[3..]),
+                Pos::EC | Pos::EF if f.starts_with('아') => format!("어{}", &f[3..]),
+                _ => f,
+            };
+            (f, pos)
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let (n, m) = (chars.len(), gold.len());
+        let goal: Vec<(String, Pos)> = gold.iter().map(|(f, p)| canon(f, *p)).collect();
+        let keys: Vec<Vec<(String, Pos)>> = lat.arcs.iter()
+            .map(|a| a.morphemes.iter().map(|(f, p)| canon(f, *p)).collect()).collect();
+        let mut from: Vec<Vec<usize>> = vec![Vec::new(); n + 1];
+        for (i, a) in lat.arcs.iter().enumerate() {
+            if a.end > a.start && a.end <= n && !a.morphemes.is_empty() {
+                from[a.start].push(i);
+            }
+        }
+        let width = m + 1;
+        let mut cost = vec![f32::INFINITY; (n + 1) * width];
+        let mut back: Vec<(usize, usize)> = vec![(usize::MAX, usize::MAX); (n + 1) * width];
+        cost[0] = 0.0;
+        for p in 0..=n {
+            for j in 0..=m {
+                let here = cost[p * width + j];
+                if !here.is_finite() { continue; }
+                if p < n && chars[p].is_whitespace() {
+                    let to = (p + 1) * width + j;
+                    if here < cost[to] { cost[to] = here; back[to] = (p * width + j, usize::MAX); }
+                }
+                for &ai in &from[p] {
+                    let k = keys[ai].len();
+                    if j + k > m || keys[ai][..] != goal[j..j + k] { continue; }
+                    let to = lat.arcs[ai].end * width + j + k;
+                    let c = here + lat.base[ai];
+                    if c < cost[to] { cost[to] = c; back[to] = (p * width + j, ai); }
+                }
+            }
+        }
+        let mut at = n * width + m;
+        if !cost[at].is_finite() { return None; }
+        let mut path = Vec::new();
+        while at != 0 {
+            let (prev, arc) = back[at];
+            if arc != usize::MAX { path.push(arc); }
+            at = prev;
+        }
+        path.reverse();
+        Some(path)
+    }
+
+    /// 연구용: 아크 경로를 `analyze_topn` 후보와 같은 방식으로 토큰화·후처리한다.
+    #[doc(hidden)]
+    pub fn lab_process(&self, text: &str, lat: &LabLattice, path: &[usize]) -> Vec<Token> {
+        let chars: Vec<char> = text.chars().collect();
+        let raw = Self::path_tokens(&lat.arcs, path, &chars);
+        Self::postprocess_candidate(&Self::eojeol_boundaries(text), raw)
+    }
+
     /// Change one POS only when the final eojeol still exactly matches its cache.
     pub(crate) fn apply_context_cache(&self, text: &str, tokens: &mut [Token]) {
         let Some(context) = &self.context_cache else { return; };
@@ -4820,6 +4967,7 @@ impl CodebookAnalyzer {
         let mut arcs = self.build_lattice(text);
 
         self.inject_cache_arcs(text, &mut arcs);
+        self.apply_search_costs(text, &mut arcs);
 
         // Run sentence-level Viterbi on the full lattice
         let (raw_tokens, score) = self.viterbi(text, &arcs);
@@ -4911,6 +5059,70 @@ impl CodebookAnalyzer {
     }
 
     /// Analyze returning top-N distinct results, sorted by Viterbi cost.
+    /// 공백 어절별 문자 span.
+    fn eojeol_boundaries(text: &str) -> Vec<(usize, usize)> {
+        let mut eojeol_boundaries: Vec<(usize, usize)> = Vec::new();
+        let mut char_offset = 0;
+        for eojeol in text.split_whitespace() {
+            let byte_start = text[char_offset..].find(eojeol)
+                .map(|p| char_offset + p).unwrap_or(char_offset);
+            let cs = text[..byte_start].chars().count();
+            let ce = cs + eojeol.chars().count();
+            eojeol_boundaries.push((cs, ce));
+            char_offset = byte_start + eojeol.len();
+        }
+        eojeol_boundaries
+    }
+
+    /// N-best 후보 하나에 어절 span을 씌우고 `analyze_topn`의 후처리 체인을 적용한다.
+    fn postprocess_candidate(eojeol_boundaries: &[(usize, usize)], raw_tokens: Vec<Token>) -> Vec<Token> {
+        let mut tokens: Vec<Token> = raw_tokens.into_iter().map(|token| {
+            let (es, ee) = Self::eojeol_span_for(&eojeol_boundaries, &token);
+            Token { start: es, end: ee, ..token }
+        }).collect();
+
+        Self::fix_vx(&mut tokens);
+        Self::fix_jc_jkb(&mut tokens);
+        Self::fix_nnb(&mut tokens);
+        Self::fix_xsn_xpn(&mut tokens);
+        Self::fix_mm(&mut tokens);
+        Self::fix_jkc(&mut tokens);
+        Self::fix_jx_jc(&mut tokens);
+        Self::fix_nnb_no_etm(&mut tokens);
+        Self::fix_xpn_standalone(&mut tokens);
+        Self::fix_ec_eos(&mut tokens);
+        Self::fix_imperative_ra(&mut tokens);
+        Self::fix_oneora(&mut tokens);
+        Self::fix_deusi_honorific(&mut tokens);
+        Self::fix_vcp(&mut tokens);
+        Self::fix_noun_inga_copula(&mut tokens);
+        Self::fix_present_copula(&mut tokens);
+        Self::fix_it_copula(&mut tokens);
+        Self::fix_vcp_eojeol_start_recovery(&mut tokens);
+        Self::fix_nde_merge(&mut tokens);
+        Self::fix_haeyo_endings(&mut tokens);
+        Self::fix_yo_jx_merge(&mut tokens);
+        Self::fix_extra_endings(&mut tokens);
+        Self::fix_mag_copula_ya(&mut tokens);
+        Self::fix_myeoch_si_ya(&mut tokens);
+        Self::fix_sn_counter_copula(&mut tokens);
+        Self::fix_han_standalone_mm(&mut tokens);
+        Self::fix_lge_endings(&mut tokens);
+        Self::fix_iri_mag(&mut tokens);
+        Self::fix_mag_ga_vv(&mut tokens);
+        Self::fix_mag_wa_vv(&mut tokens);
+        Self::fix_bwa_auxiliary(&mut tokens);
+        Self::fix_mm_determiners(&mut tokens);
+        Self::fix_geureon_mm(&mut tokens);
+        Self::fix_seyo_merge(&mut tokens);
+        Self::fix_colloquial_pronouns(&mut tokens);
+        Self::fix_jeoneun_np(&mut tokens);
+        Self::fix_geuraeseo_maj(&mut tokens);
+        Self::fix_si_dependent_noun(&mut tokens);
+        Self::fix_quote_jkq(&mut tokens);
+        tokens
+    }
+
     pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
         if text.is_empty() || n == 0 {
             return vec![AnalyzeResult { tokens: vec![], score: 0.0, elapsed_ms: 0.0 }];
@@ -4924,71 +5136,17 @@ impl CodebookAnalyzer {
         // Build lattice with cache injection (same as analyze)
         let mut arcs = self.build_lattice(text);
         self.inject_cache_arcs(text, &mut arcs);
+        self.apply_search_costs(text, &mut arcs);
 
         // Run N-best Viterbi
         let paths = self.viterbi_nbest(text, &arcs, n);
 
         // Build eojeol boundaries for span assignment
-        let mut eojeol_boundaries: Vec<(usize, usize)> = Vec::new();
-        {
-            let mut char_offset = 0;
-            for eojeol in text.split_whitespace() {
-                let byte_start = text[char_offset..].find(eojeol)
-                    .map(|p| char_offset + p).unwrap_or(char_offset);
-                let cs = text[..byte_start].chars().count();
-                let ce = cs + eojeol.chars().count();
-                eojeol_boundaries.push((cs, ce));
-                char_offset = byte_start + eojeol.len();
-            }
-        }
+        let eojeol_boundaries = Self::eojeol_boundaries(text);
 
         // Post-process each path
         let processed: Vec<AnalyzeResult> = paths.into_iter().map(|(raw_tokens, score)| {
-            let mut tokens: Vec<Token> = raw_tokens.into_iter().map(|token| {
-                let (es, ee) = Self::eojeol_span_for(&eojeol_boundaries, &token);
-                Token { start: es, end: ee, ..token }
-            }).collect();
-
-            Self::fix_vx(&mut tokens);
-            Self::fix_jc_jkb(&mut tokens);
-            Self::fix_nnb(&mut tokens);
-            Self::fix_xsn_xpn(&mut tokens);
-            Self::fix_mm(&mut tokens);
-            Self::fix_jkc(&mut tokens);
-            Self::fix_jx_jc(&mut tokens);
-            Self::fix_nnb_no_etm(&mut tokens);
-            Self::fix_xpn_standalone(&mut tokens);
-            Self::fix_ec_eos(&mut tokens);
-            Self::fix_imperative_ra(&mut tokens);
-            Self::fix_oneora(&mut tokens);
-            Self::fix_deusi_honorific(&mut tokens);
-            Self::fix_vcp(&mut tokens);
-            Self::fix_noun_inga_copula(&mut tokens);
-            Self::fix_present_copula(&mut tokens);
-            Self::fix_it_copula(&mut tokens);
-            Self::fix_vcp_eojeol_start_recovery(&mut tokens);
-            Self::fix_nde_merge(&mut tokens);
-            Self::fix_haeyo_endings(&mut tokens);
-            Self::fix_yo_jx_merge(&mut tokens);
-            Self::fix_extra_endings(&mut tokens);
-            Self::fix_mag_copula_ya(&mut tokens);
-            Self::fix_myeoch_si_ya(&mut tokens);
-            Self::fix_sn_counter_copula(&mut tokens);
-            Self::fix_han_standalone_mm(&mut tokens);
-            Self::fix_lge_endings(&mut tokens);
-            Self::fix_iri_mag(&mut tokens);
-            Self::fix_mag_ga_vv(&mut tokens);
-            Self::fix_mag_wa_vv(&mut tokens);
-            Self::fix_bwa_auxiliary(&mut tokens);
-            Self::fix_mm_determiners(&mut tokens);
-            Self::fix_geureon_mm(&mut tokens);
-            Self::fix_seyo_merge(&mut tokens);
-            Self::fix_colloquial_pronouns(&mut tokens);
-            Self::fix_jeoneun_np(&mut tokens);
-            Self::fix_geuraeseo_maj(&mut tokens);
-            Self::fix_si_dependent_noun(&mut tokens);
-            Self::fix_quote_jkq(&mut tokens);
-
+            let tokens = Self::postprocess_candidate(&eojeol_boundaries, raw_tokens);
             AnalyzeResult { tokens, score, elapsed_ms: now_ms() - t0 }
         }).collect();
 
@@ -5814,6 +5972,80 @@ mod tests {
         assert_eq!(changed.analyze(text).tokens[2].pos, Pos::NNG);
         changed.clear_user_words();
         assert_eq!(changed.analyze(text).tokens[2].pos, Pos::NNP);
+    }
+
+    /// 픽스처의 Section 18을 주어진 blob으로 바꾼 raw 모델 (None이면 제거).
+    fn search_model(blob: Option<&[u8]>) -> Vec<u8> {
+        let raw = decompress_brotli(include_bytes!("../../../models/codebook.gmdl")).unwrap();
+        let mut output = raw[..8].to_vec();
+        let mut offset = 8;
+        while offset < raw.len() {
+            let size = u32::from_le_bytes(raw[offset + 1..offset + 5].try_into().unwrap()) as usize;
+            let end = offset + 5 + size;
+            if raw[offset] != 18 { output.extend_from_slice(&raw[offset..end]); }
+            offset = end;
+        }
+        if let Some(blob) = blob {
+            output.push(18);
+            output.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            output.extend_from_slice(blob);
+        }
+        output
+    }
+
+    /// buckets마다 i16 최댓값 × qscale 0.001 ≈ +32.8 비용. router가 있으면 v2(가중치 0, 임계값 지정).
+    fn search_blob(buckets: &[u32], router_threshold: Option<f32>) -> Vec<u8> {
+        let mut blob = if router_threshold.is_some() { b"GSCW\x02".to_vec() } else { b"GSCW\x01".to_vec() };
+        blob.push(crate::search::DIM_LOG2);
+        blob.extend_from_slice(&1.0f32.to_le_bytes());
+        blob.extend_from_slice(&(buckets.len() as u32).to_le_bytes());
+        blob.extend_from_slice(&0.001f32.to_le_bytes());
+        let mut prev = 0u32;
+        for &b in buckets {
+            let mut d = b - prev;
+            prev = b;
+            loop {
+                let byte = (d & 0x7F) as u8;
+                d >>= 7;
+                if d == 0 { blob.push(byte); break; }
+                blob.push(byte | 0x80);
+            }
+        }
+        for _ in buckets { blob.extend_from_slice(&i16::MAX.to_le_bytes()); }
+        if let Some(threshold) = router_threshold {
+            blob.push(4);
+            for v in [1.0f32, 0.0, threshold] { blob.extend_from_slice(&v.to_le_bytes()); }
+            blob.extend_from_slice(&[0u8; 16]);
+        }
+        blob
+    }
+
+    #[test]
+    fn search_costs_change_paths_only_when_routed() {
+        let text = "나는 하늘을 나는 새";
+        let pairs = |r: &AnalyzeResult| r.tokens.iter().map(|t| (t.text.clone(), t.pos)).collect::<Vec<_>>();
+        let base = CodebookAnalyzer::from_bytes(&search_model(None)).unwrap();
+        let mut lat = base.lab_lattice(text);
+        let path = base.lab_best(text, &mut lat, &vec![0f32; 1 << crate::search::DIM_LOG2], 0.0);
+        let mut buckets: Vec<u32> = path.iter().map(|&i| *lat.features(i).last().unwrap()).collect();
+        buckets.sort_unstable();
+        buckets.dedup();
+
+        let before = base.analyze_topn(text, 10);
+        let penalized = CodebookAnalyzer::from_bytes(&search_model(Some(&search_blob(&buckets, None)))).unwrap();
+        assert_ne!(pairs(&penalized.analyze_topn(text, 10)[0]), pairs(&before[0]));
+        assert_ne!(pairs(&penalized.analyze(text)), pairs(&base.analyze(text)));
+
+        // 판별 점수 0(가중치·bias 0)이 임계값 1.0을 넘지 못하면 보정하지 않는다.
+        let gated = CodebookAnalyzer::from_bytes(&search_model(Some(&search_blob(&buckets, Some(1.0))))).unwrap();
+        let after = gated.analyze_topn(text, 10);
+        assert_eq!(after.len(), before.len());
+        for (a, b) in after.iter().zip(&before) {
+            assert_eq!(pairs(a), pairs(b));
+            assert_eq!(a.score.to_bits(), b.score.to_bits());
+        }
+        let open = CodebookAnalyzer::from_bytes(&search_model(Some(&search_blob(&buckets, Some(-1.0))))).unwrap();
+        assert_ne!(pairs(&open.analyze_topn(text, 10)[0]), pairs(&before[0]));
     }
 
     #[test]

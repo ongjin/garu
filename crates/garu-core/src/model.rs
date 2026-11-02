@@ -249,6 +249,18 @@ impl Analyzer {
 
     /// Candidates consumed by the reranker, before context POS correction and
     /// display-only jamo normalization, regardless of AnalyzerOptions.
+    /// 연구용: 내부 codebook 분석기.
+    #[doc(hidden)]
+    pub fn codebook(&self) -> &CodebookAnalyzer {
+        &self.codebook
+    }
+
+    /// 연구용: 재순위 입력과 같은 model 레벨 보정을 적용한다.
+    #[doc(hidden)]
+    pub fn lab_rerank_rules(tokens: &mut [Token]) {
+        Self::apply_rerank_rules(tokens);
+    }
+
     pub fn analyze_topn_for_rerank(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
         let mut results = self.codebook.analyze_topn(text, n);
         for result in &mut results {
