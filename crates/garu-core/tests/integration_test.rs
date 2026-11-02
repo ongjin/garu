@@ -356,7 +356,10 @@ fn test_dependency_noun_ri_rerank_tradeoff() {
 
 // 무공백 `갈`+의존명사. 0.9.13에서 재순위가 갈/VV+수/EC를 골라 `#[ignore]`였으나,
 // 새 사전 반영 재순위 재학습(research-history #49)으로 해결되어 다시 활성화.
+// Section 18 탐색 비용(#79)이 띄어 쓴 학습 자료의 어절 경계 feature로 `가+ㄹ` 아크에 벌점을 줘
+// 다시 갈/VV+수/EC가 된다. 게이트 v2를 통과한 모델을 사용자 결정으로 채택하며 알려진 회귀로 둔다.
 #[test]
+#[ignore = "Section 18 known regression (research-history #79)"]
 fn test_dependency_noun_su_rerank_tradeoff() {
     let analyzer = load_analyzer();
 

@@ -17,6 +17,7 @@ training/codebook_data/*
 !training/codebook_data/bulk_supplement.tsv
 !training/codebook_data/context_pos.bin
 !training/codebook_data/context_rules.bin
+!training/codebook_data/search_cost.bin
 training/codebook_data_backup/
 training/crawl_data/
 training/charmodel/

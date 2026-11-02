@@ -2,10 +2,10 @@
 
 ## 프로젝트 개요
 
-브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron으로 동작 (CNN 폐기).
-- **F1 96.090%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 91.290% / 2025 문어 held-out 86.418% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 공개 README·CHANGELOG 수치는 릴리스 때 갱신
-- **기본 모델 1,263,894 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14와 문맥 POS 교정 Section16·17 포함)
-- **WASM** — raw 433,259 B / `gzip -9` 184,681 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78 참조.
+브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron + 구어 입력용 탐색 비용 보정으로 동작 (CNN 폐기).
+- **F1 96.183%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.085% / 2025 문어 held-out 86.422% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 미배포(CHANGELOG Unreleased)
+- **기본 모델 1,343,482 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18 포함)
+- **WASM** — raw 447,163 B / `gzip -9` 190,502 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78·#79 참조.
 - **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74 참조.
 
 ### Purpose (영문 원문)
@@ -52,6 +52,7 @@ Primary constraints:
 
 ```
 입력 텍스트 → 전체 문장 래티스 구축 (캐시 항목을 저비용 아크로 주입, 오타 교정 아크 생성)
+           → 구어로 판별된 입력이면 아크 비용 보정 (Section18, 문자 n-gram 판별기 + 학습된 선형 비용)
            → 문장 수준 Trigram N-best Viterbi (top-10)
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
            → 재순위 perceptron (Section 14, 확신 마진 τ=4 넘을 때만 교체)
@@ -63,6 +64,7 @@ Primary constraints:
 - `crates/garu-core/src/codebook.rs` — 래티스 구축, Viterbi 디코딩, 어절 캐시, 후처리 규칙(`fix_*`)
 - `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + POS override + 재순위 게이트). POS 보정 규칙은 폐기된 CNN의 골드 행동을 distill한 것 (추론은 안 함)
 - `crates/garu-core/src/rerank.rs` — 재순위 perceptron (FNV-1a feature hashing — `training/rerank/features.py`와 바이트 단위 동일 필수)
+- `crates/garu-core/src/search.rs` — Section 18 아크 feature·탐색 비용·구어 판별기 (판별기 해시는 `training/search/router.py`와 동일 필수, 학습은 `examples/search_train.rs`)
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩
@@ -132,7 +134,7 @@ Do not restart from approaches already shown to be poor fits unless the goal is 
 - Extending final one-POS corrections beyond exact cache matches improved aggregate fixed F1 but regressed literature, so the tested rules were not adopted. Distinguish absent cache surfaces from cached surfaces with different final analyses. Isolated evaluation also needs the ignored `content_dict.txt` used by the 2025 reference converter; matching predictions alone does not ensure matching references. See research-history #75.
 - Joint selection among spacing alternatives improved morphological F1 on synthetic whitespace-deleted inputs, but regressed normal text and some domains while increasing loaded Node/WASM cost. It also lowered spacing-boundary F1 because it often retained the unspaced input. Do not describe it as better spacing restoration or enable it automatically. See research-history #76.
 
-- Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing (#77). A re-implementation of #75 passed gate v2 on all three sets and ships as Section 17; it is not byte-identical to the deleted #75 rules (#78). A #64 re-implementation (Section 18 search costs, branch `research/search-cost`) fails gate v2 when applied everywhere (significant gold tech/literature regressions, partly NIKL XSN-splitting conventions) but passes when gated by a spoken router (+0.80pp 2025 SX). It is not shipped: +80KB model, +7% native time on spoken text, and one focused unspaced regression (#79).
+- Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing (#77). A re-implementation of #75 passed gate v2 on all three sets and ships as Section 17; it is not byte-identical to the deleted #75 rules (#78). A #64 re-implementation (Section 18 search costs) fails gate v2 when applied everywhere (significant gold tech/literature regressions, partly NIKL XSN-splitting conventions) but passes when gated by a spoken router (+0.80pp 2025 SX); it ships at +80KB model and +7% native time on spoken text, with the unspaced `갈수있는데` regression accepted and its test ignored (#79). Retrain Section 14/17/18 candidates together when any of them changes.
 
 Strong historical wins:
 
