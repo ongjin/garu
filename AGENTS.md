@@ -132,6 +132,8 @@ Do not restart from approaches already shown to be poor fits unless the goal is 
 - Extending final one-POS corrections beyond exact cache matches improved aggregate fixed F1 but regressed literature, so the tested rules were not adopted. Distinguish absent cache surfaces from cached surfaces with different final analyses. Isolated evaluation also needs the ignored `content_dict.txt` used by the 2025 reference converter; matching predictions alone does not ensure matching references. See research-history #75.
 - Joint selection among spacing alternatives improved morphological F1 on synthetic whitespace-deleted inputs, but regressed normal text and some domains while increasing loaded Node/WASM cost. It also lowered spacing-boundary F1 because it often retained the unspaced input. Do not describe it as better spacing restoration or enable it automatically. See research-history #76.
 
+- Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. #75 passes partially (no NX rules preserved). A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing. See research-history #77.
+
 Strong historical wins:
 
 - Switching from Kiwi-derived output to NIKL gold-derived codebook patterns was the largest improvement.
