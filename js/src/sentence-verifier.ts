@@ -371,5 +371,32 @@ export function splitVerified(
     ? extractSentenceFeatures(text, candidates, analyzer)
     : extractContextFeatures(text, candidates);
   const retained = verifySentenceCandidates(text, candidates, features, model);
-  return splitAtBoundaries(text, retained.map(candidate => candidate.offset));
+  return splitAtBoundaries(text, snapBoundaries(text, retained.map(candidate => candidate.offset)));
+}
+
+// Trailing laughter, emoticons, tildes and repeated marks belong to the preceding sentence.
+const TRAILING = /[\s~!?.…^;*♡♥★☆♪♬”’)\]」』\u1100-\u11FF\u3131-\u318E\u2600-\u27BF\uFE0F\u200D\u{1F000}-\u{1FAFF}]/u;
+const HANGUL_SYLLABLE = /[가-힣]/u;
+// Spaced input: at least one word gap per ten Hangul syllables.
+const SPACED_RATIO = 10;
+
+/** Move boundaries past trailing ornaments; in spaced input, drop word-internal boundaries. */
+function snapBoundaries(text: string, offsets: number[]): number[] {
+  const chars = [...text];
+  let hangul = 0;
+  let gaps = 0;
+  for (let i = 0; i < chars.length; i++) {
+    if (HANGUL_SYLLABLE.test(chars[i])) hangul++;
+    else if (SPACE.test(chars[i]) && i > 0 && !SPACE.test(chars[i - 1])) gaps++;
+  }
+  const spaced = gaps * SPACED_RATIO >= hangul;
+
+  const out: number[] = [];
+  for (let offset of offsets) {
+    while (offset < chars.length && TRAILING.test(chars[offset])) offset++;
+    if (offset >= chars.length || out[out.length - 1] === offset) continue;
+    if (spaced && offset > 0 && !TRAILING.test(chars[offset - 1])) continue;
+    out.push(offset);
+  }
+  return out;
 }

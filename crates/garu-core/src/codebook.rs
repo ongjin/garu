@@ -3325,10 +3325,16 @@ impl CodebookAnalyzer {
     /// Other 거/그거/이거/요거 variants are kept as-is because both forms
     /// appear naturally in the gold (e.g., 그거/NP appears 2x more than 그것/NP).
     fn fix_colloquial_pronouns(tokens: &mut [Token]) {
-        for token in tokens.iter_mut() {
-            if token.text == "제" && token.pos == Pos::NP {
-                token.text = "저".to_string();
+        for i in 0..tokens.len() {
+            if tokens[i].pos != Pos::NP || (tokens[i].text != "제" && tokens[i].text != "저") {
+                continue;
             }
+            let eojeol_first = i == 0 || tokens[i - 1].start != tokens[i].start;
+            let before_ga = i + 1 < tokens.len()
+                && tokens[i + 1].start == tokens[i].start
+                && tokens[i + 1].text == "가"
+                && matches!(tokens[i + 1].pos, Pos::JKS | Pos::JKC);
+            tokens[i].text = if eojeol_first && before_ga { "제" } else { "저" }.to_string();
         }
     }
 

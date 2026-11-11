@@ -30,7 +30,7 @@
 
 **Section 16 (문맥 조건부 POS 교정)**: 정본은 Git으로 관리하는 `training/codebook_data/context_pos.bin`이다. 빌더는 이 blob을 그대로 기록하며, 파일이 없으면 섹션을 생략한다. `training/ambiguity/prepare.py`는 NIKL 2021의 문서 단위 train/dev 분할과 고정 평가셋의 공백 제거 중복 제외 후 train에서 대체 POS와 주변 어절 조건을 추출한다. `probe.py`는 고정 규칙을 모델에 넣어 실제 분석 결과를 비교한다. 포맷의 legacy 비용 필드 `-1.0`은 동일 모델 재현을 위해 남아 있으며 현재 추론이나 비용 탐색에는 사용하지 않는다.
 
-**Section 17 (최종 출력열 일치 POS 교정, 2026-11-02 채택)**: 정본은 `training/codebook_data/context_rules.bin`이고 빌더가 그대로 기록한다. Section 16과 달리 원래 열이 캐시 항목일 필요가 없고, 규칙마다 원래 형태·POS열과 바꿀 위치·POS를 저장한다. 재생성은 `prepare.py`의 train/dev에 대해 `analyze_batch --json-spans`로 현행 출력을 덤프한 뒤 `context_rules.py mine` → `select`(dev 32설정) → `export ... --blob`이다. 절차와 판정 기록은 `training/ambiguity/README.md`·`review_20261102.json`. 사전·캐시·재순위가 바뀌면 원래 열이 달라지므로 규칙을 다시 채굴하고 게이트 v2로 다시 판정한다.
+**Section 17 (최종 출력열 일치 POS 교정, 2026-11-02 채택)**: 정본은 `training/codebook_data/context_rules.bin`이고 빌더가 그대로 기록한다. Section 16과 달리 원래 열이 캐시 항목일 필요가 없고, 규칙마다 원래 형태·POS열과 바꿀 위치·POS를 저장한다. 재생성은 `prepare.py`의 train/dev에 대해 `analyze_batch --json-spans`로 현행 출력을 덤프한 뒤 `context_rules.py mine` → `select`(dev 32설정) → `export ... --blob`이다. 절차와 판정 기록은 `training/ambiguity/README.md`·`review_20261102.json`. 사전·캐시·재순위가 바뀌면 원래 열이 달라지므로 규칙을 다시 채굴하고 게이트 v2로 다시 판정한다. 2026-11-11부터 마지막 규칙은 늘임표를 지운 2021 구어에서 만든 `(그, [그/MM])→IC` 규칙이다(`training/ambiguity/spoken_geu.py`). `context_rules.py`로 다시 채굴하면 이 규칙이 빠지므로 `spoken_geu.py append`를 다시 실행한다.
 
 **Section 18 (구어 탐색 비용 보정, 2026-11-02 채택)**: 정본은 `training/codebook_data/search_cost.bin`이고 빌더가 그대로 기록한다. v2(`GSCW\x02`)는 아크 feature 가중치(FNV-1a 2^20 버킷 중 상위 20K, i16)와 문자 1–3-gram 나이브 베이즈 구어 판별기(2^15 int8, 임계값 0)를 담는다. 판별 점수가 임계값을 넘는 입력에만 래티스 아크 비용에 `scale(0.5) × Σw`를 더한다. 학습·내보내기 절차는 `training/search/README.md`에 있다. Section 14 재순위와 Section 17 규칙은 이 보정 전의 후보·출력으로 학습된 상태다. 셋 중 하나를 바꾸면 나머지의 입력 분포도 달라지므로, 함께 다시 만들고 게이트 v2로 판정한다.
 
@@ -124,6 +124,8 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 - `training/build_codebook_model.py` — GMDL 바이너리 빌드 (FST, 코드북, 트라이그램, 캐시 통합, 자동 brotli q=11 압축)
 - `training/ambiguity/{prepare,probe,context_cache}.py` — 문서 분할·문맥 POS 규칙 추출, Section 16 직렬화·실제 분석 비교
 - `training/ambiguity/context_rules.py` — 최종 출력열 기준 한 POS 규칙 채굴·dev 선택·Section 17 직렬화
+- `training/ambiguity/spoken_geu.py` — 늘임표 제거 구어에서 `그` 담화표지 규칙 채굴·Section 17 뒤에 추가
+- `training/boundaries/sns_sentences.py` — 인스타그램 문장 주석으로 1단계 문장 head 학습·`boundary-data.ts`에 적용
 - `training/search/{router,verify_gold,export}.py` + `crates/garu-core/examples/search_train.rs` — 구어 판별기·정답 경로 검증·native 탐색 비용 학습·Section 18 직렬화
 - `training/boundaries/` — 선택적 JS 띄어쓰기·문장 경계 모델 학습·선택·내보내기·공개 API 평가
 - `training/boundaries/{prepare_verifier,mine_verifier,verifier,export_verifier,eval_verifier}.py` 및 대응 `.mjs` — 원문 문단·hard negative·Q4 문맥 검증기 학습과 실제 JS 평가
@@ -134,6 +136,7 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 
 ## 이력
 
+- 2026-11-11 Section 17에 구어 담화표지 `그` 규칙을 추가하고 `제가`의 형태를 `제/NP`로 고쳤다(Rust `fix_colloquial_pronouns`). 모델 1,344,225B(+743B), SHA-256 `bb3f0ddaa9878bdb5ffba28e5634266a6197ab2f588deb8c625be38202d1ee4d`. 빌더 재생성이 바이트 동일하고 게이트 v2를 통과했다. 상세는 연구 이력 #83.
 - 2026-11-02 Section 18 구어 탐색 비용 보정 채택. 모델 1,343,482B(+79,588B), SHA-256 `daec0d758cb6024dbd6c3243b11582a63b5b8d1197b6d8e9b7e23df1e7434fb5`. 게이트 v2 통과, 집중 테스트 1건 알려진 회귀. 상세는 연구 이력 #79.
 - 2026-11-02 Section 17 최종 출력열 일치 POS 교정 채택. 모델 1,263,894B(+3,418B), SHA-256 `670a77bf4a6dc1cac120b592a7200f20fcdb3af67da194f96ded04051fbe8146`. 게이트 v2 세 세트 통과, 상세는 연구 이력 #78.
 - 2026-10-20 Section 16 문맥 POS 교정을 채택하고 학습 후보 API를 최종 교정과 분리. 기존 Section 6–14를 보존한 정규 빌드 모델은 1,260,476B(+2,042B), SHA-256 `f9ca34a2ad1d0a152f434dc21a755a802aef5a4f8d8246ff29625367d12a9ef7`. 고정 골드 모든 도메인 합계는 비음수지만 개별 문장 회귀는 남음. 선택적 JS 경계 모델을 기본 모델과 구분하고 누적 어휘 재현 기록을 현재 런타임으로 갱신. 상세는 연구 이력 #70·#71.

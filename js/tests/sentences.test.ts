@@ -31,6 +31,38 @@ describe('optional sentence verifier entry', () => {
     ]);
   });
 
+  it('splits SNS exclamations and keeps trailing ornaments with the sentence', () => {
+    expect(splitSentences('가방에 쏙! 파우치에 쏙! 음료보다 가벼워')).toEqual([
+      { text: '가방에 쏙!', offset: 0 },
+      { text: '파우치에 쏙!', offset: 7 },
+      { text: '음료보다 가벼워', offset: 15 },
+    ]);
+    expect(splitSentences('오메가3는 필수인것 같아요~!')).toEqual([
+      { text: '오메가3는 필수인것 같아요~!', offset: 0 },
+    ]);
+    expect(splitSentences('영어를 시작했어요 ㅎㅎ 영어교육의 명문과 함께 읽어볼게요')).toEqual([
+      { text: '영어를 시작했어요 ㅎㅎ', offset: 0 },
+      { text: '영어교육의 명문과 함께 읽어볼게요', offset: 13 },
+    ]);
+  });
+
+  it('does not split inside a word of spaced input', () => {
+    expect(splitSentences('새로운 컬러인 다크그레이, 실버 최초로 공개되었어요~')).toEqual([
+      { text: '새로운 컬러인 다크그레이, 실버 최초로 공개되었어요~', offset: 0 },
+    ]);
+  });
+
+  it('ends a sentence at every line break with codepoint offsets', () => {
+    expect(splitSentences('맛있어요\n분위기도 좋아요')).toEqual([
+      { text: '맛있어요', offset: 0 },
+      { text: '분위기도 좋아요', offset: 5 },
+    ]);
+    expect(splitSentences('첫 줄입니다\r\n\n😀둘째 줄입니다')).toEqual([
+      { text: '첫 줄입니다', offset: 0 },
+      { text: '😀둘째 줄입니다', offset: 9 },
+    ]);
+  });
+
   it('uses the selected local model with a real Garu analyzer', () => {
     expect(splitSentences('안녕하세요반갑습니다', analyzer)).toEqual([
       { text: '안녕하세요', offset: 0 },

@@ -66,5 +66,7 @@
     }
   },
   "evaluation_wasm_sha256": "1a3ac3a324fcfce72a1388fa1b84e12512cbfe41ac19de1bb8ebaf84f75935fd",
-  "runtime_version": "0.10.0"
+  "runtime_version": "0.10.0",
+  "runtime_boundary_weights_sha256": "c8a4aa2bc5a85130e01204bfd09d4612340eadd1f3b4dfd811bcaf991eb380c9",
+  "runtime_changes": "2026-11-11 research history #83: the first-stage sentence head was retrained with Instagram punctuation positions (NIKL online posting corpus 2025); splitSentences ends sentences at line breaks, moves boundaries past trailing ornaments and drops word-internal boundaries in spaced input. Both verifiers are unchanged and were trained against base_boundary_weights_sha256."
 }

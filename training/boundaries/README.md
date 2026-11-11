@@ -37,10 +37,10 @@ multiplication by the head scale.
 JavaScript. `infer.py` accepts JSON strings on stdin and emits restored JSON
 strings, one per line. `BoundaryModel.restore_many()` supports batch experiments.
 
-The adopted weights use a 100,000-source-sentence model for sentence boundaries
-and the full eligible training pool for spacing, both with 2^19 buckets, the
-original 13 n-gram features, L2=1e-5, speech weight10 and macro sentence-threshold
-selection. Recreate the shared evaluation split and both training pools before
+The spacing head uses the full eligible training pool. The sentence head was first
+a 100,000-source-sentence model and, since research history #83, adds Instagram
+supervision (see "Instagram sentence head" below). Both use 2^19 buckets, the
+original 13 n-gram features, L2=1e-5 and speech weight10. Recreate the shared evaluation split and both training pools before
 selecting heads:
 
 ```sh
@@ -153,6 +153,38 @@ For the adopted default, set `heads.spaces.conservative_threshold` in the select
 `review_20261020.json` records the separate boundary-F1 and morphology objectives.
 `eval_api.py` evaluates the actual JavaScript wrapper, including protection gates,
 Unicode positions and conservative/balanced modes; use its `--help` for paths.
+
+## Instagram sentence head
+
+The adopted sentence head (research history #83) adds Instagram paragraphs from the
+NIKL online posting corpus 2025 to the `large19` 2021 pool. Document buckets
+`sha256(id)[:8] mod 10` are 0-1 final test, 2-3 dev and 4-9 train. Those sentence
+records are punctuation-driven, so only positions after terminal punctuation
+(optionally followed by laughter, emoticons or closing brackets) carry loss, with
+weight3; all other Instagram positions have weight0. Training on every position
+taught the head not to split unpunctuated news. The threshold stays at the 2021
+value -0.75; dev macro selection preferred -0.5, and -0.75 was kept after viewing
+the fixed news set. The spacing head is unchanged.
+
+```sh
+SNS_LAB=$(mktemp -d)
+python3 training/boundaries/sns_sentences.py prepare --out "$SNS_LAB/sns"
+OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 python3 training/boundaries/sns_sentences.py train \
+  --base "$BOUNDARY_LAB/large19" --sns "$SNS_LAB/sns" --out "$SNS_LAB/head"
+python3 training/boundaries/sns_sentences.py apply --npz "$SNS_LAB/head/sentences.npz" --ts js/src/boundary-data.ts
+```
+
+Retraining reproduced the adopted head byte for byte (SHA-256
+`685e44c82b4ffeed4c00289204ea865b309a078ba34942bff5e10bc7deb901a4`; combined
+weights `c8a4aa2bc5a85130e01204bfd09d4612340eadd1f3b4dfd811bcaf991eb380c9`).
+`apply` replaces only the sentence half and its scale/threshold in the generated
+file. `splitUnspaced` uses the same head.
+
+`garu-ko/sentences` adds three deterministic steps after verification: every line
+break ends a sentence, a boundary followed by trailing ornaments (whitespace,
+`~!?.…^`, jamo, emoji, closing brackets) moves past them and disappears at the end
+of input, and in spaced input (at least one word gap per ten Hangul syllables) a
+boundary inside a word is dropped unless it follows punctuation or an ornament.
 
 ## Optional context verifier
 

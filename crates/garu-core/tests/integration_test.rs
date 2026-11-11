@@ -1156,3 +1156,23 @@ fn test_multiword_nnp_span_not_truncated() {
         nnp.start, nnp.end, surface_len, nnp.text
     );
 }
+
+/// 연구 이력 #83: 늘임표 없는 구어 담화표지 `그`(Section 17)와 NIKL 관례의 `제가`.
+#[test]
+fn test_spoken_filler_geu_and_jega() {
+    let analyzer = load_analyzer();
+    assert_analysis(&analyzer, "그 뭐지", &[
+        ("그", Pos::IC), ("뭐", Pos::NP), ("이", Pos::VCP), ("지", Pos::EF),
+    ]);
+    assert_analysis(&analyzer, "그 사람이 정말 착해요", &[
+        ("그", Pos::MM), ("사람", Pos::NNG), ("이", Pos::JKS), ("정말", Pos::MAG),
+        ("착하", Pos::VA), ("아요", Pos::EF),
+    ]);
+    assert_analysis(&analyzer, "제가 할게요", &[
+        ("제", Pos::NP), ("가", Pos::JKS), ("하", Pos::VV), ("ㄹ게요", Pos::EF),
+    ]);
+    assert_analysis(&analyzer, "제 생각에는 좋아요", &[
+        ("저", Pos::NP), ("의", Pos::JKG), ("생각", Pos::NNG), ("에", Pos::JKB),
+        ("는", Pos::JX), ("좋", Pos::VA), ("아요", Pos::EF),
+    ]);
+}

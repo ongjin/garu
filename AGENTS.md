@@ -3,10 +3,10 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron + 구어 입력용 탐색 비용 보정으로 동작 (CNN 폐기).
-- **F1 96.183%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.085% / 2025 문어 held-out 86.422% — 2026-11-02 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 0.12.1 배포본(모델은 0.12.0과 동일)
-- **기본 모델 1,343,482 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18 포함)
-- **WASM** — raw 447,163 B / `gzip -9` 190,502 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78·#79 참조.
-- **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74 참조.
+- **F1 96.176%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.321% / 2025 문어 held-out 86.426% — 2026-11-11 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 0.13.0 배포본
+- **기본 모델 1,344,225 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18 포함)
+- **WASM** — raw 447,575 B / `gzip -9` 190,669 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78·#79 참조.
+- **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 줄바꿈은 항상 문장 경계다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74·#83 참조.
 
 ### Purpose (영문 원문)
 
@@ -98,7 +98,7 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 # 골드 F1 평가 (garu만, n=9000 v15k, ep_norm)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu)
 
-# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.910. 학습 사용 금지)
+# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.923. 학습 사용 금지)
 python3 training/eval_nikl2025_guueh.py
 
 # 채택 게이트 v2 (gold·2025 SX·2025 NX paired bootstrap, 규칙은 benchmarks.md)
@@ -135,6 +135,8 @@ Do not restart from approaches already shown to be poor fits unless the goal is 
 - Joint selection among spacing alternatives improved morphological F1 on synthetic whitespace-deleted inputs, but regressed normal text and some domains while increasing loaded Node/WASM cost. It also lowered spacing-boundary F1 because it often retained the unspaced input. Do not describe it as better spacing restoration or enable it automatically. See research-history #76.
 
 - Adoption now uses gate v2 (`training/gate/`, rules in `docs/wiki/benchmarks.md`): paired bootstrap over gold, 2025 SX and a new 2025 NX held-out. Seed-only reranker retrains already produce domain point regressions up to 0.12pp, so do not reject on small-domain point estimates. A spoken-only reranker and register-specific margins gave no spoken gain even with oracle routing (#77). A re-implementation of #75 passed gate v2 on all three sets and ships as Section 17; it is not byte-identical to the deleted #75 rules (#78). A #64 re-implementation (Section 18 search costs) fails gate v2 when applied everywhere (significant gold tech/literature regressions, partly NIKL XSN-splitting conventions) but passes when gated by a spoken router (+0.80pp 2025 SX); it ships at +80KB model and +7% native time on spoken text, with the unspaced `갈수있는데` regression accepted and its test ignored (#79). Retrain Section 14/17/18 candidates together when any of them changes.
+
+- Residual re-diagnosis at 0.12.1 (#82) and its follow-up (#83, applied on main 2026-11-11). The sentence head and verifier ignore spaces; with normal spacing 0.12.1 scored 98.4% boundary F1 on fixed 2025 NX but 56–59% on NIKL online-corpus Instagram paragraphs. `splitSentences` now treats every line break as a boundary. Those Instagram sentence labels are punctuation-driven: train only on positions after terminal punctuation (weight 0 elsewhere) or the head learns not to split unpunctuated news. Trailing-ornament snapping and dropping word-internal boundaries in spaced input fixed most placement errors. Reviewed unpunctuated conversational boundaries remain at 47.8% F1 (`~/workspace/data/korean_text_boundaries/20261111-unpunct-review/`). Garu emitted 그/IC only for the 2021 transcription `그~`; strip tildes from 2021 SX when developing spoken changes (`training/ambiguity/spoken_geu.py` appends the resulting Section 17 rule; re-run it after re-mining Section 17). A local-context EC/EF re-decision is closed. Online-corpus document buckets (`sha256(id)[:8] mod 10`) 0–1 are the final test, 2–3 dev, 4–9 train.
 
 Strong historical wins:
 

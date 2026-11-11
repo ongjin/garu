@@ -4,7 +4,7 @@
 
 - **1.34MB model** bundled in npm package (no CDN needed)
 - **447KB WASM** engine (182KB gzipped) -- runs in any modern browser
-- **F1 96.18%** on 9k human-verified gold testset (ep_norm), **F1 92.09%** on a fixed 2025 spoken-language set
+- **F1 96.18%** on 9k human-verified gold testset (ep_norm), **F1 92.32%** on a fixed 2025 spoken-language set
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -97,11 +97,16 @@ splitSentences('안녕하세요반갑습니다');
 // [{ text: '안녕하세요', offset: 0 }, { text: '반갑습니다', offset: 5 }]
 splitSentences('“안녕하세요반갑습니다”');
 // [{ text: '“안녕하세요반갑습니다”', offset: 0 }]
+splitSentences('가방에 쏙! 파우치에 쏙! 너무 좋아요ㅎㅎ\n다음에 또 살게요');
+// [{ text: '가방에 쏙!', offset: 0 }, { text: '파우치에 쏙!', offset: 7 },
+//  { text: '너무 좋아요ㅎㅎ', offset: 15 }, { text: '다음에 또 살게요', offset: 24 }]
 ```
 
 No morphological analyzer is needed. The Q4 model ships in the package and inference runs offline. Passing an analyzer as `splitSentences(text, garu)` retains the slower morphology-verification path. Results retain original substrings and Unicode codepoint offsets, trimming segment edges. The existing text utilities and default analyzer keep their behavior and do not import this model.
 
-On the inspected, fixed NIKL2025 news set of 9,355 paragraphs, the default call's boundary F1 is 95.91% after whitespace deletion and 96.28% after terminal punctuation deletion as well. On Apple M4, loaded mean latency was 0.020ms in Node and 0.018ms in Chrome (median of seven rounds, 1,250 inputs averaging82.5 codepoints). Node P95 was0.061ms;45µs is not a per-input guarantee. Import and first-call costs are separate. The quote rule was added after inspecting fixed-set errors; reference conventions that split within quotations produce lower scores. See the repository research history for exact evaluation and latency scope.
+Every line break ends a sentence; join hard-wrapped lines (for example text copied from a PDF) before calling. Trailing laughter, emoji and tildes stay with the preceding sentence, and spaced input is never split inside a word.
+
+On the inspected, fixed NIKL2025 news set of 9,355 paragraphs, the default call's boundary F1 is 96.56% after whitespace deletion, 96.92% after terminal punctuation deletion as well, and 99.57% with the original spacing. On the held-out Instagram split of the NIKL online posting corpus 2025, paragraph boundary F1 is 77.89% against NIKL labels. Unpunctuated conversational text remains weak: 47.8% on a reviewed sample of 300. On Apple M4 Node, loaded mean latency was about 0.020ms per news paragraph with P95 about 0.06ms (median of seven rounds, 1,250 inputs averaging82.5 codepoints). This is not a per-input guarantee; import and first-call costs are separate. Browser latency was not remeasured for this version. The quote rule was added after inspecting fixed-set errors; reference conventions that split within quotations produce lower scores. See the repository research history for exact evaluation and latency scope.
 
 ## API
 
@@ -212,7 +217,7 @@ garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.34M
 No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
 
 **How accurate is it?**
-F1 96.18% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 92.09% on a fixed 2025 spoken-language evaluation set.
+F1 96.18% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 92.32% on a fixed 2025 spoken-language evaluation set.
 
 **Which POS tagset does it use?**
 The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.

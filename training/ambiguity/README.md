@@ -80,3 +80,29 @@ the same rule file.
 Development and fixed-set totals improved, but some individual sentences
 regressed. The rejected lattice-injection pilot and the selected final-POS
 intervention are recorded separately in the research history and review JSON.
+
+### Spoken filler `그` (appended rule, research history #83)
+
+NIKL 2021 SX transcribes the filler as `그~`, so the mined rules only cover that
+form. NIKL 2025 has no tildes, and bare `그` was always MM. `spoken_geu.py` strips
+tildes from the SX part of the `prepare.py` split, mines neighbor guards for the
+single rule (그, [그/MM]) to IC on train, and picks the grid setting with the best
+dev SX gain among settings whose dev NX F1 does not fall. It then appends the rule
+to the existing Section 17 blob. Guards are sorted before the greedy choice, so
+reruns are identical regardless of the Python hash seed.
+
+```sh
+LAB=$(mktemp -d)
+python3 training/ambiguity/prepare.py --out "$LAB/orig" --model js/models/base.gmdl
+python3 training/ambiguity/spoken_geu.py strip "$LAB/orig" "$LAB/strip"
+for s in train dev; do
+  GARU_MODEL=<model without the 그 rule> target/release/examples/analyze_batch "$LAB/strip/$s.txt" --json-spans > "$LAB/strip/$s.base.jsonl"
+done
+python3 training/ambiguity/spoken_geu.py mine "$LAB/strip"
+python3 training/ambiguity/spoken_geu.py append "$LAB/strip/rule_그.json" <model without the 그 rule> out.gmdl --blob training/codebook_data/context_rules.bin
+```
+
+The adopted rule has 32 guards (precision 0.8, support 3, documents 2). The
+`--blob` output is the Section 17 source of truth; the model builder then reproduces
+the shipped model byte for byte. Re-mining Section 17 with
+`context_rules.py` drops this rule, so append it again and re-run gate v2.

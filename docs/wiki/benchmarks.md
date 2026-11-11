@@ -15,7 +15,7 @@ wasm-pack build crates/garu-wasm --target web --out-dir ../../js/pkg
 # 골드 F1 평가 (garu만, n=9000 v15k, ep_norm)
 (cd training/gold_testset && python3 eval_f1.py --analyzers garu)
 
-# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.910. 학습 사용 금지)
+# 2025 구어 held-out 평가 (SX 16.4K문장, 2025→2021 역변환 골드, garu F1 0.923. 학습 사용 금지)
 python3 training/eval_nikl2025_guueh.py
 
 # 벤치마크 (NIKL MP 데이터: 기본 ~/workspace/data/nikl_mp_2021/. *.json glob)
