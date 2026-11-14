@@ -75,6 +75,18 @@ describe('inferred sentence boundaries', () => {
     ]);
   });
 
+  it('offsets the punctuation default past leading whitespace', () => {
+    expect(splitSentences('  공백 문장.')).toEqual([{ text: '공백 문장.', offset: 2 }]);
+    expect(splitSentences('\n첫 문장. 둘째 문장.')).toEqual([
+      { text: '첫 문장.', offset: 1 },
+      { text: '둘째 문장.', offset: 7 },
+    ]);
+    expect(splitSentences('\t탭 문장. 끝.')).toEqual([
+      { text: '탭 문장.', offset: 1 },
+      { text: '끝.', offset: 7 },
+    ]);
+  });
+
   it('returns original substrings with Unicode codepoint offsets', () => {
     const text = '  😀안녕하세요반갑습니다  ';
     const segments = splitUnspaced(text);

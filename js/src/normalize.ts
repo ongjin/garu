@@ -82,19 +82,26 @@ export function splitSentences(text: string): Segment[] {
   let match: RegExpExecArray | null;
 
   while ((match = re.exec(text)) !== null) {
-    const segText = text.slice(lastByteIdx, match.index + match[1].length).trim();
+    const raw = text.slice(lastByteIdx, match.index + match[1].length);
+    const segText = raw.trim();
     if (segText.length > 0) {
-      segments.push({ text: segText, offset: lastCharOffset });
+      segments.push({ text: segText, offset: lastCharOffset + leadingSpace(raw) });
     }
     const newStart = match.index + match[0].length;
     lastCharOffset += [...text.slice(lastByteIdx, newStart)].length;
     lastByteIdx = newStart;
   }
 
-  const last = text.slice(lastByteIdx).trim();
+  const rawLast = text.slice(lastByteIdx);
+  const last = rawLast.trim();
   if (last.length > 0) {
-    segments.push({ text: last, offset: lastCharOffset });
+    segments.push({ text: last, offset: lastCharOffset + leadingSpace(rawLast) });
   }
 
   return segments.length > 0 ? segments : [{ text: text.trim(), offset: 0 }];
+}
+
+/** Codepoints `trim()` drops from the start; JS whitespace is all BMP, so UTF-16 length is exact. */
+function leadingSpace(raw: string): number {
+  return raw.length - raw.trimStart().length;
 }
