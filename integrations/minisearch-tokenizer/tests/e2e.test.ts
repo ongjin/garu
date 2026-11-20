@@ -10,6 +10,49 @@ beforeAll(async () => {
 }, 30_000);
 
 describe('MiniSearch end-to-end with garu-minisearch-tokenizer', () => {
+  it('matches composed and decomposed Hangul in either direction', async () => {
+    const tokenize = await createTokenizer({ garu });
+    const ms = new MiniSearch({ fields: ['title'], tokenize });
+    ms.addAll([
+      { id: 'nfc', title: '학교에서 만났다' },
+      { id: 'nfd', title: '학교를 찾았다'.normalize('NFD') },
+      { id: 'other', title: '집에 갔다' },
+    ]);
+    for (const query of ['학교', '학교'.normalize('NFD')]) {
+      expect(ms.search(query).map(hit => hit.id).sort()).toEqual(['nfc', 'nfd']);
+    }
+  });
+
+  it('retrieves model numbers across Korean spacing and particles', async () => {
+    const tokenize = await createTokenizer({ garu });
+    const ms = new MiniSearch({ fields: ['title'], tokenize });
+    ms.addAll([
+      { id: 's24', title: '갤럭시S24를 샀다' },
+      { id: 's25', title: '갤럭시 S25를 샀다' },
+    ]);
+
+    for (const [query, id] of [
+      ['S24', 's24'], ['갤럭시 S24', 's24'],
+      ['S25', 's25'], ['갤럭시S25', 's25'],
+    ]) {
+      expect(ms.search(query, { combineWith: 'AND' }).map(hit => hit.id)).toEqual([id]);
+    }
+    expect(ms.search('갤럭시S2')).toEqual([]);
+  });
+
+  it('keeps C, C++ and C# distinguishable in an exact search', async () => {
+    const tokenize = await createTokenizer({ garu });
+    const ms = new MiniSearch({ fields: ['title'], tokenize });
+    ms.addAll([
+      { id: 'c', title: 'C로 작성했다' },
+      { id: 'cpp', title: 'C++로 작성했다' },
+      { id: 'cs', title: 'C#으로 작성했다' },
+    ]);
+    for (const [query, id] of [['c', 'c'], ['c++', 'cpp'], ['c#', 'cs']]) {
+      expect(ms.search(query).map(hit => hit.id)).toEqual([id]);
+    }
+  });
+
   it('matches inflected verbs through their stem', async () => {
     const tokenize = await createTokenizer({ garu });
     const ms = new MiniSearch({ fields: ['title'], tokenize });

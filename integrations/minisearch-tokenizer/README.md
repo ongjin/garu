@@ -45,12 +45,16 @@ Default filter is content-bearing morphemes only:
 |---|---|
 | NNG / NNP | 사과, 학교, 서울 |
 | VV / VA stems | 먹, 가, 빠르, 예쁘 |
-| SL | AI, BM25, Korean |
+| SL | AI, BM25, S24, C++, C# |
 | SH | 漢 |
 | NR / SN | 하나, 둘, 2024 |
 | XR | (rare) |
 
 Dropped: particles, endings, auxiliaries, punctuation. Lowercased so case doesn't matter.
+
+The current analyzer indexes `갤럭시S24를` and `갤럭시 S24` as `갤럭시` and `s24`. Searching for `S24` finds that model. To require both brand and model, use `ms.search('갤럭시 S24', { combineWith: 'AND' })`.
+
+`C`, `C++` and `C#` produce distinct terms. Modern Hangul syllables match across composed and canonically decomposed spellings. Rebuild indexes created with garu-ko 0.13.1 or earlier to pick up these changes.
 
 Tweak it if you want:
 

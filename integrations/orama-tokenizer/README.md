@@ -41,6 +41,10 @@ By default the tokenizer keeps content-bearing morphemes and drops everything el
 
 Output is lowercased so an English term inside a Korean document still matches case-insensitively. POS tags are from the standard Sejong tagset — same as `garu-ko`.
 
+The current analyzer indexes `갤럭시S24를` and `갤럭시 S24` as `갤럭시` and `s24`. Searching for `S24` finds that model. To require both brand and model, use `search(db, { term: '갤럭시 S24', threshold: 0 })`.
+
+`C`, `C++` and `C#` produce distinct terms. Orama's default prefix search for `C` can still match all three. Modern Hangul syllables match across composed and canonically decomposed spellings. Rebuild indexes created with garu-ko 0.13.1 or earlier to pick up these changes.
+
 Override the defaults whenever the default isn't what you want:
 
 ```ts

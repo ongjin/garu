@@ -50,6 +50,11 @@ describe('createTokenizer (Orama)', () => {
     expect(tokens.some((t) => ['빠르', '달리'].includes(t))).toBe(false);
   });
 
+  it('applies POS, casing and stopwords to the complete identifier', async () => {
+    const tok = await createTokenizer({ garu, posFilter: ['SL'], lowercase: false, stopwords: ['C#'] });
+    expect(tok.tokenize('갤럭시S24에서 C++와 C#을 17번')).toEqual(['S24', 'C++']);
+  });
+
   it('drops stopwords', async () => {
     const tok = await createTokenizer({
       garu,

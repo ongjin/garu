@@ -52,6 +52,11 @@ describe('createTokenizer (MiniSearch)', () => {
     expect(tokens.some((t) => ['빠르', '달리'].includes(t))).toBe(false);
   });
 
+  it('applies POS, casing and stopwords to the complete identifier', async () => {
+    const tok = await createTokenizer({ garu, posFilter: ['SL'], lowercase: false, stopwords: ['C#'] });
+    expect(tok('갤럭시S24에서 C++와 C#을 17번')).toEqual(['S24', 'C++']);
+  });
+
   it('drops stopwords (post-lowercase)', async () => {
     const tok = await createTokenizer({ garu, stopwords: ['것', '수'] });
     const tokens = tok('할 수 있는 것');
