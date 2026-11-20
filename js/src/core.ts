@@ -11,7 +11,9 @@ export type POS =
 export interface Token {
   text: string;
   pos: POS;
+  /** Inclusive Unicode code-point offset of the source span in the original input. */
   start: number;
+  /** Exclusive Unicode code-point offset of the source span in the original input. */
   end: number;
   score?: number;
 }
@@ -47,6 +49,8 @@ export interface LoadOptions {
   /** 분석 결과의 자모 형태소(ETM 'ㄴ' 등)를 U+11xx 결합 자모로 정규화.
    *  기본값 false (gold v15k 다수가 호환 자모 U+3130-318F를 사용). canonical 출력이 필요하면 true. */
   normalizeJamo?: boolean;
+  /** Defaults to 'standard' (ㄹ게/을게 EF + 요 JX). Use 'legacy' for the earlier search and output. */
+  promiseEndings?: 'legacy' | 'standard';
 }
 
 export interface ModelInfo {
@@ -70,11 +74,14 @@ export class GaruBase {
   protected _wasm: any;
   protected _loaded: boolean;
   protected _modelSize: number;
+  private readonly promiseEndings: NonNullable<LoadOptions['promiseEndings']>;
 
-  protected constructor(wasmInstance: any, modelSize: number) {
+  protected constructor(wasmInstance: any, modelSize: number, promiseEndings: LoadOptions['promiseEndings'] = 'standard') {
     this._wasm = wasmInstance;
     this._loaded = true;
     this._modelSize = modelSize;
+    this.promiseEndings = promiseEndings;
+    if (promiseEndings === 'legacy') wasmInstance.use_legacy_promise_endings();
   }
 
   /**
@@ -193,7 +200,7 @@ export class GaruBase {
     return {
       version: this._wasm.constructor.version(),
       size: this._modelSize,
-      accuracy: 0.9618,
+      accuracy: this.promiseEndings === 'legacy' ? 0.9618 : 0.9617,
     };
   }
 

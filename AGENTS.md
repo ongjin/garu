@@ -3,9 +3,10 @@
 ## 프로젝트 개요
 
 브라우저에서 실행되는 초경량 한국어 형태소 분석기. 코드북 + N-best Viterbi + 어절 캐시 + 후처리 규칙 + 재순위 perceptron + 구어 입력용 탐색 비용 보정으로 동작 (CNN 폐기).
-- **F1 96.176%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.321% / 2025 문어 held-out 86.426% — 2026-11-11 실측, 앞의 둘은 연구 선택에 노출된 고정셋. 0.13.1 배포본(모델은 0.13.0과 동일)
-- **기본 모델 1,344,225 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18 포함)
-- **WASM** — raw 447,575 B / `gzip -9` 190,669 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 현재 실행 비용 비교는 연구 이력 #70·#78·#79 참조.
+- **F1 96.170%** (9,000문장 v15k 골드 테스트셋, ep_norm 정규화) / 2025 구어 고정 평가 92.329% / 2025 문어 held-out 86.426% — 2026-11-20 기본 설정 실측(0.14.0), 앞의 둘은 연구 선택에 노출된 고정셋. 0.13.1과의 비교와 약속 어미에 한한 채택 예외는 연구 이력 #85 참조
+- **기본 모델 1,428,359 B** (brotli q=11, npm 패키지에 포함, CDN 불필요. 재순위 Section14, 문맥 POS 교정 Section16·17, 구어 탐색 비용 Section18, 사다·살다 문맥 분류 Section19 포함)
+- **WASM** — raw 471,349 B / `gzip -9` 201,317 B (opt-level=3 + wasm-opt -O3 + brotli decoder). 실행 비용 비교는 연구 이력 #70·#78·#79·#85·#86 참조.
+- 현대 한글의 결합 자모는 분석과 사용자 사전 조회 전에 음절로 조합하며 토큰 위치는 원문 코드포인트 기준이다. 영숫자 모델 번호와 C++·C#·F# 표기는 검색어로 보존한다. 기본 분석은 약속 어미와 보조사 요를 분리한다. 0.13.1 방식은 `Garu.load({ promiseEndings: 'legacy' })`로 선택한다(연구 이력 #85). 약속형 잔여 오류, 사다·살다 Q8 분류기와 거래요 대조 결과는 [검수 기록](docs/wiki/promise-residuals.md)에 있다.
 - **선택형 무공백 처리** — `garu-ko/text`의 `restoreSpacing`·`splitUnspaced`, `garu-ko/sentences`의 인용문 보존·Q4 문맥 검증. `splitSentences(text)`는 분석기 없이 실행하는 빠른 기본 호출이며, `(text, garu)`는 기존 형태소 검증 경로다. 줄바꿈은 항상 문장 경계다. 기본 분석 경로에는 자동 적용하지 않음. 속도·정확도 범위는 연구 이력 #71·#73·#74·#83 참조.
 
 ### Purpose (영문 원문)
@@ -57,6 +58,7 @@ Primary constraints:
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
            → 재순위 perceptron (Section 14, 확신 마진 τ=4 넘을 때만 교체)
            → 학습 문맥 조건에 따른 최종 POS 교정 (Section16 캐시 일치 → Section17 최종 출력열 일치, 형태·경계 유지)
+           → 표준 분석의 1위 후보에서 사다·살다 어간을 문맥으로 선택 (Section19)
            → 출력
 ```
 
@@ -65,6 +67,7 @@ Primary constraints:
 - `crates/garu-core/src/model.rs` — Analyzer (N-best Viterbi + POS override + 재순위 게이트). POS 보정 규칙은 폐기된 CNN의 골드 행동을 distill한 것 (추론은 안 함)
 - `crates/garu-core/src/rerank.rs` — 재순위 perceptron (FNV-1a feature hashing — `training/rerank/features.py`와 바이트 단위 동일 필수)
 - `crates/garu-core/src/search.rs` — Section 18 아크 feature·탐색 비용·구어 판별기 (판별기 해시는 `training/search/router.py`와 동일 필수, 학습은 `examples/search_train.rs`)
+- `crates/garu-core/src/homograph.rs` — Section 19 사다·살다 문맥 분류와 국소 후보 확인. 학습은 `training/ambiguity/train_homograph.py`.
 - `crates/garu-core/src/trie.rs` — FST 사전 (다중 POS: u64에 2개 POS pack)
 - `crates/garu-core/src/types.rs` — 42개 세종 POS 태그 enum
 - `crates/garu-wasm/src/lib.rs` — WASM 바인딩

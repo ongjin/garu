@@ -50,6 +50,15 @@ python3 training/gate/gate.py /tmp/base /tmp/cand --json /tmp/gate.json
 python3 -m unittest discover -s training/gate -p 'test_*.py'
 ```
 
+약속 어미의 구버전 동작은 `GARU_PROMISE_ENDINGS=legacy`로 비교한다. `score.py predict`에 전달하면 같은 `analyze_batch` 바이너리와 모델로 해당 설정을 평가한다. 학습·개발 분할에서 약속 어미 인식, 어간 일치, 오인을 재집계하려면 저장소 루트에서 다음 명령을 실행한다.
+
+```sh
+cargo build --release --example analyze_batch
+python3 training/ambiguity/promise_endings.py
+```
+
+`recognized`는 약속 어미 인식, `stem_match`는 선어말어미를 건너뛴 동사 어간의 형태 일치, `word_match`는 해당 어절의 전체 형태·품사열 ep_norm 일치다. 세 수치는 각각 따로 해석한다. [검수 사례와 #86 결과](promise-residuals.md)
+
 **세트.** `gold`=v15k 9,000문장(층=7도메인, 단위=문장), `sx25`=NIKL 2025 구어 16,407문장(단위=문서 75개), `nx25`=NIKL 2025 문어(2023년 기사) 13,765문장(층=9주제, 단위=문서 1,027개). 2025 두 세트는 기존 held-out과 같은 필터·`reverse_convert`·ep_norm을 쓴다. nx25는 v15k·재순위 train/dev와 공백 제거 텍스트 중복이 없고, 역변환 왕복 성질은 13,692/13,765(99.47%)에서 성립한다.
 
 **판정.** Δ = 후보 − 기준 ep_norm micro F1. 층 안에서 단위를 복원추출하는 paired bootstrap(B=10,000, seed 20261102)으로 분위를 구한다.

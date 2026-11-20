@@ -106,3 +106,15 @@ The adopted rule has 32 guards (precision 0.8, support 3, documents 2). The
 `--blob` output is the Section 17 source of truth; the model builder then reproduces
 the shipped model byte for byte. Re-mining Section 17 with
 `context_rules.py` drops this rule, so append it again and re-run gate v2.
+
+## Section 19
+
+`train_homograph.py` trains the 사/살 classifier using the retained NIKL 2021 training sentence IDs and text hashes in `~/workspace/data/korean_context_pos/20261020/train.refs.jsonl.gz`. The script removes Section 19 from its input model before deriving context features. The model builder reads `training/codebook_data/homograph.q8` as the source of truth.
+
+Reproduce the adopted weights with Python 3.12.13, Brotli 1.2.0, NumPy 2.5.3, SciPy 1.18.1 and scikit-learn 1.9.1. Run from the repository root:
+
+```sh
+cargo build --release --example analyze_batch
+OPENBLAS_NUM_THREADS=1 python3 training/ambiguity/train_homograph.py --analyzer target/release/examples/analyze_batch --base js/models/base.gmdl --out /tmp/garu-homograph.q8
+cmp /tmp/garu-homograph.q8 training/codebook_data/homograph.q8
+```

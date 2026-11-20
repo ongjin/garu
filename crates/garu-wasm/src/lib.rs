@@ -55,6 +55,10 @@ impl GaruWasm {
         Ok(GaruWasm { analyzer })
     }
 
+    pub fn use_legacy_promise_endings(&mut self) {
+        self.analyzer.use_legacy_promise_endings();
+    }
+
     pub fn analyze(&self, text: &str) -> Result<JsValue, JsError> {
         let result = self.analyzer.analyze(text);
         let js_result = convert_result(result);

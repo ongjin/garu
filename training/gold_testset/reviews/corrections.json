@@ -1,5 +1,5 @@
 {
-  "source": "/Users/cyj/workspace/personal/garu/training/gold_testset/gold_testset.jsonl",
+  "source": "../gold_testset.jsonl",
   "source_sha256": "3a5fa4194b2ae3eec58296674408e8f1d409a72205777044455b9c1b838bbb96",
   "terms_reviewed": [
     "가속도계",
@@ -183,6 +183,21 @@
       "review_scope": "문맥과 국립국어원 일반/고유명사 원칙의 적용. 각 출처가 세종태그를 직접 부여한 것은 아님."
     }
   ],
+  "promise_endings": {
+    "sources": ["https://www.korean.go.kr/front/onlineQna/onlineQnaView.do?mn_id=216&qna_seq=331150", "https://www.korean.go.kr/front/onlineQna/onlineQnaView.do?mn_id=216&qna_seq=308180"],
+    "reason": "약속이나 의지를 나타내는 종결 어미 -ㄹ게·-을게 뒤의 보조사 요를 별도 토큰으로 기록한다. 종성의 원래 자모 인코딩은 보존한다.",
+    "occurrences": [
+      {"gold_line": 1136, "token_index": 4, "text": "카드로 계산할게요.", "before": ["ㄹ게요", "EF"]},
+      {"gold_line": 1638, "token_index": 4, "text": "여기 메뉴 좀 볼게요.", "before": ["ㄹ게요", "EF"]},
+      {"gold_line": 6594, "token_index": 5, "text": "네 위에 이제 올릴게요.", "before": ["ᆯ게요", "EF"]},
+      {"gold_line": 7160, "token_index": 11, "text": "같이 고기랑 싸서 드시라고 담아 놀게요.", "before": ["ᆯ게요", "EF"]},
+      {"gold_line": 7271, "token_index": 5, "text": "요때 파 넣어줄게요.", "before": ["ᆯ게요", "EF"]},
+      {"gold_line": 7377, "token_index": 9, "text": "한상 차림 가지고 여러분 만나뵐게요.", "before": ["ᆯ게요", "EF"]},
+      {"gold_line": 7483, "token_index": 5, "text": "조금만 넣어 줄게요", "before": ["ᆯ게요", "EF"]},
+      {"gold_line": 7557, "token_index": 9, "text": "자 그 다음에 여기에다가 미나리를 넣을게요.", "before": ["을게요", "EF"]},
+      {"gold_line": 7898, "token_index": 9, "text": "오랜만에 내 역할 좀 해볼게요.", "before": ["ᆯ게요", "EF"]}
+    ]
+  },
   "frozen_benchmark_policy": "Original gold remains the primary regression gate; this corrected copy is a separately reported annotation view, never a training input or parameter-selection set.",
   "review_note": "독립 리뷰 후 클러스터 오토스케일러는 Cluster Autoscaler 소프트웨어명 해석이 가능하므로 클러스터 토큰의 품사 교정은 보류. 나머지4토큰만 별도 주석판에서 교정."
 }

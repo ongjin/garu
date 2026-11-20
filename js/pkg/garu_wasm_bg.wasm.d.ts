@@ -8,6 +8,7 @@ export const garuwasm_analyze_topn: (a: number, b: number, c: number, d: number,
 export const garuwasm_clear_user_words: (a: number) => void;
 export const garuwasm_new: (a: number, b: number, c: number, d: number) => void;
 export const garuwasm_tokenize: (a: number, b: number, c: number, d: number) => void;
+export const garuwasm_use_legacy_promise_endings: (a: number) => void;
 export const garuwasm_user_word_count: (a: number) => number;
 export const garuwasm_version: (a: number) => void;
 export const __wbindgen_export: (a: number, b: number) => number;

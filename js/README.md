@@ -2,9 +2,9 @@
 
 **Browser-native Korean morphological analyzer.** No server required.
 
-- **1.34MB model** bundled in npm package (no CDN needed)
-- **447KB WASM** engine (182KB gzipped) -- runs in any modern browser
-- **F1 96.18%** on 9k human-verified gold testset (ep_norm), **F1 92.32%** on a fixed 2025 spoken-language set
+- **1.43MB model** bundled in npm package (no CDN needed)
+- **471KB WASM** engine (201KB gzipped) -- runs in any modern browser
+- **F1 96.17%** on the 9,000-sentence v15k gold set (ep_norm), **F1 92.33%** on a fixed 2025 spoken-language set
 - **~1ms** inference per sentence
 - **Offline-ready** -- works without network
 - **[Live Demo](https://garu.zerry.co.kr)** -- try it in your browser
@@ -36,7 +36,7 @@ console.log(result.tokens);
 //   { text: '배',   pos: 'NNG', start: 0, end: 2 },
 //   { text: '가',   pos: 'JKS', start: 0, end: 2 },
 //   { text: '아프', pos: 'VA',  start: 3, end: 6 },
-//   { text: '어서', pos: 'EC',  start: 3, end: 6 },
+//   { text: '아서', pos: 'EC',  start: 3, end: 6 },
 //   { text: '약',   pos: 'NNG', start: 7, end: 9 },
 //   { text: '을',   pos: 'JKO', start: 7, end: 9 },
 //   { text: '먹',   pos: 'VV',  start: 10, end: 13 },
@@ -46,7 +46,7 @@ console.log(result.tokens);
 
 // Simple tokenization
 const tokens = garu.tokenize('나는 학교에 간다');
-// ['나', '는', '학교', '에', '간다']
+// ['나', '는', '학교', '에', '가', 'ㄴ다']
 
 garu.destroy(); // free WASM memory
 ```
@@ -118,6 +118,7 @@ Initialize WASM and load model. Uses bundled model by default.
 |---|---|---|
 | `modelData` | `ArrayBuffer` | Provide model bytes directly |
 | `modelUrl` | `string` | Fetch model from URL |
+| `promiseEndings` | `'legacy' \| 'standard'` | Defaults to `'standard'`, which analyzes `먹을게요` as `먹/VV + 을게/EF + 요/JX`. Use `'legacy'` for the promise-ending behavior of 0.13.1. |
 
 ### `garu.analyze(text, options?): AnalyzeResult`
 
@@ -127,10 +128,14 @@ Returns morphological tokens with POS tags (Sejong tagset).
 interface Token {
   text: string;   // surface form
   pos: POS;       // POS tag
-  start: number;  // eojeol start offset
-  end: number;    // eojeol end offset
+  start: number;  // start in original Unicode code points
+  end: number;    // exclusive end in original Unicode code points
 }
 ```
+
+By default, Garu selects the verb stem `사/VV` (buy) in `이걸 살게요` and `살/VV` (live) in `여기서 평생 살게요`. Setting `promiseEndings: 'legacy'` also disables this contextual correction.
+
+Modern Hangul has the same analysis in composed and decomposed input. User dictionary lookups also accept either spelling. For example, `garu.nouns('학교'.normalize('NFD'))` returns `['학교']`. Its span is `[0, 5)` in original code points.
 
 Set `options.topN > 1` to get N-best results as an array. Note: topN > 1 is not yet fully supported and may return fewer results.
 
@@ -211,13 +216,13 @@ await search(db, { term: '먹다' })  // ← matches
 ## FAQ
 
 **What is garu-ko?**
-garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.34MB model and a 447KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
+garu-ko (가루/Garu) is a browser-native Korean morphological analyzer. A 1.43MB model and a 471KB WASM engine run entirely in the browser, so it segments Korean text, tags parts of speech, extracts nouns, and tokenizes with no server and no network.
 
 **Does it need a server or API?**
 No. It runs 100% client-side via WebAssembly. After the initial load there is no backend call, so it works offline and inside browser extensions, service-worker PWAs, and intranet apps.
 
 **How accurate is it?**
-F1 96.18% on a 9,000-sentence human-verified gold testset (ep_norm), and F1 92.32% on a fixed 2025 spoken-language evaluation set.
+F1 96.17% on a 9,000-sentence v15k gold set (ep_norm), and F1 92.33% on a fixed 2025 spoken-language evaluation set.
 
 **Which POS tagset does it use?**
 The Sejong tagset (42 tags) from the National Institute of Korean Language — NNG/NNP for nouns, VV/VA for verbs/adjectives, particles, endings, and symbols.

@@ -49,6 +49,6 @@ export class Garu extends GaruBase {
     }
 
     const wasmInstance = new wasmModule.GaruWasm(modelBytes, options?.normalizeJamo ?? false);
-    return new Garu(wasmInstance, modelBytes.byteLength);
+    return new Garu(wasmInstance, modelBytes.byteLength, options?.promiseEndings);
   }
 }

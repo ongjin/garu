@@ -5,6 +5,7 @@
 //! POS corrections distilled from CNN's behavior on the gold testset.
 
 use crate::codebook::{CodebookAnalyzer, compat_to_combining_jongseong, normalize_surface_leading_jamo};
+use crate::hangul_input::HangulInput;
 use crate::types::{AnalyzeResult, Pos, Token};
 
 /// 런타임 동작 옵션. 기본값은 production-safe.
@@ -21,6 +22,8 @@ impl Default for AnalyzerOptions {
         Self { normalize_jamo: false }
     }
 }
+
+enum OutputPath { Selected, Candidate }
 
 pub struct Analyzer {
     codebook: CodebookAnalyzer,
@@ -45,10 +48,15 @@ impl Analyzer {
         Ok(Self { codebook, options })
     }
 
+    /// Use the 0.13.1 search and output for polite promise endings.
+    pub fn use_legacy_promise_endings(&mut self) {
+        self.codebook.standard_promise_endings = false;
+    }
+
     /// 사용자 단어 등록 — 모델 리빌드 없이 도메인 어휘를 인식시킨다.
     /// `freq`는 사전 빈도와 같은 척도(생략 시 `DEFAULT_USER_WORD_FREQ`).
     pub fn add_user_word(&mut self, surface: &str, pos: Pos, freq: Option<u32>) {
-        self.codebook.add_user_word(surface, pos, freq);
+        self.codebook.add_user_word(&HangulInput::new(surface).text, pos, freq);
     }
 
     /// 등록된 사용자 단어를 모두 제거.
@@ -62,13 +70,53 @@ impl Analyzer {
     }
 
     pub fn analyze(&self, text: &str) -> AnalyzeResult {
-        let mut result = self.analyze_inner(text);
-        self.codebook.apply_context_cache(text, &mut result.tokens);
-        self.codebook.apply_context_rules(text, &mut result.tokens);
-        if self.options.normalize_jamo {
-            Self::apply_jamo_normalization(&mut result.tokens);
-        }
+        let input = HangulInput::new(text);
+        let mut result = self.analyze_inner(&input.text);
+        self.finish_tokens(&input, &mut result.tokens, OutputPath::Selected);
         result
+    }
+
+    fn finish_tokens(&self, input: &HangulInput<'_>, tokens: &mut Vec<Token>, path: OutputPath) {
+        self.codebook.apply_context_cache(&input.text, tokens);
+        self.codebook.apply_context_rules(&input.text, tokens);
+        if self.codebook.standard_promise_endings && input.text.contains("게요") {
+            self.split_promise_endings(tokens);
+        }
+        if matches!(path, OutputPath::Selected) && self.codebook.standard_promise_endings {
+            if let Some(model) = &self.codebook.homograph {
+                model.apply(self, &input.text, tokens);
+            }
+        }
+        if self.options.normalize_jamo {
+            Self::apply_jamo_normalization(tokens);
+        }
+        input.restore_offsets(tokens);
+    }
+
+    // The reranker was trained on joined promise forms. Public analyses expose
+    // the final ending and the polite particle, both with the original eojeol span.
+    fn split_promise_endings(&self, tokens: &mut Vec<Token>) {
+        let is_joined = |t: &Token| t.pos == Pos::EF && matches!(t.text.as_str(), "ㄹ게요" | "을게요");
+        let count = tokens.iter().filter(|t| is_joined(t)).count();
+        if count == 0 { return; }
+        let mut output: Vec<Token> = Vec::with_capacity(tokens.len() + count);
+        for mut token in tokens.drain(..) {
+            let joined = is_joined(&token);
+            // An explicitly registered, standalone EF is a literal dictionary
+            // word. The same ending attached to a verb still has the particle.
+            let literal = joined && self.codebook.user_word_pos(&token.text) == Some(Pos::EF)
+                && !output.last().is_some_and(|prev| prev.start == token.start
+                    && matches!(prev.pos, Pos::VV | Pos::VX | Pos::XSV | Pos::EP));
+            if joined && !literal {
+                token.text.pop();
+                let yo = Token { text: "요".to_owned(), pos: Pos::JX, ..token };
+                output.push(token);
+                output.push(yo);
+            } else {
+                output.push(token);
+            }
+        }
+        *tokens = output;
     }
 
     fn analyze_inner(&self, text: &str) -> AnalyzeResult {
@@ -169,7 +217,7 @@ impl Analyzer {
 
     /// Normalize leading compat jamo (U+3130-318F) in ETM/EC/EF/EP/JKO/JX token
     /// surfaces to combining jongseong jamo (U+11A8-11FF).
-    fn apply_jamo_normalization(tokens: &mut Vec<Token>) {
+    fn apply_jamo_normalization(tokens: &mut [Token]) {
         for tok in tokens.iter_mut() {
             let needs = tok.text.chars().next()
                 .and_then(compat_to_combining_jongseong)
@@ -236,13 +284,10 @@ impl Analyzer {
     }
 
     pub fn analyze_topn(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
-        let mut results = self.analyze_topn_for_rerank(text, n);
+        let input = HangulInput::new(text);
+        let mut results = self.rerank_candidates(&input.text, n);
         for result in &mut results {
-            self.codebook.apply_context_cache(text, &mut result.tokens);
-            self.codebook.apply_context_rules(text, &mut result.tokens);
-            if self.options.normalize_jamo {
-                Self::apply_jamo_normalization(&mut result.tokens);
-            }
+            self.finish_tokens(&input, &mut result.tokens, OutputPath::Candidate);
         }
         results
     }
@@ -262,6 +307,15 @@ impl Analyzer {
     }
 
     pub fn analyze_topn_for_rerank(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
+        let input = HangulInput::new(text);
+        let mut results = self.rerank_candidates(&input.text, n);
+        for result in &mut results {
+            input.restore_offsets(&mut result.tokens);
+        }
+        results
+    }
+
+    fn rerank_candidates(&self, text: &str, n: usize) -> Vec<AnalyzeResult> {
         let mut results = self.codebook.analyze_topn(text, n);
         for result in &mut results {
             Self::apply_rerank_rules(&mut result.tokens);

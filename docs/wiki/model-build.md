@@ -4,7 +4,7 @@
 
 기본 형태소 모델은 사전·탐색 비용과 학습된 보정 데이터를 함께 보관한다. 리빌드할 때 큐레이션한 캐시와 채택된 보정 blob을 보존해야 기존 분석을 재현할 수 있다. 선택적 띄어쓰기·문장 경계 모델은 이 GMDL에 포함하지 않는다.
 
-| Section | 내용 | 크기 (raw bytes, 2026-10-20) |
+| Section | 내용 | 크기 (raw bytes) |
 |---------|------|------|
 | 6 | 내용어 사전 (FST, 다중 POS) | 1,132,342 |
 | 7 | 접미사 코드북 (44,760패턴, string table + u8 freq 양자화) | 1,010,736 |
@@ -16,9 +16,10 @@
 | 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 251,500 |
 | 14 | N-best 재순위 perceptron 가중치 (95K sparse, ver=2 varint+int16) | 284,651 |
 | 16 | 문맥 조건부 POS 교정 (58어절, 220조건) | 3,054 |
-| 17 | 최종 출력열 일치 POS 교정 (246규칙, 624조건, 2026-11-02) | 10,742 |
+| 17 | 최종 출력열 일치 POS 교정 (247규칙) | 10,986 |
 | 18 | 구어 탐색 비용 보정 (아크 가중치 20K + 2^15 int8 판별기, 2026-11-02) | 94,575 |
-| — | **brotli q=11 압축 후** | **1,343,482 B** |
+| 19 | 사다·살다 문맥 분류 (해시 17,535개와 int8 계수) | 87,687 |
+| — | **brotli q=11 압축 후** | **1,428,359 B** |
 
 ⚠️ **Section 7 string table은 u16 오프셋 한계(65,535 B)에 거의 닿아 있다** — 현행 `MIN_SUFFIX_FREQ=75`에서 64,562 B(98.5%)라 형태를 ~140개만 더 늘려도 넘친다. 빌더는 넘칠 때만 sub-version 2(u32 오프셋)로 승격하고 그 미만은 기존 포맷 그대로 기록하므로 현행 모델은 byte-identical이다(research-history #54). 디코더는 1·2 모두 읽는다. **승격된 모델은 0.9.16 이하 런타임이 못 읽으니 배포 시 버전 게이트 확인.** 임계를 낮춰 코드북을 키우는 것 자체는 F1 이득이 없다(th=10에서 +0.03pp에 모델 +53%).
 
@@ -43,6 +44,8 @@
 **suffix-충돌 제거 오폭 주의**: 빌더는 코드북에 기능형태소 분석이 있는 명사류(REMOVABLE_POS)를 사전에서 제거하는데(배가/NNG가 배+가를 막는 것 방지), **실제 단어가 지워질 수 있다** — 의대/NNG(freq 480)가 코드북 `의/JKG+대/XPN`(freq 1955)에 밀려 삭제돼 `의대 증원`→의+대 과분해(research-history #38). 수동 검토한 `tech_supplement.txt` 등재 단어만 이 제거에서 보호한다. 대량 반입 목록인 `bulk_supplement.tsv`는 같은 예외를 받지 않으므로, 빌드 후 실제 FST에 반영됐는지 확인한다. 저빈도 복합명사 과분해(의상실 freq 3 → 의+상실)도 수동 supplement freq bump(200이면 충분 — 저빈도 비선형 페널티 구간만 벗어나면 됨)로 수리.
 
 **불규칙 활용 증강** (Section 7 코드북, `build_codebook_model.py`): `augment_irregular_conjugations`가 content_dict의 ㅂ/ㄷ/ㅅ/르/ㅡ탈락/ㅎ 어간을 `SUFFIX_COMBOS`(어/었/은/을/으니…) 활용형으로 펼쳐 코드북에 넣는다. ㅂ불규칙 과거(추웠다=춥+었), ㅅ불규칙(`IRREG_SIOT_STEMS`, 저었다=젓+었), ㅡ탈락 과거(아팠다=아프+었, ㅆ-병합)까지 커버. `augment_irregular_honorific`은 ㅂ/ㄷ/ㅅ 어간+존댓말(고우시다=곱+으시+다, 걸으신다=걷+으시, 저으신다=젓+으시)을 어절 단위로 주입 — `augment_honorific`(자음어간 접미사만)이 못 잡는 불규칙 surface prefix 붕괴를 막음. 회귀 가드 `training/test_irregular_restore.py`(과거·존댓말·정칙불변). 정칙 ㅂ(좁다)·계사(이었다)는 과대생성돼도 실텍스트에 없어 무해(v15k 무회귀로 확인).
+
+**Section 19 (사다·살다 문맥 분류)**. 정본은 `training/codebook_data/homograph.q8`이다. 12바이트 헤더(bias·scale·특징 수) 다음에 FNV-1a u32 해시와 int8 계수가 해시 순으로 들어간다. Section 19가 없는 기존 GMDL도 읽을 수 있다. 2021년 학습 문서에서 대상 어절을 가리고 좌우 네 어절로 학습했다. [학습 재현](../../training/ambiguity/README.md#section-19) · [평가와 비용](promise-residuals.md)
 
 ## 학습 자료 위치
 
@@ -135,6 +138,8 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 - `training/neural/prepare_data.py`, `training/neural/experiment_all.py` — *(폐기된 CNN 학습용. 현재 분석기는 CNN 미사용 — `research-history.md` 참조)*
 
 ## 이력
+
+- 2026-11-20 Section 19를 기본 모델에 채택했다. 재빌드 SHA-256은 `f9fbfa457ac0e7dca68fca4ea8813ddcffebb4b3a461e0f8ffd363b115a7361a`다.
 
 - 2026-11-11 Section 17에 구어 담화표지 `그` 규칙을 추가하고 `제가`의 형태를 `제/NP`로 고쳤다(Rust `fix_colloquial_pronouns`). 모델 1,344,225B(+743B), SHA-256 `bb3f0ddaa9878bdb5ffba28e5634266a6197ab2f588deb8c625be38202d1ee4d`. 빌더 재생성이 바이트 동일하고 게이트 v2를 통과했다. 상세는 연구 이력 #83.
 - 2026-11-02 Section 18 구어 탐색 비용 보정 채택. 모델 1,343,482B(+79,588B), SHA-256 `daec0d758cb6024dbd6c3243b11582a63b5b8d1197b6d8e9b7e23df1e7434fb5`. 게이트 v2 통과, 집중 테스트 1건 알려진 회귀. 상세는 연구 이력 #79.

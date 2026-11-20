@@ -8,6 +8,51 @@ fn load_analyzer() -> Analyzer {
 }
 
 #[test]
+fn product_model_boundaries() {
+    let analyzer = load_analyzer();
+    for number in 20..=26 {
+        let model = format!("S{number}");
+        let input = format!("갤럭시{model}에서 촬영했다");
+        let result = analyzer.analyze(&input);
+        let prefix: Vec<_> = result.tokens.iter().take(3)
+            .map(|t| (t.text.as_str(), t.pos)).collect();
+        assert_eq!(prefix, [("갤럭시", Pos::NNP), (model.as_str(), Pos::SL), ("에서", Pos::JKB)], "{input}");
+    }
+
+    let spoken = analyzer.analyze("그냥 갤럭시S24인데요?");
+    assert!(spoken.tokens.iter().any(|t| t.text == "S24" && t.pos == Pos::SL));
+
+    let channel = analyzer.analyze("채널A2주년을 맞았다");
+    let anniversary: Vec<_> = channel.tokens.iter().take(3).map(|t| t.text.as_str()).collect();
+    assert_eq!(anniversary, ["채널A", "2", "주년"]);
+}
+
+#[test]
+fn language_name_suffixes() {
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("C, C++17, C#과 F#");
+    let technical: Vec<_> = result.tokens.iter()
+        .filter(|t| matches!(t.pos, Pos::SL | Pos::SN))
+        .map(|t| t.text.as_str()).collect();
+    assert_eq!(technical, ["C", "C++", "17", "C#", "F#"]);
+}
+
+#[test]
+fn numbered_name_before_acronym() {
+    let analyzer = load_analyzer();
+    for (input, name, initialism) in [
+        ("기안84TV에서 봤다", "기안84", "TV"),
+        ("뉴스1TV로 시청했다", "뉴스1", "TV"),
+        ("K리그1MVP를 발표했다", "K리그1", "MVP"),
+        ("FC 샬케 04U19에서 뛴다", "FC 샬케 04", "U19"),
+    ] {
+        let result = analyzer.analyze(input);
+        let parts: Vec<_> = result.tokens.iter().take(2).map(|t| (t.text.as_str(), t.pos)).collect();
+        assert_eq!(parts, [(name, Pos::NNP), (initialism, Pos::SL)], "{input}");
+    }
+}
+
+#[test]
 fn test_curated_domain_lexemes_are_not_oversegmented() {
     let analyzer = load_analyzer();
     let cases = [
@@ -750,6 +795,85 @@ fn test_issue2_lge_monosyllable_eul() {
 }
 
 #[test]
+fn test_polite_promise_endings() {
+    let analyzer = load_analyzer();
+    let mut failures = Vec::new();
+    for (input, stem, pos, ending) in [
+        ("제가 먹을게요", "먹", Pos::VV, "을게"),
+        ("제가 잡을게요.", "잡", Pos::VV, "을게"),
+        ("주말에는 집안일을 도울게요.", "돕", Pos::VV, "을게"),
+        ("“제가 지을게요.”라고 말했다.", "짓", Pos::VV, "을게"),
+        ("잠깐 누울게요.", "눕", Pos::VV, "을게"),
+        ("쓰레기는 제가 주울게요.", "줍", Pos::VV, "을게"),
+        ("말씀을 들을게요.", "듣", Pos::VV, "을게"),
+        ("짐을 실을게요.", "싣", Pos::VV, "을게"),
+        ("제가 만들게요!", "만들", Pos::VV, "ㄹ게"),
+        ("짐은 제가 맡길게요.", "맡기", Pos::VV, "ㄹ게"),
+        ("결과를 받아들일게요.", "받아들이", Pos::VV, "ㄹ게"),
+        ("약속할게요.", "하", Pos::XSV, "ㄹ게"),
+    ] {
+        let has_promise = |result: &garu_core::types::AnalyzeResult| {
+            result.tokens.windows(3).any(|parts| {
+                parts[0].text == stem && parts[0].pos == pos
+                    && parts[1].text == ending && parts[1].pos == Pos::EF
+                    && parts[2].text == "요" && parts[2].pos == Pos::JX
+            })
+        };
+        let selected = analyzer.analyze(input);
+        let reachable = analyzer.analyze_topn(input, 10).iter().any(has_promise);
+        if !has_promise(&selected) || !reachable {
+            failures.push((input, reachable, selected.tokens));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn test_legacy_promise_endings() {
+    let mut analyzer = load_analyzer();
+    analyzer.use_legacy_promise_endings();
+    assert_analysis(&analyzer, "제가 할게요", &[
+        ("제", Pos::NP), ("가", Pos::JKS), ("하", Pos::VV), ("ㄹ게요", Pos::EF),
+    ]);
+    assert!(!analyzer.analyze_topn("잠깐 누울게요.", 10).iter().any(|r| {
+        r.tokens.iter().any(|t| t.text == "눕" && t.pos == Pos::VV)
+    }));
+}
+
+#[test]
+fn test_polite_promise_guards() {
+    let mut analyzer = load_analyzer();
+    for input in ["먹을 게 있어요.", "먹을 게요.", "그러게요.", "가게요.", "별게요.", "물개요."] {
+        let result = analyzer.analyze(input);
+        assert!(!result.tokens.iter().any(|t| t.pos == Pos::EF
+                        && matches!(t.text.as_str(), "을게요" | "ㄹ게요" | "을게" | "ㄹ게")),
+                "{input}: {:?}", result.tokens);
+    }
+    let readings = analyzer.analyze_topn("이걸 살게요.", 10);
+    for stem in ["사", "살"] {
+        assert!(readings.iter().any(|r| r.tokens.windows(2).any(|pair| {
+            pair[0].text == stem && pair[0].pos == Pos::VV
+                && pair[1].text == "ㄹ게" && pair[1].pos == Pos::EF
+        })), "{stem} reading missing");
+    }
+    for (surface, stem) in [("먹을게요", "먹"), ("누울게요", "눕")] {
+        analyzer.add_user_word(stem, Pos::VV, Some(5000));
+        assert_analysis(&analyzer, surface, &[(stem, Pos::VV), ("을게", Pos::EF), ("요", Pos::JX)]);
+    }
+    analyzer.add_user_word("눕", Pos::NNP, Some(5000));
+    assert!(!analyzer.analyze_topn("누울게요", 10).iter().any(|r| {
+        r.tokens.iter().any(|t| t.text == "눕" && t.pos == Pos::VV)
+    }));
+    analyzer.add_user_word("누울게요", Pos::NNP, Some(u32::MAX));
+    assert_analysis(&analyzer, "누울게요", &[("누울게요", Pos::NNP)]);
+    for literal in ["을게요", "ㄹ게요"] {
+        analyzer.add_user_word(literal, Pos::EF, Some(u32::MAX));
+        assert_analysis(&analyzer, literal, &[(literal, Pos::EF)]);
+    }
+    assert_analysis(&analyzer, "먹을게요", &[("먹", Pos::VV), ("을게", Pos::EF), ("요", Pos::JX)]);
+}
+
+#[test]
 fn test_issue2_iri_mag_demotion() {
     let analyzer = load_analyzer();
 
@@ -1169,7 +1293,7 @@ fn test_spoken_filler_geu_and_jega() {
         ("착하", Pos::VA), ("아요", Pos::EF),
     ]);
     assert_analysis(&analyzer, "제가 할게요", &[
-        ("제", Pos::NP), ("가", Pos::JKS), ("하", Pos::VV), ("ㄹ게요", Pos::EF),
+        ("제", Pos::NP), ("가", Pos::JKS), ("하", Pos::VV), ("ㄹ게", Pos::EF), ("요", Pos::JX),
     ]);
     assert_analysis(&analyzer, "제 생각에는 좋아요", &[
         ("저", Pos::NP), ("의", Pos::JKG), ("생각", Pos::NNG), ("에", Pos::JKB),

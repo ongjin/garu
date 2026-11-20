@@ -617,6 +617,8 @@ pub struct CodebookAnalyzer {
     user_dict: HashMap<String, (Pos, u32)>,
     /// user_dict 표면의 최대 음절 수 — 주입 스캔 길이 상한.
     user_dict_max_chars: usize,
+    pub(crate) standard_promise_endings: bool,
+    pub(crate) homograph: Option<crate::homograph::Homograph>,
 }
 
 /// 사용자 단어의 기본 빈도. 사전 빈도와 같은 척도이며, 이 값이면 일반적인
@@ -661,6 +663,7 @@ impl CodebookAnalyzer {
         let mut section16: Option<&[u8]> = None;
         let mut section17: Option<&[u8]> = None;
         let mut section18: Option<&[u8]> = None;
+        let mut section19: Option<&[u8]> = None;
 
         while pos < data.len() {
             if pos + 5 > data.len() {
@@ -693,12 +696,13 @@ impl CodebookAnalyzer {
                 16 => section16 = Some(section_data),
                 17 => section17 = Some(section_data),
                 18 => section18 = Some(section_data),
+                19 => section19 = Some(section_data),
                 _ => {} // skip unknown sections
             }
             pos += section_len;
         }
 
-        Self::from_sections(
+        let mut analyzer = Self::from_sections(
             section6.ok_or("Missing content dict section (6)")?,
             section7.ok_or("Missing suffix codebook section (7)")?,
             section8.ok_or("Missing trigram costs section (8)")?,
@@ -711,7 +715,9 @@ impl CodebookAnalyzer {
             section16,
             section17,
             section18,
-        )
+        )?;
+        analyzer.homograph = section19.map(crate::homograph::Homograph::from_bytes).transpose()?;
+        Ok(analyzer)
     }
 
     /// Build from parsed section data.
@@ -824,6 +830,8 @@ impl CodebookAnalyzer {
             },
             user_dict: HashMap::default(),
             user_dict_max_chars: 0,
+            standard_promise_endings: true,
+            homograph: None,
         })
     }
 
@@ -856,6 +864,10 @@ impl CodebookAnalyzer {
     /// 등록된 사용자 단어 수.
     pub fn user_word_count(&self) -> usize {
         self.user_dict.len()
+    }
+
+    pub(crate) fn user_word_pos(&self, surface: &str) -> Option<Pos> {
+        self.user_dict.get(surface).map(|&(pos, _)| pos)
     }
 
     /// True if a suffix-codebook analysis is well-formed for the key it is stored
@@ -1458,6 +1470,20 @@ impl CodebookAnalyzer {
     // ASCII run detection
     // -----------------------------------------------------------------------
 
+    /// Start (in bytes) of a model number cut short by the longest dictionary prefix.
+    fn partial_model_start(text: &str, prefix_len: usize) -> Option<usize> {
+        let (prefix, rest) = text.split_at(prefix_len);
+        if !prefix.as_bytes().last()?.is_ascii_digit()
+            || !rest.as_bytes().first()?.is_ascii_alphanumeric()
+            || prefix.is_ascii()
+        {
+            return None;
+        }
+        let bytes = prefix.as_bytes();
+        let start = bytes.iter().rposition(|b| !b.is_ascii_alphanumeric())? + 1;
+        bytes[start].is_ascii_alphabetic().then_some(start)
+    }
+
     /// Find ASCII runs in text. Returns (char_start, char_end, pos) tuples.
     fn find_ascii_runs(chars: &[char]) -> Vec<(usize, usize, Pos)> {
         let mut runs = Vec::new();
@@ -1475,6 +1501,17 @@ impl CodebookAnalyzer {
                 // Trim trailing dots/hyphens
                 while i > start + 1 && (chars[i - 1] == '.' || chars[i - 1] == '-') {
                     i -= 1;
+                }
+                // These suffixes belong to the language name; ordinary operators stay separate.
+                if i == start + 1 {
+                    let suffix_len = match (chars[start].to_ascii_lowercase(), &chars[i..]) {
+                        ('c', ['+', '+', ..]) => 2,
+                        ('c' | 'f', ['#', ..]) => 1,
+                        _ => 0,
+                    };
+                    if !chars.get(i + suffix_len).is_some_and(char::is_ascii_alphabetic) {
+                        i += suffix_len;
+                    }
                 }
                 runs.push((start, i, Pos::SL));
             } else if chars[i].is_ascii_digit() {
@@ -1585,6 +1622,69 @@ impl CodebookAnalyzer {
     // Lattice construction
     // -----------------------------------------------------------------------
 
+    /// The verb in a promise has the same inflection as its prospective
+    /// attributive form: 먹을/도울/지을 → -을게요, 맡길/만들 → -ㄹ게요.
+    /// Reuse that arc's stem(s) and relative cost, retaining competing readings.
+    fn add_promise_arcs(&self, word: &str, start: usize, first_arc: usize, arcs: &mut Vec<LatticeArc>) {
+        let Some(prefix) = word.strip_suffix("게요") else { return; };
+        let Some(last) = prefix.chars().next_back() else { return; };
+        if !matches!(split_jongseong(last), Some((_, 'ㄹ'))) || self.user_dict.contains_key(word) {
+            return;
+        }
+        let prefix_end = start + prefix.chars().count();
+        let end = prefix_end + 2;
+        // NIKL 2021 training split: of 375 word-final ㄹ-coda + 게요 forms,
+        // 369 are annotated as promises. Keep the six competing readings in the lattice.
+        const PROMISE_LOG_ODDS: f32 = 4.119; // ln(369/6)
+        let credit = self.length_bonus * (end - prefix_end) as f32 + PROMISE_LOG_ODDS;
+        for index in first_arc..arcs.len() {
+            let arc = &arcs[index];
+            if arc.end != prefix_end { continue; }
+            let (stem, pos, ending, stem_morphs) = match &arc.morphemes[..] {
+                // ㄹ-final verbs keep their own coda: 만들 + ㄹ게요 → 만들게요.
+                [(stem, pos)] if stem == prefix => (stem, pos, "ㄹ", &arc.morphemes[..]),
+                [stems @ .., (ending, Pos::ETM)] if !stems.is_empty() => {
+                    let (stem, pos) = &stems[stems.len() - 1];
+                    (stem, pos, ending.as_str(), stems)
+                }
+                _ => continue,
+            };
+            if !matches!(pos, Pos::VV | Pos::VX | Pos::XSV)
+                || self.user_word_pos(stem).is_some_and(|registered| registered != *pos)
+            {
+                continue;
+            }
+            let Some((_, _, coda)) = stem.chars().next_back().and_then(decompose_hangul) else { continue; };
+            let promise = match (ending, coda) {
+                ("ㄹ", 0 | 8) => "ㄹ게요",
+                ("을", 1..=27) if coda != 8 => "을게요",
+                _ => continue,
+            };
+            let mut morphemes = stem_morphs.to_vec();
+            morphemes.push((promise.to_owned(), Pos::EF));
+            arcs.push(LatticeArc { start, end, morphemes, cost: arc.cost - credit });
+        }
+
+        // Some ㅂ-irregular attributives fall below the codebook cutoff. An
+        // attested -워 form supplies the same verb without guessing that every
+        // word ending in 울 is a ㅂ-irregular (누워 → 눕, 주워 → 줍).
+        let Some(base) = prefix.strip_suffix('울') else { return; };
+        let eo_form = format!("{base}워");
+        let Some(&idx) = self.suffix_map.get(&eo_form) else { return; };
+        for analysis in &self.suffix_entries[idx].analyses {
+            let [stem, eo] = &analysis.morphemes[..] else { continue; };
+            if stem.pos == Pos::VV && eo.form == "어" && matches!(eo.pos, Pos::EC | Pos::EF)
+                && matches!(stem.form.chars().next_back().and_then(split_jongseong), Some((_, 'ㅂ')))
+                && !self.user_word_pos(&stem.form).is_some_and(|pos| pos != stem.pos)
+            {
+                arcs.push(LatticeArc {
+                    start, end, morphemes: vec![(stem.form.clone(), Pos::VV), ("을게요".to_owned(), Pos::EF)],
+                    cost: self.get_suffix_cost(&eo_form, analysis) - credit,
+                });
+            }
+        }
+    }
+
     fn build_lattice(&self, text: &str) -> Vec<LatticeArc> {
         let chars: Vec<char> = text.chars().collect();
         let n = chars.len();
@@ -1636,6 +1736,7 @@ impl CodebookAnalyzer {
         }
         char_to_byte.push(byte_offset); // sentinel for end
 
+        let has_geyo = self.standard_promise_endings && text.contains("게요");
         // For each starting position, try strategies A, B, C
         for i in 0..n {
             if chars[i].is_whitespace() {
@@ -1644,11 +1745,19 @@ impl CodebookAnalyzer {
 
             // Strategy A: Content word + optional suffix
             // Use common_prefix_search on the remaining text from position i
+            let first_arc = arcs.len();
             let byte_start = char_to_byte[i];
             let remaining = &text[byte_start..];
             let prefix_matches = self.content_dict.common_prefix_search(remaining);
+            let model_start = prefix_matches.last()
+                .and_then(|(len, _)| Self::partial_model_start(remaining, *len));
 
             for (byte_len, entries) in &prefix_matches {
+                // If 갤럭시S2 cuts S24 short, discard both 갤럭시S2 and 갤럭시S.
+                // 채널A before 2주년 is a complete name with no numbered dictionary prefix.
+                if model_start.is_some_and(|start| *byte_len > start) {
+                    continue;
+                }
                 let match_str = &remaining[..*byte_len];
                 let match_char_len = match_str.chars().count();
                 let content_end = i + match_char_len;
@@ -2286,6 +2395,10 @@ impl CodebookAnalyzer {
                         }
                     }
                 }
+            }
+            if has_geyo && (i == 0 || !chars[i - 1].is_alphanumeric()) {
+                let word = remaining.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("");
+                self.add_promise_arcs(word, i, first_arc, &mut arcs);
             }
         }
 
@@ -5373,6 +5486,11 @@ mod tests {
         assert_eq!(runs3.len(), 2);
         assert_eq!(runs3[0], (0, 10, Pos::SN));  // 2026.04.09
         assert_eq!(runs3[1], (10, 16, Pos::SN)); // 24,991
+
+        let chars: Vec<char> = "C#tag C++D x++ A+B".chars().collect();
+        let words: Vec<String> = CodebookAnalyzer::find_ascii_runs(&chars).into_iter()
+            .map(|(start, end, _)| chars[start..end].iter().collect()).collect();
+        assert_eq!(words, ["C", "tag", "C", "D", "x", "A", "B"]);
     }
 
     fn tok(text: &str, pos: Pos, start: usize, end: usize) -> Token {

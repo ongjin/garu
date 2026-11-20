@@ -127,6 +127,9 @@ export class GaruWasm {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
+    use_legacy_promise_endings() {
+        wasm.garuwasm_use_legacy_promise_endings(this.__wbg_ptr);
+    }
     /**
      * 등록된 사용자 단어 수.
      * @returns {number}
@@ -156,7 +159,7 @@ export class GaruWasm {
     }
 }
 if (Symbol.dispose) GaruWasm.prototype[Symbol.dispose] = GaruWasm.prototype.free;
-import * as import1 from "./snippets/garu-core-42affb4a75f2d545/inline0.js"
+import * as import1 from "./snippets/garu-core-ebaf5956ee45f13f/inline0.js"
 
 function __wbg_get_imports() {
     const import0 = {
@@ -215,7 +218,7 @@ function __wbg_get_imports() {
     return {
         __proto__: null,
         "./garu_wasm_bg.js": import0,
-        "./snippets/garu-core-42affb4a75f2d545/inline0.js": import1,
+        "./snippets/garu-core-ebaf5956ee45f13f/inline0.js": import1,
     };
 }
 

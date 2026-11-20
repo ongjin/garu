@@ -1563,6 +1563,12 @@ def main():
         write_section(buf, 18, search_data)
         print(f"  Search cost: {len(search_data):,} bytes")
 
+    homograph_path = DATA_DIR / "homograph.q8"
+    if homograph_path.exists():
+        homograph_data = homograph_path.read_bytes()
+        write_section(buf, 19, homograph_data)
+        print(f"  사/살 context weights: {len(homograph_data):,} bytes")
+
     # Write output with brotli compression (q=11, max)
     import brotli as _brotli
     raw_bytes = bytes(buf)

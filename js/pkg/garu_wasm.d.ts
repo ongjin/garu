@@ -16,6 +16,7 @@ export class GaruWasm {
     clear_user_words(): void;
     constructor(model_data: Uint8Array, normalize_jamo?: boolean | null);
     tokenize(text: string): any;
+    use_legacy_promise_endings(): void;
     /**
      * 등록된 사용자 단어 수.
      */
@@ -34,6 +35,7 @@ export interface InitOutput {
     readonly garuwasm_clear_user_words: (a: number) => void;
     readonly garuwasm_new: (a: number, b: number, c: number, d: number) => void;
     readonly garuwasm_tokenize: (a: number, b: number, c: number, d: number) => void;
+    readonly garuwasm_use_legacy_promise_endings: (a: number) => void;
     readonly garuwasm_user_word_count: (a: number) => number;
     readonly garuwasm_version: (a: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
