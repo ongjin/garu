@@ -1300,3 +1300,20 @@ fn test_spoken_filler_geu_and_jega() {
         ("는", Pos::JX), ("좋", Pos::VA), ("아요", Pos::EF),
     ]);
 }
+
+/// issue #9, 연구 이력 #87: 재순위 feature는 공백을 보지 못해 `활성 화학제`의 `화`를
+/// `활성화`의 접미사처럼 채점했다. Viterbi 1위인 `화학/NNG + 제/XSN`을 유지해야 한다.
+#[test]
+fn test_issue9_spaced_hwahakje() {
+    let analyzer = load_analyzer();
+    assert_analysis(&analyzer, "활성 화학제", &[
+        ("활성", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
+    ]);
+    assert_analysis(&analyzer, "부동 화학제", &[
+        ("부동", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
+    ]);
+    assert_analysis(&analyzer, "곰팡이 성장방지용 곰팡이 방지 화학제", &[
+        ("곰팡이", Pos::NNG), ("성장", Pos::NNG), ("방지", Pos::NNG), ("용", Pos::XSN),
+        ("곰팡이", Pos::NNG), ("방지", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
+    ]);
+}

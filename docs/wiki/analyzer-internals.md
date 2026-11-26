@@ -70,7 +70,9 @@ build_lattice(text)          # 아크 생성 (사전 + 코드북 + 재구성 전
 
 ⚠️ **POS 보정의 일부는 codebook이 아니라 `model.rs`의 R1~R6 override에 있다** (codebook fix_* 이후 실행되므로 codebook에서 고쳐도 덮인다). 시간명사 오늘/어제/지금(조사앞 NNG·그 외 MAG)은 **R1**, 내일→NNG는 R2, 뭐/저기→NP는 R3/R4, NNP→NNG 힌트는 R6. 시간명사·지시대명사 POS는 여기와 그 뒤의 Section 16 적용 여부를 함께 확인한다.
 
-**재순위 perceptron (GMDL Section 14, 2026-07-13 채택 — 현 배포 모델 포함)**: Section 14가 있으면 후보 폭이 k=5→10으로 확장되고, `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘으면 선택을 교체. feature 입력은 후보 clone에 `apply_rerank_rules`로 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6 순서)을 적용한 것 — 학습 덤프가 쓰는 `Analyzer::analyze_topn_for_rerank`와 같은 함수다. Section 16 교정과 표시용 자모 정규화는 점수 입력에 포함하지 않는다. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 재순위만 무동작(k=5). ⚠️ nbest는 k에 따라 상위권 구성이 달라진다(빔 효과): nbest(5) ≠ nbest(20)[:5] — k=5 재순위가 +0.25pp에 그친 원인. **rank1은 k와 무관하게 동일하지만(9,000문장 100% 일치) rank2 이하는 k에 의존한다** — 그래서 `cand[1].score − cand[0].score` 마진을 작은 k로 미리 구해 큰 k를 건너뛰는 최적화는 성립하지 않는다(research-history #39).
+**재순위 perceptron (GMDL Section 14, 2026-07-13 채택 — 현 배포 모델 포함)**: Section 14가 있으면 후보 폭이 k=5→10으로 확장되고, `analyze_inner`의 최종 선택 블록(viterbi cost − context bonus argmin) 뒤에서 perceptron 점수가 확신 마진(모델에 저장, τ=4)을 넘고 아래 접미사 조건을 지킬 때만 선택을 교체. feature 입력은 후보 clone에 `apply_rerank_rules`로 model 레벨 보정(adj_root_xsa/protected_aux/R1~R6 순서)을 적용한 것 — 학습 덤프가 쓰는 `Analyzer::analyze_topn_for_rerank`와 같은 함수다. Section 16 교정과 표시용 자모 정규화는 점수 입력에 포함하지 않는다. early-return 경로(의존명사 패턴)는 재순위를 타지 않음. Section 14 없으면 재순위만 무동작(k=5). ⚠️ nbest는 k에 따라 상위권 구성이 달라진다(빔 효과): nbest(5) ≠ nbest(20)[:5] — k=5 재순위가 +0.25pp에 그친 원인. **rank1은 k와 무관하게 동일하지만(9,000문장 100% 일치) rank2 이하는 k에 의존한다** — 그래서 `cand[1].score − cand[0].score` 마진을 작은 k로 미리 구해 큰 k를 건너뛰는 최적화는 성립하지 않는다(research-history #39).
+
+**재순위 교체의 어절 첫 접미사 조건**: 재순위 feature(`rerank.rs`)에는 공백·어절 경계 정보가 없다. 그래서 `활성 화학제`의 `화/XSN + 학제/NNG` 후보를 `활성화`처럼 채점해 Viterbi 1위 `화학/NNG + 제/XSN`을 뒤집었다(issue #9). 교체 후보에서 어절 첫 토큰이 파생 접미사(XSN/XSV/XSA)인 수가 현재 선택보다 많으면 교체하지 않는다. 같은 어절의 토큰은 `start`를 공유하므로 `start`가 바뀌는 토큰을 어절 첫 토큰으로 센다. 개수는 `apply_rerank_rules`를 적용하기 전의 후보 토큰에서 센다. 그래서 나중 보정이 VV로 바꿀 어절 첫 `하/XSV`도 교체를 막는다. 공백 없는 `전처리화학제`는 이 조건에 걸리지 않고, 현재 선택에 이미 있는 어절 첫 접미사(`절반 가량이`의 가량/XSN)도 그대로다. 대신 띄어 쓴 접미사를 재순위가 바로잡던 교체(`계획 상으로는`의 상/XSN)도 막힌다. 측정과 남은 오류는 research-history #87.
 
 **문맥 POS 교정 (GMDL Section 16)**: `apply_context_cache`는 주변 어절 조건 중 하나가 맞고 선택된 어절의 형태·POS열·문자 span이 원래 Section 13 캐시와 정확히 일치할 때만 POS 하나를 바꾼다. 형태·토큰 수·순서·span·점수와 다른 토큰은 그대로 둔다. 사용자 사전에 어절 전체나 교정 대상 형태소가 있으면 적용하지 않는다. 아크를 추가하거나 재순위를 다시 실행하지 않으며, `analyze_inner`가 조기 반환한 결과도 공개 `analyze`의 마지막 단계에서 검사한다. 규칙 정본과 학습·평가 경계는 [모델 빌드 문서](model-build.md)에 있다.
 
@@ -124,8 +126,10 @@ sample $(pgrep -n analyze_batch) 12 -mayDie -f prof.txt
 - ㅂ불규칙 정규/불규칙은 어간 토큰만으론 구분 불가 → **표면형** 필요 (둘 다 코드북이 `[stem, 어]`로 줌).
 - 어절 캐시 ≠ 사전 ≠ 코드북이 같은 어절에 서로 다른 분석을 줄 수 있고, 최종 선택은 trigram이 결정.
 - `analyze()`와 `analyze_topn()`의 후처리가 달라 결과가 갈릴 수 있음.
+- 같은 어절이 앞 단어에 따라 다르게 분석된다(`활성 화학제`와 `용접 화학제`, issue #9). 원인은 두 가지다. 재순위 feature가 공백을 보지 못해 앞 어절과 붙은 것처럼 `pw:`·`b:` feature를 채점하고, Section 18 판별기가 입력 전체로 구어 여부를 정해 어절 경계 비용을 켜거나 끈다. dump_topk로 Viterbi 1위부터 확인한다. 1위가 맞으면 GMDL Section 14의 가중치와 `training/rerank/features.py`의 `extract`·`fnv1a`로 후보별 feature 기여를 다시 계산하고, 판별기 점수도 따로 본다.
 - **표면 환각(정합성 버그)**: 접미사 코드북에 키 표면 ≠ 재구성 표면인 **절단 엔트리**가 있었음 (예: 키 `배`→`[배우/VV,었/EP]`(배웠), `표`→`[표,하,었]`(표했), `시장`→`[시,장악,하,었]`). 어떤 strategy든 이를 `span=키길이` 아크로 주입하면 출력 표면이 입력과 불일치(`2.2배다.`→`배출/하/았/다`). **해결(commit)**: `parse_suffix_codebook`에서 로드 시 `suffix_analysis_stem_fits`로 필터 — stem 접두(첫 어미 전 = 내용+하/되 XSV·계사 이) 표면 길이 > 키 길이인 analysis를 제거. stem은 어미로 축약될 뿐 확장 안 되므로 초과는 불가능. 로드 필터라 A2/A3/C 모든 strategy 일괄 차단(코드북 sourced 절단 아크 11588→590으로 감소, 잔여는 content_dict 단어+접미사 조합이라 별개 mechanism·잠재). dump_arcs로 `[i..i+1]`인데 형태소가 다음절이면 이 클래스.
 
 ## 이력
 
+- 2026-11-27 재순위 교체에 어절 첫 파생 접미사 조건을 추가(issue #9, research-history #87). 앞 단어에 따라 분석이 바뀌는 두 경로를 함정에 기록.
 - 2026-10-20 Section 16 최종 POS 교정과 사용자 사전 보호를 분석 지도에 반영. 학습 후보 API와 공개 결과의 후처리 범위를 분리하고, 캐시 기본 비용을 현행 -1.0으로 바로잡음. 선택적 JS 경계 복원은 기존 분석 경로 밖으로 명시.

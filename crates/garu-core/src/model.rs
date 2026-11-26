@@ -203,7 +203,12 @@ impl Analyzer {
                     current_s = s;
                 }
             }
-            if rr_best != best_idx && rr_best_s - current_s > rr.margin() {
+            // feature는 공백을 보지 못해 `활성 화학제`의 화/XSN을 `활성화`처럼
+            // 채점한다. 어절 첫 파생 접미사가 늘어나는 교체는 하지 않는다(#9).
+            if rr_best != best_idx && rr_best_s - current_s > rr.margin()
+                && Self::initial_suffix_count(&candidates[rr_best].tokens)
+                    <= Self::initial_suffix_count(&candidates[best_idx].tokens)
+            {
                 best_idx = rr_best;
             }
         }
@@ -327,6 +332,19 @@ impl Analyzer {
         CodebookAnalyzer::apply_adj_root_xsa(tokens);
         Self::apply_protected_auxiliary_rules(tokens);
         Self::apply_rule_pos_corrections(tokens);
+    }
+
+    /// 어절 첫 토큰이 파생 접미사(XSN/XSV/XSA)인 수. 토큰 span은 어절 단위다.
+    fn initial_suffix_count(tokens: &[Token]) -> usize {
+        let mut count = 0;
+        let mut prev_start = None;
+        for t in tokens {
+            if prev_start != Some(t.start) && matches!(t.pos, Pos::XSN | Pos::XSV | Pos::XSA) {
+                count += 1;
+            }
+            prev_start = Some(t.start);
+        }
+        count
     }
 
     fn should_expand_contextual_nbest(text: &str) -> bool {
