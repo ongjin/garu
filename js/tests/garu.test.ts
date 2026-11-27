@@ -22,8 +22,8 @@ describe('Garu.load (node)', () => {
     const standard = await Garu.load();
     const legacy = await Garu.load({ promiseEndings: 'legacy' });
     try {
-      expect(standard.modelInfo().accuracy).toBe(0.9617);
-      expect(legacy.modelInfo().accuracy).toBe(0.9618);
+      expect(standard.modelInfo().accuracy).toBe(0.9622);
+      expect(legacy.modelInfo().accuracy).toBe(0.9623);
       expect(legacy.tokenize('제가 할게요')).toEqual(['제', '가', '하', 'ㄹ게요']);
       expect(standard.tokenize('제가 할게요')).toEqual(['제', '가', '하', 'ㄹ게', '요']);
       expect(standard.tokenize('누울게요')).toEqual(['눕', '을게', '요']);

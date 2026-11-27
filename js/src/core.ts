@@ -200,7 +200,7 @@ export class GaruBase {
     return {
       version: this._wasm.constructor.version(),
       size: this._modelSize,
-      accuracy: this.promiseEndings === 'legacy' ? 0.9618 : 0.9617,
+      accuracy: this.promiseEndings === 'legacy' ? 0.9623 : 0.9622,
     };
   }
 
