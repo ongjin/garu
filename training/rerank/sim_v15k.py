@@ -72,7 +72,7 @@ def main():
             base_score = cands[0]["score"]
             scores = []
             for i, (c, raw) in enumerate(zip(cands, cand_raws)):
-                ids, vals = hash_feats(extract(raw, c["score"] - base_score, i + 1))
+                ids, vals = hash_feats(extract(c["tokens"], c["score"] - base_score, i + 1))
                 scores.append(float(np.dot(w[ids], vals)))
             best_i = int(np.argmax(scores))
             if scores[best_i] - scores[i_final] <= args.margin:

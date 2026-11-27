@@ -105,7 +105,10 @@ python3 training/ambiguity/spoken_geu.py append "$LAB/strip/rule_그.json" <mode
 The adopted rule has 32 guards (precision 0.8, support 3, documents 2). The
 `--blob` output is the Section 17 source of truth; the model builder then reproduces
 the shipped model byte for byte. Re-mining Section 17 with
-`context_rules.py` drops this rule, so append it again and re-run gate v2.
+`context_rules.py` usually drops this rule, so append it again and re-run gate v2.
+`append` allows one rule per original sequence. If the re-mined set already has a
+narrower `(그, [그/MM])` rule (the 2026-11-27 re-mine for research history #88 found
+one with three `저는` guards), remove it from `selected.json` and export again first.
 
 ## Section 19
 

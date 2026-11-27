@@ -32,7 +32,7 @@ def data_dir(tmp_path):
         "text": "고양이", "morphemes": [["고양이", "NNG"]], "src": "SX",
     })
     write_jsonl(tmp_path / "train_top10.jsonl", {
-        "text": "고양이", "candidates": [{"score": 1., "tokens": [["고양이", "NNG"]]}],
+        "text": "고양이", "candidates": [{"score": 1., "tokens": [["고양이", "NNG", 0, 3]]}],
     })
     return tmp_path
 
@@ -214,3 +214,14 @@ def test_source_change(data_dir, filename, change, key, expected):
     source.write_text(source.read_text(encoding="utf-8") + change, encoding="utf-8")
 
     assert run_copy(source_dir, data_dir)[key] == expected
+
+
+def test_promise_target_uses_split_output(tmp_path):
+    # 후보는 붙은 `ㄹ게요/EF`로 채점되지만 공개 출력과 NIKL 정답은 `ㄹ게/EF + 요/JX`다.
+    write_jsonl(tmp_path / "train.jsonl", {
+        "text": "할게요", "morphemes": [["하", "VV"], ["ㄹ게", "EF"], ["요", "JX"]], "src": "SX",
+    })
+    write_jsonl(tmp_path / "train_top10.jsonl", {
+        "text": "할게요", "candidates": [{"score": 1., "tokens": [["하", "VV", 0, 3], ["ㄹ게요", "EF", 0, 3]]}],
+    })
+    assert trainer.preprocess(tmp_path, "train")["counts"].tolist() == [[3, 0, 0]]

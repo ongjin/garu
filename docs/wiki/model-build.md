@@ -14,12 +14,12 @@
 | 11 | 모호성 테이블 (비활성) | 4 |
 | 12 | 단어 바이그램 비용 보정 (965규칙) | 8,209 |
 | 13 | 스마트 어절 캐시 (10K 엔트리, compact format) | 251,500 |
-| 14 | N-best 재순위 perceptron 가중치 (95K sparse, ver=2 varint+int16) | 284,651 |
+| 14 | N-best 재순위 perceptron 가중치 (142K sparse, ver=3 어절 경계 feature, varint+int16) | 425,828 |
 | 16 | 문맥 조건부 POS 교정 (58어절, 220조건) | 3,054 |
 | 17 | 최종 출력열 일치 POS 교정 (247규칙) | 10,986 |
 | 18 | 구어 탐색 비용 보정 (아크 가중치 20K + 2^15 int8 판별기, 2026-11-02) | 94,575 |
 | 19 | 사다·살다 문맥 분류 (해시 17,535개와 int8 계수) | 87,687 |
-| — | **brotli q=11 압축 후** | **1,428,359 B** |
+| — | **brotli q=11 압축 후** | **1,512,444 B** |
 
 ⚠️ **Section 7 string table은 u16 오프셋 한계(65,535 B)에 거의 닿아 있다** — 현행 `MIN_SUFFIX_FREQ=75`에서 64,562 B(98.5%)라 형태를 ~140개만 더 늘려도 넘친다. 빌더는 넘칠 때만 sub-version 2(u32 오프셋)로 승격하고 그 미만은 기존 포맷 그대로 기록하므로 현행 모델은 byte-identical이다(research-history #54). 디코더는 1·2 모두 읽는다. **승격된 모델은 0.9.16 이하 런타임이 못 읽으니 배포 시 버전 게이트 확인.** 임계를 낮춰 코드북을 키우는 것 자체는 F1 이득이 없다(th=10에서 +0.03pp에 모델 +53%).
 
@@ -27,7 +27,9 @@
 
 ⚠️ **두 모델 파일은 반드시 동기 유지**: `models/codebook.gmdl`은 integration 테스트 픽스처, `js/models/base.gmdl`은 배포본. 0.9.9 때 `export_weights.py`가 js 쪽만 갱신해 픽스처가 Section 14 없는 구버전으로 남았고, 그 결과 재순위 wrong-override 회귀 3건(대박→대+박, 갈리없는데, 인가가)이 테스트에 안 잡힌 채 배송됨(2026-07-16 픽스처 동기화로 발견, research-history #37). gmdl을 직접 수정하는 도구를 쓸 때는 두 파일 모두 갱신할 것.
 
-**Section 14 (재순위 perceptron, 2026-07-13 채택)**: `training/rerank/` 파이프라인(prep_nikl→dump_topk k=10→train_perceptron→tune_margin)으로 학습, `export_weights.py --blob`이 gmdl 주입 + `training/codebook_data/rerank_section14.bin` blob 갱신. **빌더는 이 blob을 passthrough** (Section 13 어절 캐시와 같은 패턴 — blob 없으면 섹션 생략). 포맷은 `crates/garu-core/src/rerank.rs` 참조(FNV-1a feature hashing — feature 문자열 규칙이 `training/rerank/features.py`와 바이트 단위 동일해야 함). 섹션이 없으면 분석기는 재순위 없이 k=5로 동작(구모델 호환). **ver=2(2026-08-05)**: bucket 오름차순 차분 varint + 가중치 int16 양자화(step = max|w|/32767)로 652→244KB raw, 모델 −219KB. 디코더는 ver=1도 계속 읽는다. 기존 gmdl을 변환할 때는 `reencode_section14.py <blob> <gmdl>...`(weights.npz 불필요, 섹션만 in-place 교체). 양자화는 비트 동일이 아니므로 **변환 후 9,000문장 출력 diff로 확인할 것** — 채택 시점 실측은 v15k 9,000 + 구어 held-out 16,407 전부 byte-identical. ⚠️ 재학습 시 v15k∩NIKL 오염 3,950문장 제외 필수(prep_nikl.py가 자동 처리) + NIKL 2021 벤치는 이후 자기평가임에 유의. ⚠️ **`RERANK_TRAIN_PER_SRC=1000000000`(전체 316K)로 돌릴 것** — 기본값 40K는 train 80K짜리 축소판이라 dev pick 0.9471·nnz 43K로 배포본에 못 미친다(전체는 0.9478·nnz 95K). 학습 산출물 `training/rerank/data/`는 680MB라 gitignore 대상이고 스크립트로 재생성한다(prep 25초 + dump 3분 + preprocess 80초 + 8 epoch 2분). ⚠️ **dev pick이 동률이어도 재학습 가치가 있을 수 있다** — 사전이 바뀌면 후보 분포가 달라져 dev(NIKL)엔 안 보이고 v15k·held-out에서만 이득이 나온다(research-history #49). 반드시 export 후 실측할 것.
+**Section 14 (재순위 perceptron, 2026-07-13 채택)**: `training/rerank/` 파이프라인(prep_nikl→dump_topk k=10→train_perceptron→tune_margin)으로 학습, `export_weights.py --blob`이 gmdl 주입 + `training/codebook_data/rerank_section14.bin` blob 갱신. **빌더는 이 blob을 passthrough** (Section 13 어절 캐시와 같은 패턴 — blob 없으면 섹션 생략). 포맷은 `crates/garu-core/src/rerank.rs` 참조(FNV-1a feature hashing — feature 문자열 규칙이 `training/rerank/features.py`와 바이트 단위 동일해야 함). 섹션이 없으면 분석기는 재순위 없이 k=5로 동작(구모델 호환). **ver=2(2026-08-05)**: bucket 오름차순 차분 varint + 가중치 int16 양자화(step = max|w|/32767)로 652→244KB raw, 모델 −219KB. 디코더는 ver=1도 계속 읽는다. 기존 gmdl을 변환할 때는 `reencode_section14.py <blob> <gmdl>...`(weights.npz 불필요, 섹션만 in-place 교체). 양자화는 비트 동일이 아니므로 **변환 후 9,000문장 출력 diff로 확인할 것** — 채택 시점 실측은 v15k 9,000 + 구어 held-out 16,407 전부 byte-identical. ⚠️ 재학습 시 v15k∩NIKL 오염 3,950문장 제외 필수(prep_nikl.py가 자동 처리) + NIKL 2021 벤치는 이후 자기평가임에 유의. ⚠️ **`RERANK_TRAIN_PER_SRC=1000000000`(전체 316K)로 돌릴 것** — 기본값 40K는 train 80K짜리 축소판이라 dev pick 0.9471·nnz 43K로 전체 학습(2026-08 기준 0.9478·nnz 95K)에 못 미친다. 학습 산출물 `training/rerank/data/`는 680MB라 gitignore 대상이고 스크립트로 재생성한다(prep 25초 + dump 3분 + preprocess 80초 + 8 epoch 2분). ⚠️ **dev pick이 동률이어도 재학습 가치가 있을 수 있다** — 사전이 바뀌면 후보 분포가 달라져 dev(NIKL)엔 안 보이고 v15k·held-out에서만 이득이 나온다(research-history #49). 반드시 export 후 실측할 것.
+
+**Section 14 ver=3 (어절 경계 feature)**: 같은 어절의 토큰은 덤프와 추론 모두 `start`가 같다. `start`가 바뀌는 토큰에서 기존 feature에 더해 `sb:{앞 품사}|{품사}`, `spw:{앞 형태}|{품사}`, `sw:{형태}/{품사}`를 센다. 그래서 `features.extract`는 덤프 토큰 `[형태, 품사, start, end]`를 그대로 받고, `export_weights.py`는 `features.SECTION_VERSION`(3)을 기록한다. 인코딩은 ver=2와 같으며 디코더는 ver 1·2를 공백 없는 feature로 계속 읽는다. 목표 F1은 공개 출력과 같은 형태로 센다. 붙은 약속형 `ㄹ게요`·`을게요` EF를 `EF + 요/JX`로 나눈 뒤 NIKL 정답과 비교한다(`train_perceptron.output_tokens`). feature는 추론처럼 붙은 형태에서 뽑는다. 나누지 않고 학습하면 정답과 표기가 달라 `ㄹ게요/EF`에 큰 음수 가중치가 붙고 `만들게요`가 `게/EC + 요/JX`로 바뀐다. 현행 가중치는 0.14.1 모델의 상위 10개 후보로 전체 316,253문장을 8 epoch 학습했고, 마진은 dev에서 고른 0이다. 비교와 판정은 [연구 이력 #88](research-history.md).
 
 **Section 16 (문맥 조건부 POS 교정)**: 정본은 Git으로 관리하는 `training/codebook_data/context_pos.bin`이다. 빌더는 이 blob을 그대로 기록하며, 파일이 없으면 섹션을 생략한다. `training/ambiguity/prepare.py`는 NIKL 2021의 문서 단위 train/dev 분할과 고정 평가셋의 공백 제거 중복 제외 후 train에서 대체 POS와 주변 어절 조건을 추출한다. `probe.py`는 고정 규칙을 모델에 넣어 실제 분석 결과를 비교한다. 포맷의 legacy 비용 필드 `-1.0`은 동일 모델 재현을 위해 남아 있으며 현재 추론이나 비용 탐색에는 사용하지 않는다.
 
@@ -138,6 +140,8 @@ python3 training/lexicon/replay.py --baseline /tmp/garu-baseline-3229d92.gmdl
 - `training/neural/prepare_data.py`, `training/neural/experiment_all.py` — *(폐기된 CNN 학습용. 현재 분석기는 CNN 미사용 — `research-history.md` 참조)*
 
 ## 이력
+
+- 2026-11-27 Section 14를 ver=3(어절 경계 feature)으로 다시 학습해 기본 모델에 넣었다. 모델 1,512,444B(+84,085B), SHA-256 `c99546f7edea5cf33196186745324b4041506bbb71953616684ae7b6beb60644`. Section 17은 다시 채굴해 판정했지만 이득이 없어 기존 규칙을 유지했다. 상세는 연구 이력 #88.
 
 - 2026-11-20 Section 19를 기본 모델에 채택했다. 재빌드 SHA-256은 `f9fbfa457ac0e7dca68fca4ea8813ddcffebb4b3a461e0f8ffd363b115a7361a`다.
 

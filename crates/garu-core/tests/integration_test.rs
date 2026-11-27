@@ -1317,3 +1317,24 @@ fn test_issue9_spaced_hwahakje() {
         ("곰팡이", Pos::NNG), ("방지", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
     ]);
 }
+
+/// issue #9, 연구 이력 #88: 어절 경계 feature로 다시 학습한 재순위(Section 14 ver 3)는
+/// 붙여 쓴 `전처리화학제`와 뒤 어절에 끌리던 `유해 화학제 분사업`에서도 `화학/NNG + 제/XSN`을 고른다.
+#[test]
+fn test_issue9_joined_hwahakje() {
+    let analyzer = load_analyzer();
+    assert_analysis(&analyzer, "플라스틱도금용 전처리화학제", &[
+        ("플라스틱", Pos::NNG), ("도금", Pos::NNG), ("용", Pos::XSN),
+        ("전처리", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
+    ]);
+    assert_analysis(&analyzer, "해충방제용 반응변형화학제", &[
+        ("해충", Pos::NNG), ("방제", Pos::NNG), ("용", Pos::XSN),
+        ("반응", Pos::NNG), ("변형", Pos::NNG), ("화학", Pos::NNG), ("제", Pos::XSN),
+    ]);
+
+    let result = analyzer.analyze("화학제 캡슐화 및 유해 화학제 분사업");
+    let got: Vec<(&str, Pos)> = result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect();
+    let hwahakje = [("화학", Pos::NNG), ("제", Pos::XSN)];
+    assert_eq!(got.windows(2).filter(|w| *w == hwahakje).count(), 2, "{got:?}");
+    assert!(!got.contains(&("학제", Pos::NNG)), "{got:?}");
+}

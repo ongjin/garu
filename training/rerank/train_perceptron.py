@@ -1,8 +1,8 @@
 """Averaged perceptron 재순위 학습.
 
 입력: <data_dir>/{train,dev}.jsonl (gold) + {train,dev}_top10.jsonl (dump_topk k=10)
-- feature: raw 후보 토큰에서 추출 (features.extract) — Rust production과 동일 입력
-- 타깃: ep_norm 정규화 후 문장 F1 최대 후보 (동률 시 낮은 rank)
+- feature: 어절 span이 있는 raw 후보 토큰에서 추출 (features.extract) — Rust production과 동일 입력
+- 타깃: 공개 출력과 같은 형태(output_tokens)를 ep_norm 정규화한 문장 F1 최대 후보 (동률 시 낮은 rank)
 - 전처리 캐시: <data_dir>/cache_{split}.npz (feature/counts 재계산 방지)
 - gold/dump 바이트와 전처리·feature·ep_norm 소스가 모두 같을 때만 캐시 재사용
 출력: <data_dir>/weights.npz (dev micro F1 최고 에폭의 averaged weights)
@@ -66,6 +66,21 @@ def norm(tokens):
     return normalize_ep_morphemes([[t[0], t[1]] for t in tokens])
 
 
+# 공개 분석은 재순위 선택 뒤 붙은 약속형 EF를 EF + 요/JX로 나눈다(model.rs split_promise_endings).
+# NIKL 정답도 나뉜 형태라, 목표 F1은 나눈 뒤에 센다. feature는 추론처럼 붙은 형태에서 뽑는다.
+PROMISE_JOINED = ("ㄹ게요", "을게요")
+
+
+def output_tokens(tokens):
+    out = []
+    for form, pos, *_ in tokens:
+        if pos == "EF" and form in PROMISE_JOINED:
+            out += [[form[:-1], "EF"], ["요", "JX"]]
+        else:
+            out.append([form, pos])
+    return out
+
+
 def prf_counts(pred, gold_counter):
     p = Counter((f, t) for f, t in pred)
     tp = sum((p & gold_counter).values())
@@ -113,9 +128,8 @@ def preprocess(data_dir, split):
         cands = dump["candidates"]
         base_score = cands[0]["score"] if cands else 0.0
         for rank, cand in enumerate(cands):
-            raw = [[t[0], t[1]] for t in cand["tokens"]]
-            counts.append(prf_counts(norm(raw), gold_counter))
-            ids, vals = hash_feats(extract(raw, cand["score"] - base_score, rank + 1))
+            counts.append(prf_counts(norm(output_tokens(cand["tokens"])), gold_counter))
+            ids, vals = hash_feats(extract(cand["tokens"], cand["score"] - base_score, rank + 1))
             all_ids.extend(ids)
             all_vals.extend(vals)
             cand_feat_offsets.append(len(all_ids))

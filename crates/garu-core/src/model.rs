@@ -203,8 +203,8 @@ impl Analyzer {
                     current_s = s;
                 }
             }
-            // feature는 공백을 보지 못해 `활성 화학제`의 화/XSN을 `활성화`처럼
-            // 채점한다. 어절 첫 파생 접미사가 늘어나는 교체는 하지 않는다(#9).
+            // Section 14 ver 1·2 feature는 공백을 보지 못해 `활성 화학제`의 화/XSN을
+            // `활성화`처럼 채점했다. 어절 첫 파생 접미사가 늘어나는 교체는 하지 않는다(#9).
             if rr_best != best_idx && rr_best_s - current_s > rr.margin()
                 && Self::initial_suffix_count(&candidates[rr_best].tokens)
                     <= Self::initial_suffix_count(&candidates[best_idx].tokens)

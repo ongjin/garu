@@ -56,7 +56,7 @@ Primary constraints:
            → 구어로 판별된 입력이면 아크 비용 보정 (Section18, 문자 n-gram 판별기 + 학습된 선형 비용)
            → 문장 수준 Trigram N-best Viterbi (top-10)
            → 후처리 (VCP 분리, MM 관형사 교정, POS 보정 등 fix_*)
-           → 재순위 perceptron (Section 14, 확신 마진 τ=4를 넘고 어절 첫 파생 접미사를 늘리지 않을 때만 교체)
+           → 재순위 perceptron (Section 14 ver=3 어절 경계 feature, 저장된 확신 마진(현행 0)을 넘고 어절 첫 파생 접미사를 늘리지 않을 때만 교체)
            → 학습 문맥 조건에 따른 최종 POS 교정 (Section16 캐시 일치 → Section17 최종 출력열 일치, 형태·경계 유지)
            → 표준 분석의 1위 후보에서 사다·살다 어간을 문맥으로 선택 (Section19)
            → 출력
@@ -141,7 +141,7 @@ Do not restart from approaches already shown to be poor fits unless the goal is 
 
 - Residual re-diagnosis at 0.12.1 (#82) and its follow-up (#83, applied on main 2026-11-11). The sentence head and verifier ignore spaces; with normal spacing 0.12.1 scored 98.4% boundary F1 on fixed 2025 NX but 56–59% on NIKL online-corpus Instagram paragraphs. `splitSentences` now treats every line break as a boundary. Those Instagram sentence labels are punctuation-driven: train only on positions after terminal punctuation (weight 0 elsewhere) or the head learns not to split unpunctuated news. Trailing-ornament snapping and dropping word-internal boundaries in spaced input fixed most placement errors. Reviewed unpunctuated conversational boundaries remain at 47.8% F1 (`~/workspace/data/korean_text_boundaries/20261111-unpunct-review/`). Garu emitted 그/IC only for the 2021 transcription `그~`; strip tildes from 2021 SX when developing spoken changes (`training/ambiguity/spoken_geu.py` appends the resulting Section 17 rule; re-run it after re-mining Section 17). A local-context EC/EF re-decision is closed. Widening the 그 rule only for router-spoken input (#84) gained +0.135pp 2025 SX but significantly regressed gold 일상/구어 (demonstrative `그 영화…?` caught by low-support next-word-suffix guards); not adopted. Online-corpus document buckets (`sha256(id)[:8] mod 10`) 0–1 are the final test, 2–3 dev, 4–9 train.
 
-- Section 14 features ignore spaces, so weights learned from joined words (`활성화`) flipped a correct Viterbi rank 1 across a space (`활성 화학제` → `화/XSN 학제/NNG`, issue #9). Swaps that add eojeol-initial XSN/XSV/XSA are vetoed: gate v2 pass, but reranker fixes of spaced suffixes such as `계획 상으로는` are lost. Most eojeol-initial suffixes still come from Viterbi rank 1; a real fix needs spacing-aware Section 14 features. See research-history #87.
+- Section 14 ver 1·2 features ignored spaces, so weights learned from joined words (`활성화`) flipped a correct Viterbi rank 1 across a space (`활성 화학제` → `화/XSN 학제/NNG`, issue #9). Swaps that add eojeol-initial XSN/XSV/XSA are vetoed (#87). Ver=3 adds eojeol-boundary features (`sb:`/`spw:`/`sw:`) retrained on current candidates (#88): held-out pooled +0.028pp, model +84KB, and about half the gain is the retrain itself. Count the training target on the public output form (joined promise EF split into EF + 요/JX), or the reranker learns to avoid `ㄹ게요/EF`. Re-mining Section 17 afterwards gave no gain, so the old rules stay.
 
 Strong historical wins:
 
@@ -152,7 +152,7 @@ Strong historical wins:
 - Smart eojeol cache broke the codebook-only ceiling by caching high-correction-value words, not merely frequent words.
 - Contextual postprocessing rules gave free accuracy without growing the model.
 - Sentence-level Viterbi allows cached analyses to be overridden by stronger sentence context.
-- N-best Viterbi plus the reranking perceptron (Section 14, swap only above confidence margin τ=4) is the main current path for better ambiguity handling. CNN agreement scoring was retired because +0.2%p did not justify +700KB of model size — see docs/wiki/research-history.md.
+- N-best Viterbi plus the reranking perceptron (Section 14, swap only above its stored confidence margin) is the main current path for better ambiguity handling. CNN agreement scoring was retired because +0.2%p did not justify +700KB of model size — see docs/wiki/research-history.md.
 
 ## Research Priorities
 

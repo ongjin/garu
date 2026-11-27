@@ -4,6 +4,7 @@
 //! 바이트 단위로 동일해야 한다 — 학습(Python)·추론(Rust) 정합의 전제.
 //! 입력 tokens는 model 레벨 보정(apply_adj_root_xsa 등)까지 끝난 형태
 //! (= 학습 덤프의 `Analyzer::analyze_topn_for_rerank` 출력과 동일).
+//! 같은 어절의 토큰은 같은 `start`를 공유하므로, `start`가 바뀌는 곳이 공백이다.
 
 use crate::types::Token;
 use std::fmt::Write;
@@ -20,7 +21,15 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     h
 }
 
+/// ver 1·2 가중치는 공백을 보지 않는 feature로, ver 3은 어절 경계 feature를 더해 학습했다.
+#[derive(Clone, Copy, PartialEq)]
+enum FeatureSet {
+    Base,
+    Spacing,
+}
+
 pub struct Reranker {
+    features: FeatureSet,
     dim_mask: u64,
     margin: f32,
     /// 정렬된 (bucket, weight) 병렬 배열 — sparse 가중치.
@@ -34,12 +43,13 @@ impl Reranker {
     /// - ver=2: `[scale f32][bucket delta varint × count][quantized weight i16 × count]`
     ///   — bucket은 오름차순 차분을 LEB128로, 가중치는 `round(w/scale)`로 저장.
     ///     같은 가중치를 압축 친화적으로 담은 것이라 디코드 결과는 ver=1과 같은 형태다.
+    /// - ver=3: ver=2와 같은 인코딩. 가중치가 어절 경계 feature(sb:/spw:/sw:)를 포함한다.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
         if data.len() < 10 {
             return Err("Rerank section too short".into());
         }
         let ver = data[0];
-        if ver != 1 && ver != 2 {
+        if !(1..=3).contains(&ver) {
             return Err(format!("Unknown rerank section version {}", ver));
         }
         let dim_log2 = data[1];
@@ -106,7 +116,9 @@ impl Reranker {
             }
         }
 
+        let features = if ver == 3 { FeatureSet::Spacing } else { FeatureSet::Base };
         Ok(Reranker {
+            features,
             dim_mask: (1u64 << dim_log2) - 1,
             margin,
             buckets,
@@ -147,6 +159,7 @@ impl Reranker {
         let mut prev2 = "<s2>";
         let mut prev = "<s>";
         let mut prev_form = "<s>";
+        let mut prev_start = None;
         for t in tokens {
             let pos = t.pos.as_str();
             let form = t.text.as_str();
@@ -155,9 +168,18 @@ impl Reranker {
             feat!(1.0, "t:{}|{}|{}", prev2, prev, pos);
             feat!(1.0, "w:{}/{}", form, pos);
             feat!(1.0, "pw:{}|{}", prev_form, pos);
+
+            let crosses_space = prev_start.is_some_and(|start| start != t.start);
+            if crosses_space && self.features == FeatureSet::Spacing {
+                feat!(1.0, "sb:{}|{}", prev, pos);
+                feat!(1.0, "spw:{}|{}", prev_form, pos);
+                feat!(1.0, "sw:{}/{}", form, pos);
+            }
+
             prev2 = prev;
             prev = pos;
             prev_form = form;
+            prev_start = Some(t.start);
         }
         feat!(1.0, "b:{}|</s>", prev);
         feat!(1.0, "t:{}|{}|</s>", prev2, prev);
@@ -179,6 +201,7 @@ impl Reranker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Pos;
 
     #[test]
     fn fnv1a_matches_python() {
@@ -187,5 +210,58 @@ mod tests {
         // 한글 UTF-8 바이트 처리 확인 (값은 features.py fnv1a와 대조)
         let h = fnv1a("w:정부/NNG".as_bytes());
         assert_ne!(h, 0);
+    }
+
+    const TEST_DIM_LOG2: u8 = 20;
+
+    /// 지정한 feature에만 정수 가중치를 둔 Section 14 (scale 1, margin 0).
+    fn section(ver: u8, feats: &[(&str, i16)]) -> Vec<u8> {
+        let mask = (1u64 << TEST_DIM_LOG2) - 1;
+        let mut entries: Vec<(u32, i16)> = feats.iter()
+            .map(|&(name, q)| ((fnv1a(name.as_bytes()) & mask) as u32, q))
+            .collect();
+        entries.sort();
+
+        let mut out = vec![ver, TEST_DIM_LOG2];
+        out.extend_from_slice(&0f32.to_le_bytes());
+        out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        out.extend_from_slice(&1f32.to_le_bytes());
+        let mut prev = 0u32;
+        for &(bucket, _) in &entries {
+            let mut delta = bucket - prev;
+            prev = bucket;
+            loop {
+                let byte = (delta & 0x7F) as u8;
+                delta >>= 7;
+                if delta == 0 {
+                    out.push(byte);
+                    break;
+                }
+                out.push(byte | 0x80);
+            }
+        }
+        for &(_, q) in &entries {
+            out.extend_from_slice(&q.to_le_bytes());
+        }
+        out
+    }
+
+    fn token(text: &str, pos: Pos, start: usize) -> Token {
+        Token { text: text.to_owned(), pos, start, end: start + 1, score: None }
+    }
+
+    /// ver 3은 어절이 바뀌는 토큰에서만 sb:/spw:/sw:를 더하고, ver 2는 공백을 보지 않는다.
+    #[test]
+    fn spacing_features_need_ver3() {
+        let feats = [("sw:화/XSN", -10), ("sb:NNG|XSN", -3), ("spw:활성|XSN", -2)];
+        let spaced = [token("활성", Pos::NNG, 0), token("화", Pos::XSN, 3), token("학제", Pos::NNG, 3)];
+        let joined = [token("활성", Pos::NNG, 0), token("화", Pos::XSN, 0), token("학제", Pos::NNG, 0)];
+
+        let v3 = Reranker::from_bytes(&section(3, &feats)).unwrap();
+        assert_eq!(v3.score(&spaced, 0.0, 1), -15.0);
+        assert_eq!(v3.score(&joined, 0.0, 1), 0.0);
+
+        let v2 = Reranker::from_bytes(&section(2, &feats)).unwrap();
+        assert_eq!(v2.score(&spaced, 0.0, 1), 0.0);
     }
 }
